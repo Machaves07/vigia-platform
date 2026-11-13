@@ -6,7 +6,8 @@ código que responde la aplicación real (cadena fija y ruta de prueba interna) 
 menor índice**; sin violaciones, la operación recibe la petición.
 
 - Los documentos válidos salen de los generadores del kit de U-01 (``zone_catalog``, ``finding``,
-  ``detection_for_review``, ``observability_event``, ``heartbeat``, ``update_result``) y la
+  ``detection_for_review``, ``observability_event``, ``heartbeat``, ``update_result`` y, desde
+  v1.5.0, ``episode_photo``) y la
   violación de esquema, de su mutación explícita ``mutate_missing_field`` (o un campo no
   declarado). El kit fijado no trae ``mutate_submission`` ni ``violation_combinations``; aquí
   ``violation_combinations`` es el conjunto no vacío de verificaciones que se rompen.
@@ -32,6 +33,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from vigia_contracts.conformance.generators import (
     detection_for_review,
+    episode_photo,
     finding,
     heartbeat,
     mutate_missing_field,
@@ -54,6 +56,7 @@ BODY_ROUTES = (
     NodeRoute.OBSERVABILITY_EVENT,
     NodeRoute.HEARTBEAT,
     NodeRoute.UPDATE_RESULT,
+    NodeRoute.EPISODE_PHOTO,  # TASK-572 (A-112): con y sin imagen, del generador del kit v1.5.0.
 )
 ROUTES = (*BODY_ROUTES, NodeRoute.ZONE_CATALOG)
 
@@ -83,6 +86,7 @@ def documents(draw: st.DrawFn, route: NodeRoute) -> dict[str, Any] | None:
         NodeRoute.DETECTION_REVIEW: detection_for_review(catalog),
         NodeRoute.OBSERVABILITY_EVENT: observability_event(catalog),
         NodeRoute.HEARTBEAT: heartbeat(catalog),
+        NodeRoute.EPISODE_PHOTO: episode_photo(catalog),
     }[route]
     result: dict[str, Any] = draw(strategy)
     return result

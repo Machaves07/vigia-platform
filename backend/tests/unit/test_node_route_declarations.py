@@ -1,8 +1,9 @@
 """Declaración de las rutas del contrato (TASK-206; A-51; BR-NUC-91).
 
-- ``NodeRoute`` son las diez rutas obligatorias de ``OPERATIONS`` del esqueleto de U-01 (método,
-  plantilla, certificado y límite de cuerpo; 16 KB la rotación y sin cuerpo la confirmación y el
-  catálogo, nota de NFR-GOB-33); ``GET conformance-profile`` no está.
+- ``NodeRoute`` son las once rutas de ``OPERATIONS`` del esqueleto de U-01 v1.5.0: las diez
+  obligatorias y la foto del episodio de A-112 (método, plantilla, certificado y límite de cuerpo;
+  16 KB la rotación, sin cuerpo la confirmación y el catálogo, nota de NFR-GOB-33, y 307 200 bytes
+  la foto); ``GET conformance-profile`` no está.
 - ``check_routes`` impide arrancar con una ruta bajo ``/api/nodes`` sin ``node_route`` (sin
   declaración o con ``requires``), con un ``node_route`` fuera de su plantilla o de su método
   (también fuera de ``/api/nodes``), con ``body_limit`` en una ruta del contrato o con una entrada
@@ -58,8 +59,9 @@ async def _handler() -> dict[str, str]:  # pragma: no cover - no se llama
 # --- NodeRoute frente al esqueleto de U-01 -------------------------------------------------------
 
 
-def test_node_route_is_the_ten_mandatory_routes_of_the_skeleton() -> None:
-    assert len(NodeRoute) == 10
+def test_node_route_is_the_eleven_routes_of_the_skeleton() -> None:
+    # v1.5.0 (TASK-572, A-112): las diez obligatorias y la foto del episodio de la sombra.
+    assert len(NodeRoute) == 11
     assert {route.operation_id for route in NodeRoute} == set(OPERATIONS) - {
         "get_conformance_profile"
     }
@@ -81,6 +83,8 @@ def test_the_body_limits_are_those_of_br_ctr_12_and_the_note_of_nfr_gob_33() -> 
     assert NodeRoute.CREDENTIAL_ROTATION.max_body_bytes == 16_384
     assert NodeRoute.CLIP_CONFIRMATION.max_body_bytes == 0
     assert NodeRoute.ZONE_CATALOG.max_body_bytes == 0
+    # A-112: el límite propio de la foto del episodio, que amplía BR-CTR-12.
+    assert NodeRoute.EPISODE_PHOTO.max_body_bytes == 307_200
 
 
 def test_every_route_has_its_strict_reader_of_the_generated_models() -> None:
@@ -192,7 +196,7 @@ def test_node_router_mounts_only_the_requested_routes_with_their_declaration() -
 def test_node_router_with_every_route_never_mounts_conformance_profile() -> None:
     router = node_router(tuple(NodeRoute))
     routes = list(iter_declared_routes(router.routes))
-    assert len(routes) == 10
+    assert len(routes) == 11
     assert all("conformance-profile" not in route.path for route in routes)
     registry = DetailCodeRegistry()
     registry.seal()
@@ -204,6 +208,7 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
     # TASK-223: latido y catálogo por zona. VIG-156 (TASK-221): las tres rutas de la ingesta.
     # VIG-151 (TASK-219): el alta y la rotación de la credencial. VIG-162 (TASK-226): el resultado
     # de actualización; con él están las diez (``conformance-profile`` no se implementa, A-51).
+    # TASK-572 (A-112): la foto del episodio de la sombra, la undécima.
     assert PUBLISHED_NODE_ROUTES == (
         NodeRoute.HEARTBEAT,
         NodeRoute.CLIP_UPLOAD,
@@ -215,6 +220,7 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
         NodeRoute.ENROLLMENT,
         NodeRoute.CREDENTIAL_ROTATION,
         NodeRoute.UPDATE_RESULT,
+        NodeRoute.EPISODE_PHOTO,
     )
     assert set(PUBLISHED_NODE_ROUTES) == set(NodeRoute)
     assert "node_api" in {unit.name for unit in platform_units()}
@@ -230,6 +236,7 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
         NodeRoute.ENROLLMENT.path,
         NodeRoute.CREDENTIAL_ROTATION.path,
         NodeRoute.UPDATE_RESULT.path,
+        NodeRoute.EPISODE_PHOTO.path,
     }
 
 

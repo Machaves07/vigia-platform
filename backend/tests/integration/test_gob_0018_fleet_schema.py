@@ -136,6 +136,19 @@ ALARM_EVALUATION_MIGRATION = _load_alarm_evaluation_migration()
 ALARM_EVALUATION_TABLE = ALARM_EVALUATION_MIGRATION.TABLE
 
 
+def _load_episode_photo_migration() -> Any:
+    """``gob_0042`` (TASK-572, A-112): la foto del episodio de la sombra, con RLS como el resto."""
+    path = BACKEND / "migrations" / "versions" / "gob_0042_episode_photo.py"
+    spec = importlib.util.spec_from_file_location("gob_0042_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+EPISODE_PHOTO_TABLE = _load_episode_photo_migration().TABLE
+
+
 @dataclass(frozen=True)
 class Fleet:
     database: MigratedDatabase
@@ -279,14 +292,15 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    # gob_0024 (TASK-221) añade la marca del cierre huérfano y gob_0026 (TASK-225) la histéresis
-    # de las alarmas, con el mismo aislamiento.
+    # gob_0024 (TASK-221) añade la marca del cierre huérfano, gob_0026 (TASK-225) la histéresis
+    # de las alarmas y gob_0042 (TASK-572) la foto del episodio, con el mismo aislamiento.
     assert {row["relname"] for row in rows} == {
         *FLEET_TABLES,
         GLOBAL_TABLE,
         REVOCATION_STATE_TABLE,
         ORPHAN_CLOSE_TABLE,
         ALARM_EVALUATION_TABLE,
+        EPISODE_PHOTO_TABLE,
     }
     # Excepción documentada (gob_0021, TASK-218): la marca global de la lista, sin datos de cliente.
     secured = [row for row in rows if row["relname"] != REVOCATION_STATE_TABLE]
@@ -308,8 +322,9 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         ORPHAN_CLOSE_TABLE,
         GLOBAL_TABLE,
         ALARM_EVALUATION_TABLE,
+        EPISODE_PHOTO_TABLE,
     }
-    for table in (*FLEET_TABLES, ORPHAN_CLOSE_TABLE, ALARM_EVALUATION_TABLE):
+    for table in (*FLEET_TABLES, ORPHAN_CLOSE_TABLE, ALARM_EVALUATION_TABLE, EPISODE_PHOTO_TABLE):
         named = by_table[table]
         assert set(named) == {"organization_isolation", "provider_concession_scope"}, table
         isolation, provider = named["organization_isolation"], named["provider_concession_scope"]
@@ -498,9 +513,12 @@ async def test_every_index_starts_with_the_scope_or_is_a_key(superuser: Any) -> 
         row["table_name"] for row in rows if row["columns"][:2] == ["organization_id", "plant_id"]
     }
     # Todas las de planta; la marca por organización y la global solo tienen su clave.
-    assert scoped == {*FLEET_TABLES, ORPHAN_CLOSE_TABLE, ALARM_EVALUATION_TABLE} - {
-        "revocation_list_dirty"
-    }
+    assert scoped == {
+        *FLEET_TABLES,
+        ORPHAN_CLOSE_TABLE,
+        ALARM_EVALUATION_TABLE,
+        EPISODE_PHOTO_TABLE,
+    } - {"revocation_list_dirty"}
     loose = [
         row["index_name"]
         for row in rows

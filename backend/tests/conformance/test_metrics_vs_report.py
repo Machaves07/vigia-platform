@@ -191,6 +191,7 @@ def test_duplicates_are_only_told_apart_where_the_kit_sees_a_receipt() -> None:
         "post_detection_review",
         "post_observability_event",
         "post_update_result",
+        "post_episode_photo",  # v1.5.0 (TASK-572, A-112)
     } == RECEIPT_OPERATIONS
     outcomes = {
         ("post_heartbeat", "accepted"): 2,

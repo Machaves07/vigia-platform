@@ -229,13 +229,14 @@ def task_problems(ages: Mapping[str, int], pending: Mapping[str, str]) -> list[s
 
 def test_one_latency_alarm_per_contract_route() -> None:
     targets: Mapping[str, int] = TABLE["NODE_ROUTE_P95_TARGETS_MS"]
-    assert len(NodeRoute) == len(PUBLISHED_NODE_ROUTES) == 10
+    assert len(NodeRoute) == len(PUBLISHED_NODE_ROUTES) == 11
     assert route_problems(targets, ALARMS) == []
     # NFR-GOB-01 y, para las tres sin cifra, A-55 (provisionales, marcadas como tales).
     provisional = {
         NodeRoute.CREDENTIAL_ROTATION.path: 2_000,
         NodeRoute.CLIP_CONFIRMATION.path: 300,
         NodeRoute.UPDATE_RESULT.path: 200,
+        NodeRoute.EPISODE_PHOTO.path: 500,
     }
     assert set(TABLE["PROVISIONAL_NODE_ROUTE_TARGETS"]) == set(provisional)
     assert {path: targets[path] for path in provisional} == provisional
@@ -244,9 +245,11 @@ def test_one_latency_alarm_per_contract_route() -> None:
 
 def test_certificate_and_ingest_routes_are_contract_routes() -> None:
     """Denominadores de ``node-rate-limited-high`` (con certificado) y de la ingesta."""
+    # La foto del episodio (A-112) no entra: tope de 10 métricas por expresión de CloudWatch
+    # (``infra/stacks/observability.py``, TASK-572).
     assert set(TABLE["CERTIFICATE_NODE_ROUTES"]) == {
         route.path for route in NodeRoute if route.mutual_tls
-    }
+    } - {NodeRoute.EPISODE_PHOTO.path}
     assert set(TABLE["INGEST_ROUTES"]) == {
         NodeRoute.FINDING.path,
         NodeRoute.OBSERVABILITY_EVENT.path,

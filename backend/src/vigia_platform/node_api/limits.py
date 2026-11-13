@@ -13,7 +13,7 @@ U-01: la ficha se consume al llegar la petición, también si después se rechaz
 2. **Por nodo** (sujeto del certificado; clave ``node:<node_id>:<operación>``): hallazgos,
    detecciones y eventos comparten 240 por minuto con ráfaga 60; concesiones 480 con ráfaga 120;
    latidos 4 por minuto; catálogo 30; confirmación 30; rotación 2 por hora; resultado de
-   actualización 10 por hora.
+   actualización 10 por hora; foto del episodio (A-112) 120 por minuto con ráfaga 30.
 3. **Alta**: por origen (HMAC de la dirección, nunca en claro; claves
    ``enrollment:<hmac>:quarter`` y ``:day``) 5 cada 15 minutos y 20 al día, y por ``node_id``
    5 cada 15 minutos (``admit_enrollment_node``, que llama la ruta del alta tras leer la CSR).
@@ -113,6 +113,8 @@ NODE_BUDGETS: Final[Mapping[NodeRoute, RouteBudget]] = MappingProxyType(
         NodeRoute.CLIP_CONFIRMATION: RouteBudget("clip_confirmation", Budget(30, 60)),
         NodeRoute.CREDENTIAL_ROTATION: RouteBudget("credential_rotation", Budget(2, 3_600)),
         NodeRoute.UPDATE_RESULT: RouteBudget("update_result", Budget(10, 3_600)),
+        # A-112 (TASK-572): la foto del episodio, 120 por minuto con ráfaga de 30.
+        NodeRoute.EPISODE_PHOTO: RouteBudget("episode_photo", Budget(120, 60, burst=30)),
     }
 )
 """Por nodo (nota de NFR-GOB-33); los tres registros comparten un cubo (``ingest``)."""

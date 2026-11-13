@@ -1,4 +1,4 @@
-"""PR-GOB-12 sobre las diez rutas del contrato (TASK-228; PAT-GOB-SEG-05; NFR-GOB-30; A-51).
+"""PR-GOB-12 sobre las once rutas del contrato (TASK-228, TASK-572; PAT-GOB-SEG-05; NFR-GOB-30).
 
 La aplicación real de las rutas del contrato (``create_app`` con la cadena fija y la
 ``NodeApiGate`` de producción con ``PostgresNodeContextStore``) y los manejadores de negocio de las
@@ -288,14 +288,16 @@ NODE_CASES: Final[dict[NodeRoute, NodeCase]] = {
     ),
     NodeRoute.CREDENTIAL_ROTATION: NodeCase("schema_invalid", {"node_id": _rotation}),
     NodeRoute.UPDATE_RESULT: NodeCase(MISMATCH, _heartbeat_like(NodeRoute.UPDATE_RESULT.path)),
+    # TASK-572 (A-112): la foto del episodio, con la guarda de alcance antes del esquema.
+    NodeRoute.EPISODE_PHOTO: NodeCase(MISMATCH, _ingest(NodeRoute.EPISODE_PHOTO.path)),
 }
 """Un caso por ruta de la lista cerrada ``NodeRoute`` (A-51)."""
 
 
 def test_every_contract_route_has_its_case() -> None:
-    # Sin base: las diez de la lista cerrada, todas publicadas y todas con su caso.
+    # Sin base: las once de la lista cerrada, todas publicadas y todas con su caso.
     assert set(NODE_CASES) == set(NodeRoute) == set(PUBLISHED_NODE_ROUTES)
-    assert len(NODE_CASES) == 10
+    assert len(NODE_CASES) == 11
     missing = sorted(route.name for route in set(NodeRoute) - set(NODE_CASES))
     assert not missing, f"rutas del contrato sin caso de aislamiento: {missing}"
 
@@ -609,6 +611,8 @@ def test_the_plant_guard_another_plant_of_the_same_organization(world: NodeWorld
         "hallazgo (plant_id)": NODE_CASES[NodeRoute.FINDING].variants["plant_id"],
         "hallazgo (zone_id)": NODE_CASES[NodeRoute.FINDING].variants["zone_id"],
         "resultado (plant_id)": NODE_CASES[NodeRoute.UPDATE_RESULT].variants["plant_id"],
+        "foto del episodio (plant_id)": NODE_CASES[NodeRoute.EPISODE_PHOTO].variants["plant_id"],
+        "foto del episodio (zone_id)": NODE_CASES[NodeRoute.EPISODE_PHOTO].variants["zone_id"],
     }
     for label, build in calls.items():
         response = world.send(build(world, node, elsewhere), node)
@@ -632,6 +636,7 @@ def test_the_zone_guard_a_zone_of_the_same_plant_not_assigned_to_the_node(
         NODE_CASES[NodeRoute.FINDING].variants["zone_id"],
         NODE_CASES[NodeRoute.DETECTION_REVIEW].variants["zone_id"],
         NODE_CASES[NodeRoute.OBSERVABILITY_EVENT].variants["zone_id"],
+        NODE_CASES[NodeRoute.EPISODE_PHOTO].variants["zone_id"],
     ):
         response = world.send(build(world, node, target), node)
         assert _rejection(response)[:2] == (403, MISMATCH), response.text

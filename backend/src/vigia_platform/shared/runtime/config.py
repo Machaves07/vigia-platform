@@ -43,6 +43,8 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   ``VIGIA_ASSISTANT_MODEL`` (TASK-344), el modelo del asistente (``claude-opus-5`` por defecto o
   ``claude-sonnet-5``, sin sufijo de fecha). La clave del proveedor no es de esta lista: la
   inyecta Secrets Manager solo en ``vigia-worker`` (NFR-LAZ-26) y la lee ``loop.registration``;
+- foto del episodio de la sombra (TASK-572, A-112): ``VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` (30
+  por defecto, de 1 a 90 días; con 0 o con 91 el proceso no arranca);
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local``, ``test`` e ``integration`` (LocalStack); en cualquier otro entorno detiene el arranque;
 - ``VIGIA_NODE_CA_BACKEND`` (``kms`` por defecto, o ``file``) y ``VIGIA_NODE_CA_KEY_FILE``: firmante
@@ -295,6 +297,9 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable("email_events_queue_url", "VIGIA_EMAIL_EVENTS_QUEUE_URL", _text(_QUEUE_URL)),
     _Variable("email_sender_domain", "VIGIA_EMAIL_SENDER_DOMAIN", _text(EGRESS_HOST)),
     _Variable("assistant_model", "VIGIA_ASSISTANT_MODEL", _text(_ASSISTANT_MODEL)),
+    _Variable(
+        "episode_photo_retention_days", "VIGIA_EPISODE_PHOTO_RETENTION_DAYS", _integer(1, 90)
+    ),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -367,6 +372,9 @@ class RuntimeConfig(BaseModel):
     assistant_model: str | None = None
     """Modelo del asistente de causa raíz (U-04, TASK-344): ``claude-opus-5`` o
     ``claude-sonnet-5``; sin ella, ``claude-opus-5``. Bajar de modelo es decisión del dueño."""
+    episode_photo_retention_days: int = 30
+    """Días que vive la foto del episodio de la sombra en la plataforma (TASK-572, A-112; QF5):
+    ``expires_at = received_at + días``, de 1 a 90; fuera de ese rango el proceso no arranca."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:

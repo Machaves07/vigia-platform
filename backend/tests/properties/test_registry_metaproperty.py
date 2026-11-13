@@ -23,12 +23,14 @@ from pydantic import (
     Base64Bytes,
     Base64Str,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
     StrictFloat,
     StrictInt,
     StrictStr,
+    ValidationError,
     WithJsonSchema,
     WrapValidator,
     create_model,
@@ -38,6 +40,7 @@ from pydantic import (
 from pydantic.alias_generators import to_camel
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pydantic_core import core_schema
+from vigia_contracts.models._base import StrictTrue
 from vigia_contracts.models.common import UUID, Timestamp
 from vigia_contracts.models.finding import Finding
 
@@ -665,6 +668,62 @@ def test_contract_rules_exemption_is_by_function_not_by_name() -> None:
     with pytest.raises(RecordTypeRejected) as raised:
         RecordTypeRegistry().register(_definition(_NamedLikeContractRules))
     assert "/: validador de función before, wrap o plain" in str(raised.value)
+
+
+# --- TASK-572: la guarda ``StrictTrue`` del contrato v1.5.0 (A-112) --------------------------
+
+
+class _StrictTrueField(ContentModel):
+    """Un ``const: true`` del contrato v1.5.0 (``EpisodeImage.anonymized``, ``no_data``…)."""
+
+    zone_id: UUID
+    anonymized: StrictTrue
+
+
+def _strict_true_guard() -> Any:
+    (guard,) = [item.func for item in StrictTrue.__metadata__ if isinstance(item, BeforeValidator)]
+    return guard
+
+
+class _OtherBeforeOnLiteral(ContentModel):
+    """Otro validador ``before`` delante del mismo ``Literal[True]``: amplía lo admitido."""
+
+    zone_id: UUID
+    anonymized: Annotated[Literal[True], BeforeValidator(lambda value: True)]
+
+
+class _GuardOnOtherSchema(ContentModel):
+    """La misma guarda de ``StrictTrue`` delante de otro esquema: no es ``const: true``."""
+
+    zone_id: UUID
+    note: Annotated[StrictBool, BeforeValidator(_strict_true_guard())]
+
+
+def test_the_strict_true_guard_of_the_contract_is_accepted_and_only_narrows() -> None:
+    """v1.5.0 (vigia-contracts#98): ``Literal[True]`` con la guarda que rechaza ``1`` y ``1.0``.
+    Sin esta excepción, ningún tipo con un catálogo v1.5.0 se registra y la plataforma no arranca
+    (``catalog_version_published``: ``commissioning_watermark``, ``no_data``, ``presence``)."""
+    RecordTypeRegistry().register(_definition(_StrictTrueField))
+    assert _StrictTrueField.model_validate({"zone_id": _ZONE, "anonymized": True})
+    for value in (1, 1.0, "true"):
+        with pytest.raises(ValidationError):
+            _StrictTrueField.model_validate({"zone_id": _ZONE, "anonymized": value})
+
+
+@pytest.mark.parametrize(
+    ("model", "document"),
+    [
+        (_OtherBeforeOnLiteral, {"anonymized": "cualquier cosa"}),
+        (_GuardOnOtherSchema, {"note": True}),
+    ],
+)
+def test_the_strict_true_exemption_is_by_function_and_by_the_literal_it_guards(
+    model: type[ContentModel], document: dict[str, Any]
+) -> None:
+    assert model.model_validate({"zone_id": _ZONE, **document})
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert "validador de función before, wrap o plain" in str(raised.value)
 
 
 # --- VIG-129: alias de validación (P3; seguimiento nº 3 de VIG-40) ----------------------------

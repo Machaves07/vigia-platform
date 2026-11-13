@@ -229,7 +229,8 @@ def test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert str(CONTRACT_VERSION) == "1.4.0"
+    # TASK-572: el kit instalado es v1.5.0; el nodo sigue declarando la 1.4.0 (en ventana) y la
+    # plataforma responde con la suya.
     with simulated_node(site, capsys, tmp_path, monkeypatch, version="1.4.0") as node:
         zone = site.zones()["POPE"]
         node.beat()
@@ -253,7 +254,9 @@ def test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node(
     ]
     # El lector estricto de v1.4.0 acepta el documento servido (sin schema_invalid).
     assert api.parse_zone_catalog(json.dumps(served).encode()).to_json_value() == served
-    assert {(asked, answered) for _, asked, answered in node.sent} == {("1.4.0", "1.4.0")}
+    assert {(asked, answered) for _, asked, answered in node.sent} == {
+        ("1.4.0", str(CONTRACT_VERSION))
+    }
 
 
 @pytest.mark.parametrize("cited", ["energy", "unknown"])
@@ -322,9 +325,11 @@ def test_a_v1_1_0_node_still_enrolls_beats_and_fetches_the_catalog(
     notice = state.contract_notice
     assert notice is not None
     assert (notice.result, notice.retires_at) == (CompatibilityResult.ACCEPTED, None)
-    # El nodo declaró la 1.1.0 en todas sus peticiones, y la plataforma respondió como 1.4.0.
+    # El nodo declaró la 1.1.0 en todas sus peticiones, y la plataforma respondió con su versión.
     assert node.sent
-    assert {(asked, answered) for _, asked, answered in node.sent} == {(NODE_V1_1, "1.4.0")}
+    assert {(asked, answered) for _, asked, answered in node.sent} == {
+        (NODE_V1_1, str(CONTRACT_VERSION))
+    }
     # El catálogo Pope sigue en la forma de v1.1.0: un lector v1.1.0 no ve campos nuevos.
     text = json.dumps(served)
     assert "guard_conditions" not in text and "no_data" not in text

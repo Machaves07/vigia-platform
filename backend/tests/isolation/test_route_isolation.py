@@ -999,7 +999,8 @@ _U02_U03_CASES: Final[dict[tuple[str, str], Case]] = {
                 },
             ),
         )
-        for path in ("findings", "detection-reviews", "observability-events")
+        # TASK-572 (A-112): la foto del episodio, con la misma guarda antes del esquema.
+        for path in ("findings", "detection-reviews", "observability-events", "episode-photos")
     },
     # VIG-151: el alta no lleva certificado; un código o una CSR (nombre común) de un nodo de B
     # nunca dan una credencial de B ni de A: enrollment_code_invalid o schema_invalid

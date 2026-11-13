@@ -86,6 +86,7 @@ SPECS: Final[Mapping[NodeRoute, NodeOperationSpec]] = MappingProxyType(
         ),
         NodeRoute.ZONE_CATALOG: _spec(NodeRoute.ZONE_CATALOG, None, PathParameter.ZONE_ID),
         NodeRoute.UPDATE_RESULT: _spec(NodeRoute.UPDATE_RESULT, api.parse_update_result),
+        NodeRoute.EPISODE_PHOTO: _spec(NodeRoute.EPISODE_PHOTO, api.parse_episode_photo_submission),
     }
 )
 """Una entrada por ``NodeRoute``; ``GET conformance-profile`` no está (A-51: no se implementa)."""

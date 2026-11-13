@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 151 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 152 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -281,6 +281,7 @@ export const OPERATIONS = {
   post_credential_rotation: { method: 'post', path: '/api/nodes/credential-rotations' },
   post_detection_review: { method: 'post', path: '/api/nodes/detection-reviews' },
   post_enrollment: { method: 'post', path: '/api/nodes/enrollment' },
+  post_episode_photo: { method: 'post', path: '/api/nodes/episode-photos' },
   post_finding: { method: 'post', path: '/api/nodes/findings' },
   post_heartbeat: { method: 'post', path: '/api/nodes/heartbeats' },
   post_observability_event: { method: 'post', path: '/api/nodes/observability-events' },

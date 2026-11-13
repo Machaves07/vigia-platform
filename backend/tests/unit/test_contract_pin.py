@@ -1,18 +1,19 @@
-"""``vigia-contracts`` consumido por la etiqueta ``v1.4.0`` con su commit fijado (TASK-153, 571).
+"""``vigia-contracts`` consumido por la etiqueta ``v1.5.0`` con su commit fijado (TASK-153, 572).
 
 NFR-NUC-24 (heredada de NFR-CTR-25) y ADR-004: el backend consume el contrato por ``git+ssh``
 con ``#subdirectory=generated/python`` y **por etiqueta** ``vX.Y.Z``, nunca por rama ni por un
 hash suelto; el ``uv.lock`` fija el hash del commit de esa etiqueta. Esta prueba corre en el
 trabajo «backend (lint, tipos y pruebas sin integración)» de ``ci.yml``, sin red:
 
-- ``pyproject.toml`` pide exactamente ``@v1.4.0`` del repositorio y subdirectorio de ADR-004;
-- ``uv.lock`` resuelve esa misma etiqueta (``rev=v1.4.0``) al commit ``TAG_COMMIT`` (40
-  hexadecimales), con la versión ``1.4.0`` del paquete, y su ``requires-dist`` coincide;
+- ``pyproject.toml`` pide exactamente ``@v1.5.0`` del repositorio y subdirectorio de ADR-004;
+- ``uv.lock`` resuelve esa misma etiqueta (``rev=v1.5.0``) al commit ``TAG_COMMIT`` (40
+  hexadecimales), con la versión ``1.5.0`` del paquete, y su ``requires-dist`` coincide;
 - el paquete instalado en el entorno es ese commit (``direct_url.json``, PEP 610).
 
 ``TAG_COMMIT`` es el commit al que apunta la etiqueta (ligera) en el remoto, leído con
-``git ls-remote https://github.com/Machaves07/vigia-contracts refs/tags/v1.4.0*``
-el 2026-11-11 (A-77 y A-112, TASK-571; antes ``v1.1.0`` por A-63).
+``git ls-remote https://github.com/Machaves07/vigia-contracts refs/tags/v1.5.0*``
+el 2026-11-12 (A-112, TASK-572; antes ``v1.4.0`` por A-77 y A-112, TASK-571, y ``v1.1.0``
+por A-63).
 Si una etiqueta nueva se adopta, se cambian aquí la etiqueta y su commit a la vez.
 
 Los bordes (hash en lugar de etiqueta, rama, etiqueta móvil, ``rev`` del bloqueo distinto,
@@ -36,9 +37,9 @@ PYPROJECT: Final = BACKEND / "pyproject.toml"
 LOCK: Final = BACKEND / "uv.lock"
 
 PACKAGE: Final = "vigia-contracts"
-TAG: Final = "v1.4.0"
-TAG_COMMIT: Final = "60d3136d5c88437cd6edb0d81913ae515393812e"
-VERSION: Final = "1.4.0"
+TAG: Final = "v1.5.0"
+TAG_COMMIT: Final = "e52245d804187469d2cd67f49d5f5e9283b9ab3d"
+VERSION: Final = "1.5.0"
 REPOSITORY: Final = "ssh://git@github.com/Machaves07/vigia-contracts.git"
 SUBDIRECTORY: Final = "generated/python"
 

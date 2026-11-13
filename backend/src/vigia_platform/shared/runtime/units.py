@@ -220,6 +220,7 @@ from vigia_platform.node_api.routes.clip_uploads import clip_upload_operation
 from vigia_platform.node_api.routes.credential_rotations import credential_rotation_operation
 from vigia_platform.node_api.routes.detection_reviews import detection_review_operation
 from vigia_platform.node_api.routes.enrollment import enrollment_operation
+from vigia_platform.node_api.routes.episode_photos import episode_photo_route
 from vigia_platform.node_api.routes.findings import finding_operation
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
 from vigia_platform.node_api.routes.observability_events import observability_event_operation
@@ -893,6 +894,7 @@ PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = (
     NodeRoute.ENROLLMENT,
     NodeRoute.CREDENTIAL_ROTATION,
     NodeRoute.UPDATE_RESULT,
+    NodeRoute.EPISODE_PHOTO,  # TASK-572 (A-112): la foto del episodio de la sombra.
 )
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. VIG-152 (TASK-222)
@@ -1060,6 +1062,7 @@ def _node_operations(
                 database=services.database, writer=services.writer, clock=services.clock
             )
         ),
+        NodeRoute.EPISODE_PHOTO: episode_photo_route(services),  # TASK-572 (A-112).
     }
 
 
