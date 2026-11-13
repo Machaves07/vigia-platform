@@ -103,6 +103,8 @@ export const DECLARED_ROUTES: readonly string[] = [
   '/zones/:zone_id/catalog/parameters',
   '/zones/:zone_id/commissioning',
   '/zones/:zone_id/commissioning/close',
+  '/zones/:zone_id/commissioning/episodes',
+  '/zones/:zone_id/commissioning/episodes/:photo_id',
   '/zones/:zone_id/commissioning/matrix',
   '/zones/:zone_id/commissioning/occlusion',
   '/zones/:zone_id/commissioning/records/:record_id',
@@ -125,6 +127,7 @@ const PARAM_FORMS: Readonly<Record<string, RegExp>> = {
   finding_state_id: UUID,
   node_id: UUID,
   record_id: UUID,
+  photo_id: UUID,
   period: /^\d{4}-(?:0[1-9]|1[0-2])$/,
   // Token opaco del enlace de invitación (BR-APP-18): base64url, sin datos de la persona.
   token: /^[A-Za-z0-9_-]{16,512}$/,

@@ -12,8 +12,11 @@ import { noticeFromError } from './notices';
 
 export interface ScreenNotices {
   readonly notices: readonly Notice[];
-  /** Añade el aviso de `error`; `field` lo ancla a un campo del formulario. */
-  add(error: unknown, field?: string | null): void;
+  /**
+   * Añade el aviso de `error`; `field` lo ancla a un campo del formulario. Es estable entre
+   * renderizados: se puede separar del objeto y usar en las dependencias de un efecto.
+   */
+  readonly add: (error: unknown, field?: string | null) => void;
   dismiss(id: string): void;
   /** El aviso anclado a `field`, si lo hay. */
   field(field: string): Notice | undefined;

@@ -4,7 +4,9 @@
     "scripts/**/*.mjs",
     "tests/views/index.ts",
     "tests/msw/scenarios/index.ts",
-    "tests/browser/probe.ts"
+    "tests/browser/probe.ts",
+    "tests/browser/episode_photo/harness.tsx",
+    "tests/browser/episode_photo/control.ts"
   ],
   "project": [
     "src/**/*.{ts,tsx}",

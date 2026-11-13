@@ -22,5 +22,10 @@
   "labels.revoked_by_side.client": "Cliente",
   "labels.revoked_by_side.provider": "Proveedor",
   "labels.verify_request_kind.ledger": "Expediente",
-  "labels.verify_request_kind.audit": "Auditoría"
+  "labels.verify_request_kind.audit": "Auditoría",
+  "labels.image_absent_reason.frame_unavailable": "El cuadro ya no estaba disponible en el nodo",
+  "labels.image_absent_reason.too_large": "La imagen superaba el tamaño máximo admitido",
+  "labels.image_absent_reason.disk_pressure": "El nodo tenía poco espacio en disco",
+  "labels.image_absent_reason.pending_cap": "El nodo había llegado al tope de fotos pendientes",
+  "labels.audit_operation.episode_photo_read": "Lectura de la foto de un episodio de puesta en marcha"
 }

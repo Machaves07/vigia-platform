@@ -116,7 +116,8 @@ export const UNCACHED_READS: Readonly<Record<string, string>> = {
   'GET /accreditation/monthly-packages/{plant_id}/{period}/download':
     'descarga por navegación, nunca en caché',
   'GET /episode-photos/{photo_id}/image':
-    'imagen del mismo origen por <img src> (no-store, auditada en cada petición), nunca en caché',
+    'imagen por fetch del transporte (X-Vigia-Concession) pintada en un canvas, una petición por ' +
+    'apertura del detalle y sin reintentos (no-store, auditada en cada petición), nunca en caché',
 };
 
 export const READ_POLICIES: Readonly<Record<ReadOperation, QueryPolicy>> = Object.fromEntries(

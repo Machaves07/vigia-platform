@@ -1,5 +1,6 @@
 /**
- * Regresiones nativas de LC-APP-01 (VIG-343) y de la CSP estricta con `<select>` (VIG-345);
+ * Regresiones nativas de LC-APP-01 (VIG-343), de la CSP estricta con `<select>` (VIG-345) y de la
+ * foto del episodio de la sombra pintada en un lienzo bajo la CSP del backend (TASK-574);
  * independientes de los recorridos por rol de VIG-299.
  */
 import { defineConfig } from '@playwright/test';
@@ -8,7 +9,7 @@ import { compatibleWebkitExecutable } from './webkit.ts';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['bootstrap_h264.spec.ts', 'csp_select.spec.ts'],
+  testMatch: ['bootstrap_h264.spec.ts', 'csp_select.spec.ts', 'episode_photo_csp.spec.ts'],
   workers: 1,
   retries: 0,
   timeout: 60_000,

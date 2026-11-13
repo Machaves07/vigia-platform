@@ -1,7 +1,9 @@
 /**
  * SCR-06 · Consola de comisionamiento y walk-test (U-03; token U-02), escritorio y tableta.
  * Grupos: `session` y `matrix` (VIG-310), `occlusion`, `close` y `record` (segunda tarea de la
- * pantalla). La entrada canónica es `session`.
+ * pantalla) y `episodes` (TASK-574, A-112): los episodios de la sombra con su foto difuminada,
+ * solo con `commissioning.run` (la instaladora bajo concesión; QF10, BR-GOB-30). La entrada
+ * canónica es `session`.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -45,6 +47,17 @@ export const descriptor: ScreenDescriptor = {
       access: 'permission',
       required_permissions: ['commissioning.run'],
       load: () => import('./record'),
+    },
+    {
+      id: 'episodes',
+      paths: [
+        '/zones/:zone_id/commissioning/episodes',
+        '/zones/:zone_id/commissioning/episodes/:photo_id',
+      ],
+      access: 'permission',
+      required_permissions: ['commissioning.run'],
+      menu: { title_text: 'navigation.menu.episodes', select: 'zone_id' },
+      load: () => import('./episodes'),
     },
   ],
   sections: [

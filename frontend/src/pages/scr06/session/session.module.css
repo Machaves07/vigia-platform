@@ -151,3 +151,8 @@
   margin: 0;
   color: var(--color-text);
 }
+
+/* Enlaces de la cabecera de la consola (episodios de la sombra, TASK-574). */
+.links {
+  margin: 0;
+}
