@@ -261,6 +261,13 @@ function byKey(key: string): Element | null {
   return document.querySelector(`[data-text-key="${key}"]`);
 }
 
+/** Sin foto: el aviso sí y la superposición no (A-112). */
+function expectNoticeWithoutOverlay(): void {
+  const notice = 'media.episode_photo.commissioning_notice';
+  expect(byKey(notice)?.textContent).toBe(text(notice));
+  expect(byKey('media.episode_photo.blurred_automatically')).toBeNull();
+}
+
 function expectNoticeAndOverlay(): void {
   for (const key of [
     'media.episode_photo.commissioning_notice',
@@ -306,7 +313,7 @@ describe('detalle', { timeout: TEST_TIMEOUT }, () => {
     await settle();
     expect(traffic.image).toEqual([]);
     expect(view.container.querySelector('canvas')).toBeNull();
-    expectNoticeAndOverlay();
+    expectNoticeWithoutOverlay();
   });
 
   it('un episodio que no está en el listado → «no disponible en su alcance» sin pedir imagen', async () => {
@@ -356,6 +363,24 @@ describe('detalle', { timeout: TEST_TIMEOUT }, () => {
     }
     expect(traffic.image).toHaveLength(1);
     expectNoticeAndOverlay();
+  });
+
+  it('al salir del detalle se cancela la búsqueda en curso', async () => {
+    let signal: AbortSignal | null = null;
+    const find = vi.fn((_zone: string, _photo: string, abort: AbortSignal) => {
+      signal = abort;
+      return new Promise<EpisodePhoto | null>(() => undefined);
+    });
+    const view = render(
+      <MemoryRouter>
+        <EpisodeDetailScreen zoneId={ZONE} photoId={WITH_PHOTO} clock={clock} find={find} />
+      </MemoryRouter>,
+    );
+    await settle();
+    expect(find).toHaveBeenCalledTimes(1);
+    expect((signal as AbortSignal | null)?.aborted).toBe(false);
+    view.unmount();
+    expect((signal as AbortSignal | null)?.aborted).toBe(true);
   });
 
   it('un identificador que no es UUID no pide nada y pinta «no disponible»', async () => {

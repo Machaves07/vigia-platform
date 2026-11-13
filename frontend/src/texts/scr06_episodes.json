@@ -1,7 +1,7 @@
 {
   "scr06_episodes.link": "Episodios de la sombra",
   "scr06_episodes.list.caption": "Episodios de la sombra de la zona",
-  "scr06_episodes.list.intro": "Cada tramo que el nodo clasificó en la sombra llega con su foto difuminada o con el motivo por el que no la tiene. Las fotos se borran a los 30 días o cuando la zona pasa a productivo.",
+  "scr06_episodes.list.intro": "Cada tramo que el nodo clasificó en la sombra llega con su foto difuminada o con el motivo por el que no la tiene. Las fotos se borran al cumplirse el plazo de retención configurado (30 días por omisión; la columna «Vencimiento» da la fecha) o cuando la zona pasa a productivo.",
   "scr06_episodes.list.empty": "Esta zona no tiene episodios de la sombra guardados.",
   "scr06_episodes.list.back": "Volver a la consola de comisionamiento",
   "scr06_episodes.col.frame_at": "Hora del cuadro",

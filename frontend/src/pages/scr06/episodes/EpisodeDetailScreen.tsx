@@ -5,8 +5,8 @@
  *   (`findEpisodePhoto`, páginas de 200). Sin él, «no disponible en su alcance».
  * - La foto la pide y la pinta UI-26 (`BlurredEpisodePhoto`): una petición por apertura, sin
  *   reintentos ni recarga al enfocar, y ninguna si el episodio llegó sin imagen (se muestra el
- *   motivo etiquetado). El aviso de material de puesta en marcha y la superposición «Imagen
- *   difuminada automáticamente» están siempre.
+ *   motivo etiquetado). El aviso de material de puesta en marcha está siempre; la superposición
+ *   «Imagen difuminada automáticamente», siempre que hay imagen (sin foto no la hay; A-112).
  * - `not_found` del listado o de la imagen (zona en `productive`, foto vencida o purgada, fuera de
  *   alcance): la pantalla entera pasa a «no disponible en su alcance». Lo transitorio va a la pila
  *   de avisos (UI-19); volver a buscar o a pedir la imagen es siempre un gesto de la persona.

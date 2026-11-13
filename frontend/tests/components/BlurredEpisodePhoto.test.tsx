@@ -103,6 +103,12 @@ function expectNoticeAndOverlay(): void {
   expect(byKey(OVERLAY)?.textContent).toBe(text(OVERLAY));
 }
 
+/** Sin foto: el aviso sí y la superposición no (no hay imagen que difuminar; A-112). */
+function expectNoticeWithoutOverlay(): void {
+  expect(byKey(NOTICE)?.textContent).toBe(text(NOTICE));
+  expect(byKey(OVERLAY)).toBeNull();
+}
+
 async function painted(): Promise<HTMLCanvasElement> {
   const element = await screen.findByRole('img', { name: ALT }, WAIT);
   if (!(element instanceof HTMLCanvasElement)) throw new Error('La foto no está en un lienzo');
@@ -249,6 +255,13 @@ describe('sin descarga (BR-APP-58)', () => {
     const onOverlay = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     overlay?.dispatchEvent(onOverlay);
     expect(onOverlay.defaultPrevented).toBe(true);
+    // La capa transparente cubre el lienzo (el clic derecho cae en ella) y no se anuncia.
+    const shield = view.container.querySelector('[data-part="shield"]');
+    expect(shield?.getAttribute('aria-hidden')).toBe('true');
+    expect(shield?.parentElement).toBe(canvas.parentElement);
+    const onShield = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    shield?.dispatchEvent(onShield);
+    expect(onShield.defaultPrevented).toBe(true);
     const drag = new Event('dragstart', { bubbles: true, cancelable: true });
     canvas.dispatchEvent(drag);
     expect(drag.defaultPrevented).toBe(true);
@@ -269,7 +282,8 @@ describe('sin imagen', () => {
         label('image_absent_reason', reason),
       );
       expect(byKey('media.episode_photo.absent')).not.toBeNull();
-      expectNoticeAndOverlay();
+      expect(view.container.querySelector('[data-part="shield"]')).toBeNull();
+      expectNoticeWithoutOverlay();
     },
   );
 });

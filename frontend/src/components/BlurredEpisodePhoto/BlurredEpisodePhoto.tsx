@@ -14,9 +14,12 @@
  *   y se cierra el mapa de bits.
  * - **Sin descarga.** Ningún enlace, `download` ni botón de guardar; el lienzo no es arrastrable
  *   y el menú contextual no se abre sobre la foto.
- * - **Textos.** Superposición «Imagen difuminada automáticamente» (nunca «por construcción»: un
- *   tercero no detectado puede salir nítido, riesgo R1) y aviso fijo de material de puesta en
- *   marcha. Sin imagen, el motivo etiquetado (`image_absent_reason`) y ninguna petición.
+ *   Una capa transparente cubre el lienzo: el menú nativo de Firefox (Mayús + clic derecho) no
+ *   cae sobre él.
+ * - **Textos.** Aviso fijo de material de puesta en marcha, siempre. Con imagen, la superposición
+ *   «Imagen difuminada automáticamente» (nunca «por construcción»: un tercero no detectado puede
+ *   salir nítido, riesgo R1). Sin imagen, el motivo etiquetado (`image_absent_reason`), sin la
+ *   superposición (no hay imagen; decisión de la torre en A-112) y ninguna petición.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -180,13 +183,23 @@ export function BlurredEpisodePhoto({
             {text('media.episode_photo.loading')}
           </p>
         ) : null}
-        <span
-          className={styles.overlay}
-          data-part="overlay"
-          data-text-key="media.episode_photo.blurred_automatically"
-        >
-          {text('media.episode_photo.blurred_automatically')}
-        </span>
+        {hasImage ? (
+          <>
+            {/*
+             * Capa transparente sobre el lienzo: el clic derecho cae en ella y no en el lienzo, así
+             * que el menú nativo que Firefox abre con Mayús + clic derecho no ofrece «Guardar
+             * imagen como».
+             */}
+            <span className={styles.shield} aria-hidden="true" data-part="shield" />
+            <span
+              className={styles.overlay}
+              data-part="overlay"
+              data-text-key="media.episode_photo.blurred_automatically"
+            >
+              {text('media.episode_photo.blurred_automatically')}
+            </span>
+          </>
+        ) : null}
       </div>
       {hasImage && phase === 'failed' ? (
         <div className={styles.failure} data-text-key="media.episode_photo.unavailable">

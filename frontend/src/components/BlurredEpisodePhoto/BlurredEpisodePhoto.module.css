@@ -46,6 +46,12 @@
   text-align: center;
 }
 
+/* Capa transparente sobre el lienzo: recibe el clic derecho en su lugar. */
+.shield {
+  position: absolute;
+  inset: 0;
+}
+
 .overlay {
   position: absolute;
   top: var(--space-2);

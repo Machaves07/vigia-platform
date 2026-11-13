@@ -130,8 +130,10 @@ describe('imagen: una petición por apertura, con la concesión en la cabecera',
     );
     install(new FakeClock(), { concession: () => CONCESSION });
     const blob = await readEpisodePhotoImage(PHOTO);
-    expect(blob).toBeInstanceOf(Blob);
+    // Sin `instanceof`: con el Node 22 del CI el Blob de fetch y el de jsdom son clases distintas.
+    expect(Object.prototype.toString.call(blob)).toBe('[object Blob]');
     expect(blob.type).toBe('image/jpeg');
+    expect(blob.size).toBe(4);
     expect(seen).toEqual([{ concession: CONCESSION, path: `/episode-photos/${PHOTO}/image` }]);
   });
 });

@@ -228,6 +228,13 @@ test('la foto se pinta en el lienzo bajo la CSP del backend, con X-Vigia-Concess
   // El lienzo no queda vacío: cada píxel del JPEG sintético (opaco) se dibujó.
   expect(pixels?.opaque).toBe((pixels?.width ?? 0) * (pixels?.height ?? 0));
   expect(await page.locator('img, a[download]').count()).toBe(0);
+  // El clic derecho en el centro de la foto cae en la capa transparente, no en el lienzo.
+  const target = await canvas.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return hit?.getAttribute('data-part') ?? hit?.tagName ?? null;
+  });
+  expect(target).toBe('shield');
 
   await drain(page);
   expect(violations).toEqual([]);
