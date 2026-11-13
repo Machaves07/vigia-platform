@@ -60,8 +60,7 @@ from typing import Any, Final
 from vigia_contracts.models.enumerations import ImageAbsentReason
 
 from vigia_platform.fleet.adapters.http.episode_photos import (
-    IMAGE_HEADERS,
-    JPEG_MEDIA_TYPE,
+    SERVED_HEADERS,
     EpisodePhotoImageOut,
     EpisodePhotoOut,
     EpisodePhotosOut,
@@ -627,7 +626,7 @@ def episode_photos_section() -> dict[str, Any]:
             "path": "/episode-photos/{photo_id}/image",
             "permission": _COMMISSIONING_RUN,
             "photo_id": str(_EXAMPLE_PHOTO),
-            "headers": {"Content-Type": JPEG_MEDIA_TYPE, **IMAGE_HEADERS},
+            "headers": dict(SERVED_HEADERS),
             "sha256": hashlib.sha256(data).hexdigest(),
             "data_base64": base64.b64encode(data).decode("ascii"),
         },

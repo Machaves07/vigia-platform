@@ -13,10 +13,11 @@ alcance, vencida o con la zona ya en ``productive`` responde ``not_found``, nunc
   proveedor).
 - ``GET /episode-photos/{photo_id}/image``: el JPEG difuminado, del mismo origen que la aplicación
   (la política de contenido es ``img-src 'self'``), con ``Content-Type: image/jpeg``,
-  ``Cache-Control: no-store``, ``X-Content-Type-Options: nosniff`` y ``Content-Disposition:
-  inline``. Antes de servir se recalcula la ``sha256``: si no coincide con la guardada, no sale
-  nada (``internal_error``). **Una** entrada ``episode_photo_read`` por petición, también la que la
-  cadena deniega antes de la ruta (sin ``commissioning.run``): de esa se encarga la dependencia
+  ``Cache-Control: no-store``, ``X-Content-Type-Options: nosniff`` (de la cadena) y
+  ``Content-Disposition: inline``. Antes de servir se recalcula la ``sha256``: si no coincide con
+  la guardada, no sale nada (``internal_error``). **Una** entrada ``episode_photo_read`` por
+  petición, también la que la cadena deniega antes de la ruta (sin ``commissioning.run``): de esa
+  se encarga la dependencia
   ``_gate_audit``, declarada antes que ``requires``, que ve la denegación de la cadena y escribe la
   entrada ``denied`` solo si la ruta no llegó a correr (si corrió, la escribió el servicio).
 """
@@ -52,7 +53,9 @@ from vigia_platform.shared.api.middleware import request_context, request_sessio
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "IMAGE_HEADERS",
     "JPEG_MEDIA_TYPE",
+    "SERVED_HEADERS",
     "EpisodePhotoImageOut",
     "EpisodePhotoOut",
     "EpisodePhotoStandardOut",
@@ -66,10 +69,17 @@ _INSTANT_CHARS: Final = 40
 _CURSOR_CHARS: Final = 36
 IMAGE_HEADERS: Final = {
     "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
     "Content-Disposition": "inline",
 }
-"""Cabeceras propias de la imagen (las de seguridad comunes las fija la cadena)."""
+"""Cabeceras propias de la imagen. ``X-Content-Type-Options: nosniff`` (y el resto de las de
+seguridad) la fija la cadena en toda respuesta y sustituye cualquiera que ponga una ruta
+(``shared.api.middleware.headers``): repetirla aquí no cambiaría nada."""
+SERVED_HEADERS: Final = {
+    "Content-Type": JPEG_MEDIA_TYPE,
+    **IMAGE_HEADERS,
+    "X-Content-Type-Options": "nosniff",
+}
+"""Las cuatro cabeceras con las que sale la imagen (las propias y las de la cadena)."""
 
 Services = Annotated[FleetHttp, Depends(fleet_http)]
 

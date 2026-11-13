@@ -4623,8 +4623,8 @@
       "headers": {
         "Content-Type": "image/jpeg",
         "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": "inline"
+        "Content-Disposition": "inline",
+        "X-Content-Type-Options": "nosniff"
       },
       "sha256": "09355ceebd5e94d6a118f9eca7845263afb859b670c56aafd081dc2f432132b2",
       "data_base64": "/9j//gAUdmlnaWFfYW5vbnltaXplZD0x/9sAQwABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AACwgAQABAAQERAP/EABQAAQAAAAAAAAAAAAAAAAAAAAD/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AAAAAAAAAAAAAAAAAAAAAAD/2Q=="
