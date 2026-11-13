@@ -114,16 +114,18 @@ def test_br_gob_101_a_retiring_minor_publishes_until_its_date_and_not_from_it() 
 
 
 def test_br_gob_101_the_default_platform_policy_keeps_every_minor_it_accepted() -> None:
-    # La plataforma implementa la 1.4.0 del contrato (TASK-571). Con la 1.1.0 (A-63) aceptaba las
-    # series 1.0 y 1.1; al adoptar la 1.4.0 ninguna sale de la ventana sin aviso de retiro
-    # (BR-CTR-21): se aceptan de la 1.0 a la 1.4. Una menor más nueva, otra mayor o la 0.x, no.
+    # La plataforma implementa la 1.5.0 del contrato (TASK-572; antes la 1.4.0, TASK-571). Con la
+    # 1.1.0 (A-63) aceptaba las series 1.0 y 1.1; al adoptar las nuevas ninguna sale de la ventana
+    # sin aviso de retiro (BR-CTR-21): se aceptan de la 1.0 a la 1.5. Una menor más nueva, otra
+    # mayor o la 0.x, no.
     policy = VersionPolicy()
-    assert str(policy.current) == "1.4.0"
-    assert policy.window == PLATFORM_CONTRACT_WINDOW == 4
-    for version in ("1.0.0", "1.0.12", "1.1.0", "1.1.12", "1.2.0", "1.3.7", "1.4.0", "1.4.12"):
+    assert str(policy.current) == "1.5.0"
+    assert policy.window == PLATFORM_CONTRACT_WINDOW == 5
+    versions = ("1.0.0", "1.0.12", "1.1.0", "1.1.12", "1.2.0", "1.3.7", "1.4.0", "1.4.12", "1.5.0")
+    for version in versions:
         assert within_contract_window(version, policy, NOW), version
         assert _oracle(version, policy, NOW), version
-    assert not within_contract_window("1.5.0", policy, NOW)
+    assert not within_contract_window("1.6.0", policy, NOW)
     assert not within_contract_window("2.0.0", policy, NOW)
     assert not within_contract_window("0.9.0", policy, NOW)
 

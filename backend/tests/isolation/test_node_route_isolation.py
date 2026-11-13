@@ -2,7 +2,7 @@
 
 La aplicación real de las rutas del contrato (``create_app`` con la cadena fija y la
 ``NodeApiGate`` de producción con ``PostgresNodeContextStore``) y los manejadores de negocio de las
-diez rutas publicadas, compuestos como los compone la raíz (``shared.runtime.units``
+once rutas publicadas, compuestos como los compone la raíz (``shared.runtime.units``
 ``_node_operations``; el alta y la rotación, con la autoridad ``vigia-node-ca`` de prueba de
 ``tests/fleet_enrollment_support.py``), contra PostgreSQL 16 real como ``vigia_app``.
 
