@@ -162,6 +162,7 @@ def test_g05_each_record_type_has_its_own_body_limit(gob: GobPlatform) -> None:
         NodeRoute.OBSERVABILITY_EVENT: 65_536,
         NodeRoute.HEARTBEAT: 65_536,
         NodeRoute.UPDATE_RESULT: 65_536,
+        NodeRoute.EPISODE_PHOTO: 307_200,
         NodeRoute.ENROLLMENT: 16_384,
         NodeRoute.CREDENTIAL_ROTATION: 16_384,
         NodeRoute.CLIP_UPLOAD: 16_384,

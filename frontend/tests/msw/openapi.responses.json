@@ -1912,6 +1912,63 @@
       }
     },
     {
+      "operationId": "post_episode_photo",
+      "method": "post",
+      "path": "/api/nodes/episode-photos",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/Receipt"
+          }
+        },
+        "400": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "401": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "403": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "409": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "413": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "422": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "429": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "503": {
+          "application/json": {
+            "$ref": "#/components/schemas/RejectionResponse"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "post_finding",
       "method": "post",
       "path": "/api/nodes/findings",

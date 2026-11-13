@@ -460,6 +460,15 @@ class NodeOperations:
     ) -> Response:
         return await self._dispatch(NodeRoute.ENROLLMENT, request)
 
+    async def post_episode_photo(
+        self,
+        request: Request,
+        *,
+        x_vigia_contract_version: str | None,
+        idempotency_key: str | None,
+    ) -> Response:
+        return await self._dispatch(NodeRoute.EPISODE_PHOTO, request)
+
     async def post_finding(
         self,
         request: Request,

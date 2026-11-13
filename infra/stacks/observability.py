@@ -149,17 +149,22 @@ NODE_ROUTE_P95_TARGETS_MS: Final = {
     "/api/nodes/credential-rotations": 2_000,
     "/api/nodes/clip-uploads/{clip_id}/confirmation": 300,
     "/api/nodes/update-results": 200,
+    # [objetivo propio], provisional: la foto del episodio de la sombra (A-112, TASK-572), con el
+    # de los hallazgos (cuerpo de hasta 300 KB con la imagen en línea).
+    "/api/nodes/episode-photos": 500,
 }
-"""p95 por ruta obligatoria del contrato: una alarma ``latency-node-*`` por cada una de las diez
-(nota T-04 del 2026-09-23 de U-03 §8.1, que completa las seis de A-24). La prueba cruzada del
-backend la compara con ``NodeRoute``."""
+"""p95 por ruta del contrato: una alarma ``latency-node-*`` por cada una de las diez obligatorias
+(nota T-04 del 2026-09-23 de U-03 §8.1, que completa las seis de A-24) y la de la foto del
+episodio (A-112). La prueba cruzada del backend la compara con ``NodeRoute``."""
 
 PROVISIONAL_NODE_ROUTE_TARGETS: Final = (
     "/api/nodes/credential-rotations",
     "/api/nodes/clip-uploads/{clip_id}/confirmation",
     "/api/nodes/update-results",
+    "/api/nodes/episode-photos",
 )
-"""Objetivos ``[objetivo propio]`` provisionales de A-55: la descripción de su alarma lo dice."""
+"""Objetivos ``[objetivo propio]`` provisionales de A-55 (y de A-112, la foto del episodio): la
+descripción de su alarma lo dice."""
 
 CERTIFICATE_NODE_ROUTES: Final = (
     "/api/nodes/findings",
@@ -173,7 +178,10 @@ CERTIFICATE_NODE_ROUTES: Final = (
     "/api/nodes/update-results",
 )
 """Rutas del contrato con certificado de cliente (la alta entra por ``app.`` con límite propio):
-el denominador de ``node-rate-limited-high``."""
+el denominador de ``node-rate-limited-high``. La foto del episodio (A-112, TASK-572) no está:
+CloudWatch admite como mucho 10 métricas en una expresión de alarma y la expresión ya lleva 9
+rutas y el numerador. Sin ella el porcentaje sale algo mayor (el numerador sí cuenta sus
+``rate_limited``): la alarma es más sensible, nunca menos."""
 
 INGEST_ROUTES: Final = ("/api/nodes/findings", "/api/nodes/observability-events")
 """Ingesta de hallazgos y eventos: el denominador de ``node-permanent-reject-rate``."""
@@ -390,6 +398,7 @@ APPLICATION_ALARM_METRICS: Final = {
     "latency-node-credential-rotations": (("http_server_duration_ms", ("route",)),),
     "latency-node-confirmation": (("http_server_duration_ms", ("route",)),),
     "latency-node-update-results": (("http_server_duration_ms", ("route",)),),
+    "latency-node-episode-photos": (("http_server_duration_ms", ("route",)),),
     "bulkhead-person-saturated": (
         ("bulkhead_in_use", ("pool_class",)),
         ("bulkhead_size", ("pool_class",)),

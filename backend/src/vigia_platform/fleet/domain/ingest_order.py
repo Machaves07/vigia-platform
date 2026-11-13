@@ -15,8 +15,10 @@ solo hallazgos y detecciones (BR-GOB-92: los eventos describen al observador).
   unassigned_at)``, BR-GOB-88);
 - ``catalog_violation``: el ``{standard_id, version}`` citado existe en alguna versión del
   catálogo vigente en la ventana (BR-CTR-08) y, con ella, las señales son todas las declaradas,
-  cada una una vez y con su rol (BR-CTR-04) y los umbrales son coherentes (BR-CTR-10): publicación
-  en un hallazgo por umbral, y los dos umbrales iguales a los del catálogo en una detección. Si
+  cada una una vez y con su rol (BR-CTR-04), ninguna lectura válida de una señal declarada
+  ``no_data`` (A-77; como la plataforma simulada desde v1.2.0, seguimiento de VIG-449) y los
+  umbrales son coherentes (BR-CTR-10): publicación en un hallazgo por umbral, y los dos umbrales
+  iguales a los del catálogo en una detección. Si
   ninguna versión que lo cita los cumple, el campo de la **más nueva** (como la plataforma
   simulada de U-01); si ninguna lo cita, ``standard``;
 - ``usage_approved_during``: la compuerta de uso estuvo ``approved`` en algún instante de la
@@ -199,6 +201,10 @@ class CatalogVersionView:
     """``signal_id`` → ``role`` de las señales declaradas."""
     review: float
     publication: float
+    cameras: frozenset[uuid.UUID] = frozenset()
+    """Las cámaras declaradas (la foto del episodio cita una, A-112)."""
+    no_data: frozenset[uuid.UUID] = frozenset()
+    """Las señales declaradas sin dato (v1.2.0, A-77): su lectura nunca es válida."""
 
     @classmethod
     def from_payload(
@@ -222,10 +228,26 @@ class CatalogVersionView:
             )
             thresholds = payload["thresholds"]
             review, publication = float(thresholds["review"]), float(thresholds["publication"])
+            cameras = frozenset(
+                uuid.UUID(str(item["camera_id"])) for item in payload.get("cameras", ())
+            )
+            no_data = frozenset(
+                uuid.UUID(str(item["signal_id"]))
+                for item in payload["signals"]
+                if item.get("no_data") is True
+            )
         except (KeyError, TypeError, ValueError, AttributeError):
             raise CatalogUnreadable("versión del catálogo ilegible") from None
         return cls(
-            version, effective_from, effective_until, standards, signals, review, publication
+            version,
+            effective_from,
+            effective_until,
+            standards,
+            signals,
+            review,
+            publication,
+            cameras,
+            no_data,
         )
 
     def in_force_during(self, window: Window) -> bool:
@@ -253,6 +275,9 @@ def _mismatch(
             return "signals"
         if reading["role"] != catalog.signals[signal_id]:
             return f"signals[{index}].role"
+        if signal_id in catalog.no_data and reading["valid"] is not False:
+            # Señal declarada sin dato (A-77): el nodo no la lee; una lectura válida es inventada.
+            return f"signals[{index}].valid"
         seen.add(signal_id)
     if seen != set(catalog.signals):
         return "signals"

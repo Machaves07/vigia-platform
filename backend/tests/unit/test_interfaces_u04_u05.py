@@ -660,7 +660,8 @@ def test_the_node_routes_are_the_ten_of_the_contract_and_none_for_gates(
 ) -> None:
     node = {key for key in u03_routes if key[1].startswith(NODE_PREFIX)}
     expected = {(route.method, route.path) for route in NodeRoute}
-    assert len(NodeRoute) == 10
+    # Las diez obligatorias y, desde v1.5.0, la foto del episodio de la sombra (A-112, TASK-572).
+    assert len(NodeRoute) == 11
     assert node == expected
     assert expected <= _app_yaml_operations()
     # v1.5 (§3.6): sin ruta de compuertas; las compuertas viajan en la respuesta al latido

@@ -563,12 +563,15 @@ CONTRACT_ROUTES = {
     "/api/nodes/credential-rotations": 2000,
     "/api/nodes/clip-uploads/{clip_id}/confirmation": 300,
     "/api/nodes/update-results": 200,
+    # A-112 (TASK-572), [objetivo propio] provisional: la foto del episodio de la sombra.
+    "/api/nodes/episode-photos": 500,
 }
-"""Las diez rutas obligatorias del contrato (nota T-04 de U-03 §8.1) con su objetivo p95."""
+"""Las diez rutas obligatorias del contrato (nota T-04 de U-03 §8.1) y la foto del episodio
+(A-112), con su objetivo p95."""
 
 
 def test_node_latency_alarms_are_one_per_contract_route(deployment: Synthesized) -> None:
-    """Exactamente diez ``latency-node-*``: p95 por encima de 2 x objetivo durante 15 min."""
+    """Exactamente once ``latency-node-*``: p95 por encima de 2 x objetivo durante 15 min."""
     routes = {}
     for key, alarm in _alarms(deployment).items():
         if not key.startswith("latency-node-"):
@@ -587,12 +590,14 @@ def test_node_latency_alarms_are_one_per_contract_route(deployment: Synthesized)
     assert NODE_ROUTE_P95_TARGETS_MS == CONTRACT_ROUTES
 
 
-def test_the_three_provisional_latency_targets_say_so(pilot: Synthesized) -> None:
-    """A-55: rotación, confirmación y resultado de actualización no tienen cifra en NFR-GOB-01."""
+def test_the_four_provisional_latency_targets_say_so(pilot: Synthesized) -> None:
+    """A-55: rotación, confirmación y resultado de actualización no tienen cifra en NFR-GOB-01, ni
+    la foto del episodio de A-112 (TASK-572)."""
     assert set(PROVISIONAL_NODE_ROUTE_TARGETS) == {
         "/api/nodes/credential-rotations",
         "/api/nodes/clip-uploads/{clip_id}/confirmation",
         "/api/nodes/update-results",
+        "/api/nodes/episode-photos",
     }
     for key, alarm in _alarms(pilot).items():
         if key.startswith("latency-node-"):

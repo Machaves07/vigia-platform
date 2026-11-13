@@ -109,6 +109,8 @@ class MetricName(enum.StrEnum):
     # Rutas del contrato (U-03, NFR-GOB-54)
     NODE_REQUESTS_TOTAL = "node_requests_total"
     NODE_REQUEST_BODY_BYTES = "node_request_body_bytes"
+    # Foto del episodio de la sombra (U-03, TASK-572, A-112)
+    EPISODE_PHOTO_RECEIVED_TOTAL = "episode_photo_received_total"
     # Concesiones de clip por nodo (U-03, NFR-GOB-55)
     CLIP_GRANTS_ISSUED_TOTAL = "clip_grants_issued_total"
     CLIP_GRANTS_USED_TOTAL = "clip_grants_used_total"
@@ -265,6 +267,11 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "route", "result", "rejection_code"),
     _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
           "NFR-GOB-54", "route"),
+    # Foto del episodio (TASK-572, A-112): por resultado, rejection_code y si trae imagen; nunca
+    # por nodo ni por zona (NFR-GOB-13), nunca con bytes ni base64.
+    _spec(_N.EPISODE_PHOTO_RECEIVED_TOTAL, _C, "{record}",
+          "Fotos del episodio de la sombra por resultado y si traen imagen.", "A-112",
+          "result", "rejection_code", "image_presence"),
     # Concesiones de clip (NFR-GOB-55, LC-GOB-13): emitidas, usadas y huérfanas por nodo. Solo
     # contadores y solo node_id (NFR-GOB-13: sin histogramas por nodo ni etiqueta de zona).
     _spec(_N.CLIP_GRANTS_ISSUED_TOTAL, _C, "{grant}", "Concesiones de clip emitidas por nodo.",
@@ -518,6 +525,7 @@ class PlatformMetrics:
         self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
         self.node_requests_total = counter(_N.NODE_REQUESTS_TOTAL)
         self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
+        self.episode_photo_received_total = counter(_N.EPISODE_PHOTO_RECEIVED_TOTAL)
         self.clip_grants_issued_total = counter(_N.CLIP_GRANTS_ISSUED_TOTAL)
         self.clip_grants_used_total = counter(_N.CLIP_GRANTS_USED_TOTAL)
         self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)

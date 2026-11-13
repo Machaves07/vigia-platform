@@ -35,6 +35,7 @@ __all__ = [
     "CLIP_UPLOAD_GRANT",
     "ENROLLMENT_ATTEMPT",
     "ENROLLMENT_CODE",
+    "EPISODE_PHOTO",
     "FLEET_ALARM",
     "FLEET_ALARM_EVALUATION",
     "HEARTBEAT_HISTORY",
@@ -398,3 +399,37 @@ OBSERVABILITY_ORPHAN_CLOSE: Final = Table(
     _instant("received_at"),
 )
 """Cierre huérfano de un evento de observabilidad ⛓ (``gob_0024``, TASK-221; BL §2.4)."""
+
+EPISODE_PHOTO: Final = Table(
+    "episode_photo",
+    METADATA,
+    _uuid("organization_id", primary_key=True),
+    _uuid("photo_id", primary_key=True),
+    _uuid("plant_id"),
+    _uuid("zone_id"),
+    _uuid("node_id"),
+    _uuid("episode_id"),
+    _integer("segment_index"),
+    _text("classified_as"),
+    _text("family"),
+    _uuid("standard_id"),
+    _integer("standard_version"),
+    Column("max_confidence", Double, nullable=False),
+    _instant("started_at"),
+    _instant("ended_at"),
+    _instant("received_at"),
+    _instant("expires_at"),
+    _uuid("camera_id", nullable=True),
+    _instant("frame_at", nullable=True),
+    _integer("width", nullable=True),
+    _integer("height", nullable=True),
+    _integer("size_bytes", nullable=True),
+    _text("sha256", nullable=True),
+    _text("blur_params_version", nullable=True),
+    Column("image", LargeBinary, nullable=True),
+    _text("image_absent_reason", nullable=True),
+    _text("canonical_sha256"),
+    _uuid("platform_record_id"),
+)
+"""Foto del episodio de la sombra (``gob_0042``, TASK-572; A-112): fuera del expediente, con la
+imagen anulable y vencimiento; la purga es de TASK-573."""

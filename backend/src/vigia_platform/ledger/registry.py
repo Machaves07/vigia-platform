@@ -36,10 +36,10 @@ import json
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, get_args
 
-from pydantic import BaseModel, ConfigDict
-from vigia_contracts.models._base import ContractModel
+from pydantic import BaseModel, BeforeValidator, ConfigDict
+from vigia_contracts.models._base import ContractModel, StrictTrue
 
 from vigia_platform.ledger.free_text import FreeTextField
 from vigia_platform.ledger.schema_rules import (
@@ -538,6 +538,37 @@ def _is_contract_rules(function: object) -> bool:
     return getattr(function, "__func__", None) is _CONTRACT_RULES
 
 
+_STRICT_TRUE_GUARD: Final = next(
+    item.func for item in get_args(StrictTrue)[1:] if isinstance(item, BeforeValidator)
+)
+"""La guarda de ``StrictTrue`` del contrato (v1.5.0, vigia-contracts#98; precisión de A-112): el
+tipo de todo ``const: true`` de los modelos generados es ``Literal[True]`` con un validador
+``before`` que solo **estrecha** lo admitido: rechaza ``1``, ``1.0`` y ``1e0``, que
+``Literal[True]`` aceptaría por igualdad y que el JSON Schema (``const: true``) rechaza. Con ella,
+lo validado es exactamente lo que describe el esquema."""
+
+
+def _is_strict_true(node: Mapping[str, Any], function: object) -> bool:
+    """El único validador ``before`` admitido: la guarda de ``StrictTrue`` sobre ``Literal[True]``.
+
+    Se reconoce por la función (no por el nombre) y por el esquema que envuelve: el literal
+    ``True`` y nada más. La misma función delante de otro esquema no se admite."""
+    inner = node.get("schema")
+    return (
+        node.get("type") == "function-before"
+        and function is _STRICT_TRUE_GUARD
+        and isinstance(inner, Mapping)
+        and inner.get("type") == "literal"
+        and _only_true(inner.get("expected"))
+    )
+
+
+def _only_true(expected: object) -> bool:
+    """El literal admite exactamente ``True``, comparado por identidad: ``Literal[1]`` no vale
+    (``1 == True`` en Python) ni un literal con más valores."""
+    return isinstance(expected, list | tuple) and len(expected) == 1 and expected[0] is True
+
+
 _SEQUENCE_SCHEMAS: Final = frozenset({"list", "tuple", "set", "frozenset"})
 
 
@@ -613,8 +644,10 @@ def custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
     propio cambian el esquema sin cambiar lo que se valida; un validador ``before``, ``wrap`` o
     ``plain`` (de campo, de modelo o de un ``__get_pydantic_core_schema__`` propio), o un esquema
     de dos ramas (``lax_or_strict``, ``json_or_python``), cambia lo que se valida sin cambiar el
-    esquema. En los dos casos la metapropiedad miraría un esquema y el
-    validador aceptaría otra cosa. Se buscan en el esquema del núcleo, que es lo que valida.
+    esquema. En los dos casos la metapropiedad miraría un esquema y el validador aceptaría otra
+    cosa. Se buscan en el esquema del núcleo, que es lo que valida. Dos excepciones, por función:
+    el envolvente de ``ContractModel`` y la guarda de ``StrictTrue`` sobre ``Literal[True]``
+    (v1.5.0), que solo estrecha lo admitido.
     """
     found: set[str] = set()
     replacing: set[str] = set()
@@ -624,7 +657,10 @@ def custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
         if node.get("type") in _REPLACING_VALIDATORS:
             function = node.get("function")
             target = function.get("function") if isinstance(function, Mapping) else None
-            if not (node.get("type") == "function-wrap" and _is_contract_rules(target)):
+            if not (
+                (node.get("type") == "function-wrap" and _is_contract_rules(target))
+                or _is_strict_true(node, target)
+            ):
                 replacing.add(path or "/")
         if node.get("type") in _SPLIT_SCHEMAS:
             split.add(path or "/")

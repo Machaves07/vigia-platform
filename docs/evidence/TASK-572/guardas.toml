@@ -1,0 +1,519 @@
+# Mutaciones con nombre de TASK-572 (foto del episodio de la sombra; A-112). Rutas desde la raíz.
+# Formato de tabla_guardas.py (skill vigia-calidad-antes-del-pr). Esta sesión no puede usar git
+# fuera de su worktree: se corrió con un ejecutor equivalente (línea base en verde, mutación del
+# texto exacto, salida 1, restauración verificada por SHA-256; cobertura de condiciones nuevas
+# frente a una copia de main con difflib). Las de integración necesitan Docker; en Docker
+# Desktop con la carrera del mapeo de puertos, el adaptador port_retry de docs/evidence/VIG-394.
+base = "origin/main"
+comando = "uv run --frozen --project backend pytest -q -p no:cacheprovider -x -p port_retry -W ignore::hypothesis.errors.HypothesisWarning"
+
+[[guarda]]
+nombre = "m_idempotencia_al_final: la idempotencia se resuelve después de la imagen, el catálogo y la compuerta"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
+reemplazar = "            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_resent_photo_is_a_duplicate_after_the_gate_and_the_catalog_changed"
+
+[[guarda]]
+nombre = "m_idempotencia_al_final (propiedad del orden)"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
+reemplazar = "            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_resent_photo_is_a_duplicate_even_after_the_catalog_or_the_gate_changed"
+
+[[guarda]]
+nombre = "m_idempotencia_no_atomica: consulta y después INSERT sin ON CONFLICT"
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+buscar = "        inserted = (await transaction.execute(_CLAIM, values)).first()\n"
+reemplazar = "        if await self.stored(transaction, row.photo_id) is not None:\n            return False\n        plain = text(str(_CLAIM.text).replace(\" ON CONFLICT (organization_id, photo_id) DO NOTHING\", \"\"))\n        inserted = (await transaction.execute(plain, values)).first()\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_ten_simultaneous_submissions_leave_one_row_and_the_same_receipt"
+
+[[guarda]]
+nombre = "m_conflicto_como_duplicado: otros bytes con el mismo photo_id se dan por duplicado"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        if stored.canonical_sha256 != row.canonical_sha256:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_same_photo_id_with_other_bytes_is_an_idempotency_conflict"
+
+[[guarda]]
+nombre = "m_conflicto_como_duplicado (concurrente)"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        if stored.canonical_sha256 != row.canonical_sha256:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_two_simultaneous_submissions_with_different_bytes_leave_one_row_and_a_conflict"
+
+[[guarda]]
+nombre = "m_sin_verificar_marca: la imagen sin vigia_anonymized=1 pasa"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if not facts.marked:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[sin marca]"
+
+[[guarda]]
+nombre = "m_acepta_exif: el APP1 (EXIF) se lee como un comentario"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    facts = jpeg_facts(data)\n"
+reemplazar = "    facts = jpeg_facts(data.replace(b\"\\xff\\xe1\", b\"\\xff\\xfe\"))\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[con APP1 EXIF]"
+
+[[guarda]]
+nombre = "m_acepta_cola: se ignora lo que hay tras EOI"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    facts = jpeg_facts(data)\n"
+reemplazar = "    facts = jpeg_facts(data[: data.rfind(b\"\\xff\\xd9\") + 2])\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[bytes tras EOI]"
+
+[[guarda]]
+nombre = "m_acepta_jfxx: los APP0 se tratan como admitidos (miniatura JFXX)"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "        if facts.code in _NOT_ANONYMIZED:\n"
+reemplazar = "        if facts.code is JpegDefectCode.TRAILING_DATA:\n"
+prueba = "backend/tests/conformance/test_episode_photo_kit.py::test_the_a75_guard_rejects_what_is_not_anonymized[app0-jfxx]"
+
+[[guarda]]
+nombre = "m_sin_hash: no se compara la sha256 declarada"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if hashlib.sha256(data).hexdigest() != str(image[\"sha256\"]):\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[sha256 alterada]"
+
+[[guarda]]
+nombre = "m_sin_tamano: no se compara size_bytes"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if len(data) != image[\"size_bytes\"]:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[tamano alterado]"
+
+[[guarda]]
+nombre = "m_sin_ancho: no se compara el ancho del SOF"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if facts.width != image[\"width\"]:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_each_image_defect_has_its_code_and_field[ancho]"
+
+[[guarda]]
+nombre = "m_sin_alto: no se compara el alto del SOF"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if facts.height != image[\"height\"]:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_each_image_defect_has_its_code_and_field[alto]"
+
+[[guarda]]
+nombre = "m_esquema_antes_que_zona: sin before_schema, el esquema gana a la zona"
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+buscar = "        handle=handle, before_schema=scope_before_schema, on_rejection=on_rejection\n"
+reemplazar = "        handle=handle, before_schema=None, on_rejection=on_rejection\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_the_zone_of_another_node_wins_over_an_invalid_body"
+
+[[guarda]]
+nombre = "m_alcance_sin_identidad: before_schema no mira organización, planta ni nodo"
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+buscar = "        if presented is not None and presented != expected[name]:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_foreign_scope_field_is_node_zone_mismatch_before_the_schema"
+
+[[guarda]]
+nombre = "m_alcance_sin_zona: before_schema no mira la zona"
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+buscar = "    if zone is not None and not node.covers_zone(zone):\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_foreign_scope_field_is_node_zone_mismatch_before_the_schema"
+
+[[guarda]]
+nombre = "m_sin_compuerta: no se mira la compuerta de montaje"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "            if not usage_approved_during(spans, fact.gate_window):\n"
+reemplazar = "            if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_without_the_mounting_gate_the_photo_is_rejected"
+
+[[guarda]]
+nombre = "m_sin_camara: la cámara fuera del catálogo pasa"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if camera is not None and not any(_uuid(camera) in item.cameras for item in citing):\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[camara fuera del catalogo]"
+
+[[guarda]]
+nombre = "m_sin_estandar: un estándar que no está en el catálogo pasa"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if not citing:\n        return \"standard\"\n"
+reemplazar = "    if False:\n        return \"standard\"\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_standard_and_the_camera_must_be_in_the_catalog_in_force"
+
+[[guarda]]
+nombre = "m_sin_antiguedad: una foto más antigua que la retención del nodo pasa"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        if fact.too_old(await store.retention_days(transaction, node.node_id)):\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_an_old_photo_is_timestamp_out_of_window"
+
+[[guarda]]
+nombre = "m_sin_version_del_cuerpo: contract_version del cuerpo distinto de la cabecera pasa"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        if submission.get(\"contract_version\") != contract_version:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_body_must_declare_the_header_version_and_the_key_must_be_the_photo_id"
+
+[[guarda]]
+nombre = "m_sin_clave: Idempotency-Key distinta de photo_id pasa"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        if idempotency_key != submission[\"photo_id\"]:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_body_must_declare_the_header_version_and_the_key_must_be_the_photo_id"
+
+[[guarda]]
+nombre = "m_sin_imagen_verificada: el paso 6 no se ejecuta"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n"
+reemplazar = "            if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_photo_with_a_bad_image_writes_nothing"
+
+[[guarda]]
+nombre = "m_retencion_sin_tope (servicio): 0 o 91 días no impiden construir el servicio"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    if type(days) is not int or not MIN_RETENTION_DAYS <= days <= MAX_RETENTION_DAYS:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_retention_days_out_of_range_do_not_start"
+
+[[guarda]]
+nombre = "m_retencion_sin_tope (proceso): VIGIA_EPISODE_PHOTO_RETENTION_DAYS admite 0 y 91"
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+buscar = "\"episode_photo_retention_days\", \"VIGIA_EPISODE_PHOTO_RETENTION_DAYS\", _integer(1, 90)\n"
+reemplazar = "\"episode_photo_retention_days\", \"VIGIA_EPISODE_PHOTO_RETENTION_DAYS\", _integer(0, 91)\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_process_does_not_start_with_retention_outside_1_to_90"
+
+[[guarda]]
+nombre = "m_vencimiento_desplazado: expires_at un día más tarde"
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+buscar = "    return received_at + timedelta(days=check_retention_days(days))\n"
+reemplazar = "    return received_at + timedelta(days=check_retention_days(days) + 1)\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_acceptance_with_and_without_image_and_their_duplicates"
+
+[[guarda]]
+nombre = "m_no_data_sin_rechazo: la ingesta real acepta una lectura válida de una señal no_data"
+archivo = "backend/src/vigia_platform/fleet/domain/ingest_order.py"
+buscar = "        if signal_id in catalog.no_data and reading[\"valid\"] is not False:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_the_real_ingest_rejects_a_valid_reading_of_a_no_data_signal"
+
+[[guarda]]
+nombre = "m_registro_before_libre: cualquier validador before delante de Literal[True] se admite"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "        and function is _STRICT_TRUE_GUARD\n"
+reemplazar = ""
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_is_by_function_and_by_the_literal_it_guards"
+
+[[guarda]]
+nombre = "m_registro_guarda_en_otro_esquema: la guarda de StrictTrue se admite delante de cualquier esquema"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "        and inner.get(\"type\") == \"literal\"\n        and _only_true(inner.get(\"expected\"))\n"
+reemplazar = ""
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_is_by_function_and_by_the_literal_it_guards"
+
+[[guarda]]
+nombre = "m_registro_sin_strict_true: sin la excepción, un catálogo v1.5.0 no se registra"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "                or _is_strict_true(node, target)\n"
+reemplazar = ""
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_guard_of_the_contract_is_accepted_and_only_narrows"
+
+[[guarda]]
+nombre = "m_imagen_al_monton: la imagen rechazada también se inserta (y se revierte)"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n"
+reemplazar = "                previous = await self._claim(transaction, row)\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_rejected_image_never_reaches_the_heap_nor_the_toast"
+
+[[guarda]]
+nombre = "m_conflicto_sin_insert_perdido: con la imagen rechazada no se consulta la foto ya aceptada"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        return None if stored is None else self._resolve(stored, row)\n"
+reemplazar = "        return None\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_rejected_image_with_a_taken_photo_id_is_still_a_conflict"
+
+[[guarda]]
+nombre = "m_strict_true_por_igualdad: el literal se compara con == (Literal[1] pasa)"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "len(expected) == 1 and expected[0] is True"
+reemplazar = "len(expected) == 1 and expected[0] == True"
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_needs_a_literal_of_exactly_true_by_identity"
+
+[[guarda]]
+nombre = "m_strict_true_varios_valores: un literal con más valores que True pasa"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "len(expected) == 1 and expected[0] is True"
+reemplazar = "len(expected) >= 1 and expected[0] is True"
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_needs_a_literal_of_exactly_true_by_identity"
+
+[[guarda]]
+nombre = "m_check_sin_tope_tamano: la base admite size_bytes por encima de 204 800"
+archivo = "backend/migrations/versions/gob_0042_episode_photo.py"
+buscar = "CHECK (size_bytes BETWEEN 1 AND 204800)"
+reemplazar = "CHECK (size_bytes >= 1)"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_the_check_bounds_the_declared_size"
+
+[[guarda]]
+nombre = "m_check_sin_xor: la base admite imagen y motivo a la vez"
+archivo = "backend/migrations/versions/gob_0042_episode_photo.py"
+buscar = "            CHECK ((image IS NULL) = (image_absent_reason IS NOT NULL)),\n"
+reemplazar = "            CHECK (true),\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_the_check_rejects_an_image_with_its_reason_or_neither"
+
+[[guarda]]
+nombre = "m_cubo_compartido: la foto comparte el cubo de la ingesta"
+archivo = "backend/src/vigia_platform/node_api/limits.py"
+buscar = "        NodeRoute.EPISODE_PHOTO: RouteBudget(\"episode_photo\", Budget(120, 60, burst=30)),\n"
+reemplazar = "        NodeRoute.EPISODE_PHOTO: _INGEST,\n"
+prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_photo_has_its_own_bucket_of_120_per_minute_with_a_burst_of_30"
+
+[[guarda]]
+nombre = "m_limite_256k: la foto hereda el límite de 256 KB de los hallazgos"
+archivo = "backend/src/vigia_platform/shared/api/declarations.py"
+buscar = "    EPISODE_PHOTO = (\"post_episode_photo\", \"POST\", \"/episode-photos\", 307_200)\n"
+reemplazar = "    EPISODE_PHOTO = (\"post_episode_photo\", \"POST\", \"/episode-photos\", 262_144)\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_body_over_307200_bytes_is_payload_too_large"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "violation = None if image is None or data is None else image_violation(image, data)"
+motivo = "la cubren m_sin_imagen_verificada y m_imagen_al_monton"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if violation is None:"
+motivo = "la cubre m_imagen_al_monton"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+texto = "return isinstance(expected, list | tuple) and len(expected) == 1 and expected[0] is True"
+motivo = "la cubren m_strict_true_por_igualdad, m_strict_true_varios_valores y m_registro_guarda_en_otro_esquema"
+
+[[exenta]]
+archivo = "backend/migrations/versions/gob_0042_episode_photo.py"
+texto = "raise NotImplementedError("
+motivo = "convención de las migraciones solo hacia adelante (MIG001)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "except Exception as error:"
+motivo = "solo métrica y registro del rechazo; la excepción sale igual (la cubren las pruebas de rechazos por su código)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "return inserted is not None"
+motivo = "la cubren m_idempotencia_no_atomica y m_conflicto_como_duplicado"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+texto = "if not ("
+motivo = "condición de varias líneas; la cubren m_registro_before_libre, m_registro_guarda_en_otro_esquema y m_registro_sin_strict_true"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if not isinstance(node, NodeScope) or not isinstance(document, ContractModel):"
+motivo = "error de programación (tipos); no es una guarda del contrato"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "except ValueError:"
+motivo = "segunda barrera del paso 4: el patrón del esquema ya rechaza un base64 inválido (lo cubre «base64 inválido» con schema_invalid)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if previous is not None:"
+motivo = "la cubre m_idempotencia_al_final (el duplicado se devuelve aquí)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if violation is not None:"
+motivo = "la cubren m_sin_verificar_marca, m_acepta_exif, m_acepta_cola, m_sin_hash y m_sin_tamano"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if await store.claim(transaction, row):"
+motivo = "la cubren m_idempotencia_no_atomica y m_conflicto_como_duplicado"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if stored is None:"
+motivo = "inalcanzable: la clave existe si el INSERT chocó con ella (pragma: no cover)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "raise RuntimeError(\"foto del episodio sin fila tras el conflicto de clave\")"
+motivo = "inalcanzable, ver la anterior"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "raise TypeError(\"accept recibe el alcance del nodo y la presentación del contrato\")"
+motivo = "error de programación"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "raise IngestRejected("
+motivo = "cada raise lo cubre la guarda de su condición"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "if row.organization_id != transaction.context.organization_id:"
+motivo = "defensa en profundidad: la organización de la fila ya la fijó before_schema y la RLS WITH CHECK la rechaza igual (test_episode_photo_rls)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "raise ValueError(\"la foto es de otra organización que la transacción\")"
+motivo = "ver la anterior"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "if row is None:"
+motivo = "lectura: sin fila no hay duplicado; la cubre m_conflicto_como_duplicado"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "return value if type(value) is uuid.UUID else uuid.UUID(str(value))"
+motivo = "conversión del tipo de asyncpg"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/adapters/postgres/episode_photo_store.py"
+texto = "GateSpan(row.status == \"approved\", row.effective_from, row.effective_until)"
+motivo = "la cubre m_sin_compuerta (el estado leído decide la compuerta)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "if received_at.utcoffset() is None:"
+motivo = "error de programación: instantes sin zona"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "raise ValueError(\"received_at lleva zona horaria\")"
+motivo = "ver la anterior"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "raise ValueError(\"VIGIA_EPISODE_PHOTO_RETENTION_DAYS va de 1 a 90 días\")"
+motivo = "la cubre m_retencion_sin_tope (servicio)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "if isinstance(facts, JpegDefect):"
+motivo = "la cubren m_acepta_exif, m_acepta_cola y m_acepta_jfxx"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "except (binascii.Error, ValueError):"
+motivo = "segunda barrera del paso 4 (ver el servicio)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "raise ValueError(\"data_base64 no es base64 estándar\") from None"
+motivo = "ver la anterior; test_invalid_base64_is_a_value_error"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "if item.in_force_during(window)"
+motivo = "la cubre m_sin_estandar (versión fuera de la ventana: «standard»)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
+texto = "None if"
+motivo = "conversión de columnas anulables de la fila (sin decisión)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if TYPE_CHECKING:"
+motivo = "solo tipos"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if not isinstance(value, str):"
+motivo = "lectura suelta antes del esquema; la cubre test_a_foreign_scope_field_is_node_zone_mismatch_before_the_schema (valor no canónico)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "return parsed if str(parsed) == value else None"
+motivo = "ver la anterior"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if node is None or not isinstance(body, Mapping):"
+motivo = "sin certificado o sin JSON decide el esquema o el certificado (como clip_uploads)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "raise NodeRejection(RejectionCode.NODE_ZONE_MISMATCH"
+motivo = "los cubren m_alcance_sin_identidad y m_alcance_sin_zona"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if isinstance(document, EpisodePhotoSubmission):"
+motivo = "solo métrica y registro (image_presence)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "return ABSENT if document.image is None else PRESENT"
+motivo = "solo métrica y registro"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if isinstance(document, Mapping) and isinstance(document.get(\"image\"), Mapping):"
+motivo = "solo métrica y registro"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "instruments = metrics if metrics is not None else get_metrics()"
+motivo = "solo métrica"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if code is not None:"
+motivo = "solo métrica y registro"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if zone_id is not None:"
+motivo = "solo registro"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "None if rejection is None else rejection.code"
+motivo = "solo métrica"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "zone = presentation.get(\"zone_id\") if isinstance(presentation, Mapping) else None"
+motivo = "solo registro"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "if node is None or not isinstance(document, EpisodePhotoSubmission):"
+motivo = "error de programación: la verificación previa ya dejó nodo y cuerpo (como las demás rutas)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "raise RuntimeError(\"foto del episodio sin alcance de nodo o sin cuerpo verificado\")"
+motivo = "ver la anterior"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "result = NodeResult.ACCEPTED_DUPLICATE if reply.duplicate else NodeResult.ACCEPTED"
+motivo = "solo métrica (lo cubre la prueba de aceptación por sus puntos)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/node_api/routes/episode_photos.py"
+texto = "retention = DEFAULT_RETENTION_DAYS if config is None else config.episode_photo_retention_days"
+motivo = "composición: sin configuración, el valor del diseño"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/domain/ingest_order.py"
+texto = "if item.get(\"no_data\") is True"
+motivo = "lectura del catálogo; la cubre m_no_data_sin_rechazo"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+texto = "next("
+motivo = "lectura del tipo del contrato al importar"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+texto = "item.func for item in get_args(StrictTrue)[1:] if isinstance(item, BeforeValidator)"
+motivo = "lectura del tipo del contrato al importar"

@@ -16,9 +16,10 @@ dependencia de FastAPI:
   ``checkpoint`` y hash del verificador, la salud profunda, que es interna, y los estáticos de la
   aplicación de página única: pantallas, ``/assets/*``, ``/version.json`` y ``/robots.txt``);
   método y plantilla de la ruta deben coincidir con los de la lista;
-- ``node_route(NodeRoute.X)`` (A-51): la ruta es una de las **diez rutas obligatorias del
-  contrato** de U-01 bajo ``/api/nodes`` (``NodeRoute``, lista cerrada; el descubrimiento de
-  versión ``GET conformance-profile`` no se implementa en v1). Sin sesión ni clave de la matriz:
+- ``node_route(NodeRoute.X)`` (A-51): la ruta es una de las **rutas del contrato** de U-01
+  (las diez obligatorias y, desde v1.5.0, la foto del episodio de A-112) bajo ``/api/nodes``
+  (``NodeRoute``, lista cerrada; el descubrimiento de versión ``GET conformance-profile`` no se
+  implementa en v1). Sin sesión ni clave de la matriz:
   la identifica el certificado del nodo. Toda ruta bajo ``/api/nodes`` debe declarar
   ``node_route`` y ninguna otra puede hacerlo; método y plantilla deben coincidir con su entrada.
   Su límite de cuerpo es el de su entrada (``NodeRoute.max_body_bytes``), así que no declara
@@ -175,11 +176,12 @@ class SessionRoute(enum.Enum):
 
 
 class NodeRoute(enum.Enum):
-    """Las diez rutas obligatorias del contrato (A-51; ``domain-entities.md`` §4 de U-01).
+    """Las once rutas del contrato (A-51; ``domain-entities.md`` §4 de U-01; A-112).
 
     Cada entrada: ``operation_id`` de ``ingest.yaml``, método, plantilla relativa a
     ``/api/nodes`` y límite del cuerpo **descomprimido** en bytes (BR-CTR-12 y la nota de
-    NFR-GOB-33: 16 KB la rotación y sin cuerpo la confirmación y el catálogo). Añadir una entrada
+    NFR-GOB-33: 16 KB la rotación y sin cuerpo la confirmación y el catálogo; 307 200 la foto del
+    episodio, A-112). Añadir una entrada
     es un cambio revisado del código; ``tests/unit/test_node_route_declarations.py`` la compara con
     ``OPERATIONS`` del esqueleto de U-01.
     """
@@ -199,6 +201,8 @@ class NodeRoute(enum.Enum):
     )
     ZONE_CATALOG = ("get_zone_catalog", "GET", "/zones/{zone_id}/catalog", 0)
     UPDATE_RESULT = ("post_update_result", "POST", "/update-results", 65_536)
+    # v1.5.0 (A-112, TASK-572): la foto del episodio de la sombra, con su límite propio.
+    EPISODE_PHOTO = ("post_episode_photo", "POST", "/episode-photos", 307_200)
 
     @property
     def operation_id(self) -> str:
