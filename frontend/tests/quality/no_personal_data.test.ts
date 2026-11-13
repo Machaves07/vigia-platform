@@ -39,6 +39,8 @@ const PARAM_FORMS: Readonly<Record<string, RegExp>> = {
   finding_state_id: UUID,
   node_id: UUID,
   record_id: UUID,
+  // Episodio de la sombra en SCR-06 (TASK-574): UUID de la foto, nunca datos de la persona.
+  photo_id: UUID,
   period: /^\d{4}-(?:0[1-9]|1[0-2])$/,
   // Token opaco del enlace de invitación (BR-APP-18): base64url, sin datos de la persona.
   token: /^[A-Za-z0-9_-]{16,512}$/,

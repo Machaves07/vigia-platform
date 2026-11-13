@@ -35,6 +35,7 @@ import type { Clock } from '@/state/clock';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
 
+import { EpisodesLink } from './EpisodesLink';
 import { HoursPanel } from './HoursPanel';
 import { RegressionRerunPanel } from './RegressionRerunPanel';
 import { ReopenPanel } from './ReopenPanel';
@@ -236,6 +237,7 @@ export function SessionScreen({
   return (
     <main className={styles.page}>
       <h1 className={styles.title}>{text('navigation.scr06')}</h1>
+      <EpisodesLink zoneId={zoneId} />
       <NoticeStack
         notices={notices.notices}
         clock={clock}

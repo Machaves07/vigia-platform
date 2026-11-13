@@ -1,0 +1,86 @@
+.photo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-text);
+}
+
+.notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  font-weight: 600;
+}
+
+/*
+ * Mismo marco que los clips (UI-12): fondo de tinta, la foto entera sin recortar y la
+ * superposición arriba a la izquierda, que no recibe el puntero.
+ */
+.frame {
+  position: relative;
+  display: flex;
+  min-height: 12rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-text);
+  overflow: hidden;
+  user-select: none;
+}
+
+.canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.absent,
+.status {
+  margin: 0;
+  padding: var(--space-6) var(--space-3) var(--space-3);
+  color: var(--color-surface);
+  text-align: center;
+}
+
+.overlay {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-small);
+  pointer-events: none;
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.message {
+  margin: 0;
+}
+
+.retry {
+  min-height: var(--touch-target-min);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.retry:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}

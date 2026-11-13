@@ -10,6 +10,8 @@
  * - `status: 'assumed'` nombra la operación del diseño (`GET /zones/{id}/…`) que la
  *   especificación aún no tiene: responde `unavailable` sin llamar a la red (BR-APP-63).
  * - El cuerpo de una escritura se valida con `validateBody` antes de enviarse (BR-APP-64).
+ * - Una lectura declarada con `retry: false` sale una sola vez (sin los reintentos de
+ *   `ports.base`): cada petición deja su entrada de auditoría (A-112).
  * - `slowSince()` vale, mientras alguna petición del puerto lleve 1 s o más en curso, el instante
  *   en que la más antigua cruzó ese segundo; si no, `null` (carga prolongada, NFR-APP-04).
  */
@@ -85,6 +87,8 @@ interface FixedRead<Id extends ReadOperationId = ReadOperationId> extends Declar
   readonly kind: 'read';
   readonly status: 'fixed';
   readonly operationId: Id;
+  /** `false`: sin los reintentos de lectura de `ports.base` (una petición, una auditoría). */
+  readonly retry?: false;
 }
 interface FixedWrite<Id extends WriteOperationId = WriteOperationId> extends DeclarationBase {
   readonly kind: 'write';
@@ -209,6 +213,7 @@ export function defineScreenPort<
 
     const { operationId } = declaration;
     const dependency = declaration.dependency ?? 'platform';
+    const once = declaration.kind === 'read' && declaration.retry === false;
     const send = async (kind: RequestKind, input: Input = {}, signal?: AbortSignal) => {
       const transport = currentTransport();
       if (kind === 'write') transport.assertVersionCurrent?.();
@@ -224,6 +229,7 @@ export function defineScreenPort<
           kind,
           dependency,
           signal,
+          ...(once ? { retry: false as const } : {}),
           ...(input.path === undefined ? {} : { path: input.path }),
           ...(input.query === undefined
             ? {}

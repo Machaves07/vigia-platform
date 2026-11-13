@@ -8,6 +8,8 @@
  *   de red o `temporarily_unavailable` sin `detail_code` de negocio, y solo con el circuito de su
  *   dependencia cerrado (BR-APP-73, PAT-APP-RES-02). Agotados, la lectura falla como `offline`.
  *   Solo las operaciones `GET` pueden declararse lectura: un `POST` nunca se repite solo.
+ *   Una lectura con `retry: false` sale una sola vez y falla con el error de ese intento: la
+ *   imagen de un episodio de la sombra deja una entrada de auditoría por petición (A-112).
  * - Escrituras: cero reintentos (BR-APP-72). Un tiempo de espera o un fallo de red se informa
  *   como `temporarily_unavailable` (BR-APP-61): `behaviourFor` da `transient` con
  *   `retry_after_seconds` para el botón «repetir». Con el circuito `platform` abierto ni salen.
@@ -149,6 +151,11 @@ export interface ApiRequest {
   /** Cancelación del llamador (solo lecturas: una escritura enviada no se cancela). */
   readonly signal?: AbortSignal | undefined;
   readonly dependency?: Dependency;
+  /**
+   * `false`: la lectura sale una sola vez, sin los reintentos de BR-APP-73 (cada petición deja
+   * una entrada de auditoría, A-112). Las escrituras nunca se reintentan.
+   */
+  readonly retry?: false;
 }
 
 export interface Transport {
@@ -441,7 +448,7 @@ export function createTransport(options: TransportOptions): Transport {
       const result = await attempt(request);
       settle(request, result);
       if (result.type === 'ok') return result.value;
-      if (!retryable(result)) throw failure(result);
+      if (request.retry === false || !retryable(result)) throw failure(result);
       const delay = READ_RETRY_DELAYS_MS[retry];
       if (delay === undefined || !circuitClosed(dependency))
         throw new PortError({ kind: 'offline' });
