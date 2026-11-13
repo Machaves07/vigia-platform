@@ -2,9 +2,12 @@
 
 Trece de los veintiséis tipos de U-03; los otros trece (ingesta, alta, credenciales y versiones
 de flota) están en ``fleet.record_types``. Todos los escribe U-03, en la cadena de **planta** y en
-su versión 1 (``walk_test_result`` también en la 2, TASK-216), con un modelo de contenido
+su versión 1 (``walk_test_result`` también en la 2, TASK-216; ``catalog_version_published`` en la
+2 desde VIG-457, con el sobre del contrato v1.5.0), con un modelo de contenido
 estricto (``ContentModel``). Retirar un tipo o una
-versión está prohibido (BR-NUC-52): una versión nueva solo amplía.
+versión está prohibido (BR-NUC-52): una versión nueva solo amplía. La versión 1 de
+``catalog_version_published`` queda **congelada** en ``record_types_frozen`` (VIG-457): el sobre
+del contrato v1.1.0 que persistió ``f64df12``, para que el contrato vigente no la cambie.
 
 - **Texto libre** (A-45): solo en las rutas declaradas de ``free_text_paths``; pasa la política
   base de U-02 y el validador mínimo de U-03 (D-7). Ningún campo identifica a una persona
@@ -40,6 +43,7 @@ from vigia_platform.catalog.domain.enums import (
     StepKind,
     WalkTestKind,
 )
+from vigia_platform.catalog.record_types_frozen import CatalogVersionPublishedV1
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorUnit, Role
 
@@ -707,10 +711,18 @@ minúsculas (``schema_rules.is_free_text``)."""
 CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _catalog(
         "catalog_version_published",
+        CatalogVersionPublishedV1,
+        source_key_path="/source_key",
+        free_text_paths=("/reason_es", *ENVELOPE_FREE_TEXT_PATHS),
+        outbox_events=("catalog_updated", "regression_marked"),
+    ),
+    _catalog(
+        "catalog_version_published",
         CatalogVersionPublished,
         source_key_path="/source_key",
         free_text_paths=("/reason_es", *ENVELOPE_FREE_TEXT_PATHS),
         outbox_events=("catalog_updated", "regression_marked"),
+        schema_version=2,
     ),
     _catalog(
         "standard_admission_test",
@@ -801,7 +813,9 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
 )
 """Los trece tipos del catálogo, en versión 1 (domain-entities §5), y la versión 2 de
-``walk_test_result`` (TASK-216), justo después de la 1: las versiones se registran en orden."""
+``walk_test_result`` (TASK-216) y de ``catalog_version_published`` (VIG-457: el sobre del contrato
+v1.5.0; la 1, congelada en ``record_types_frozen``), cada una justo después de su 1: las versiones
+se registran en orden."""
 
 
 def register_catalog_record_types(registry: RecordTypeRegistry) -> None:

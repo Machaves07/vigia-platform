@@ -2,7 +2,9 @@
 
 Trece de los veintiséis tipos de U-03; los otros trece (catálogo, compuertas y comisionamiento)
 están en ``catalog.record_types``. Todos los escribe U-03, en la cadena de **planta** y en su
-versión 1. Retirar un tipo o una versión está prohibido (BR-NUC-52).
+versión 1 (``ingest_rejected`` también en la 2 desde VIG-457, con el ``record_kind`` del contrato
+v1.5.0; su 1 queda congelada en ``record_types_frozen``). Retirar un tipo o una versión está
+prohibido (BR-NUC-52).
 
 - **Ingesta** (``finding_received``, ``detection_for_review_received``,
   ``observability_event_received``): el contenido es el modelo del contrato **con** ``receipt``
@@ -33,6 +35,7 @@ from vigia_contracts.models.finding import Finding
 from vigia_contracts.models.observability_event import ObservabilityEvent
 
 from vigia_platform.fleet.domain.enums import EnrollmentAttemptResult, UpdateResult
+from vigia_platform.fleet.record_types_frozen import IngestRejectedV1
 from vigia_platform.ledger.domain.coverage import CommunicationState
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorUnit
@@ -237,12 +240,13 @@ def _fleet(
     free_text_paths: tuple[str, ...] = (),
     evidence_paths: tuple[str, ...] = (),
     outbox_events: tuple[str, ...] = (),
+    schema_version: int = 1,
 ) -> RecordType:
     return RecordType(
         record_type=record_type,
         writer_unit=ActorUnit.U03,
         chain_level=ChainLevel.PLANT,
-        schema_version=1,
+        schema_version=schema_version,
         content_model=model,
         source_key_path=source_key_path,
         free_text_paths=free_text_paths,
@@ -322,9 +326,13 @@ FLEET_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
     _fleet("enrollment_code_issued", EnrollmentCodeIssued, source_key_path="/code_id"),
     _fleet("enrollment_attempt_rejected", EnrollmentAttemptRejected, source_key_path="/attempt_id"),
-    _fleet("ingest_rejected", IngestRejected),
+    _fleet("ingest_rejected", IngestRejectedV1),
+    _fleet("ingest_rejected", IngestRejected, schema_version=2),
 )
-"""Los trece tipos de la flota y la ingesta, en versión 1 (domain-entities §5)."""
+"""Los trece tipos de la flota y la ingesta, en versión 1 (domain-entities §5), y la versión 2 de
+``ingest_rejected`` (VIG-457: ``record_kind`` del contrato v1.5.0, con ``episode_photo``; la 1,
+congelada en ``record_types_frozen``), justo después de su 1: las versiones se registran en
+orden."""
 
 
 def register_fleet_record_types(registry: RecordTypeRegistry) -> None:
