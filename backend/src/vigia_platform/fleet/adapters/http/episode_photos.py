@@ -70,16 +70,19 @@ _CURSOR_CHARS: Final = 36
 IMAGE_HEADERS: Final = {
     "Cache-Control": "no-store",
     "Content-Disposition": "inline",
+    "Cross-Origin-Resource-Policy": "same-origin",
 }
-"""Cabeceras propias de la imagen. ``X-Content-Type-Options: nosniff`` (y el resto de las de
-seguridad) la fija la cadena en toda respuesta y sustituye cualquiera que ponga una ruta
-(``shared.api.middleware.headers``): repetirla aquí no cambiaría nada."""
+"""Cabeceras propias de la imagen. ``Cross-Origin-Resource-Policy: same-origin`` (defensa en
+profundidad, revisión de Fable de #318): el navegador no entrega la imagen a una página de otro
+origen aunque algún día la concesión viajara de otra forma. ``X-Content-Type-Options: nosniff``
+(y el resto de las de seguridad) la fija la cadena en toda respuesta y sustituye cualquiera que
+ponga una ruta (``shared.api.middleware.headers``): repetirla aquí no cambiaría nada."""
 SERVED_HEADERS: Final = {
     "Content-Type": JPEG_MEDIA_TYPE,
     **IMAGE_HEADERS,
     "X-Content-Type-Options": "nosniff",
 }
-"""Las cuatro cabeceras con las que sale la imagen (las propias y las de la cadena)."""
+"""Las cabeceras con las que sale la imagen (las propias y las de la cadena)."""
 
 Services = Annotated[FleetHttp, Depends(fleet_http)]
 

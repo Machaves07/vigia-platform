@@ -7,10 +7,13 @@
 - ``EpisodePhotoPurger`` no se construye con lotes de menos de una fila.
 - Las dos rutas declaran **exactamente** ``commissioning.run`` (``m_coordinador_lee`` en la
   declaración: con otra clave de la matriz, el coordinador pasaría la cadena).
+- El listado nunca **selecciona** ``image`` ni ``sha256`` (r22: las pruebas de integración miden
+  la respuesta, que el modelo cerrado ya filtra; esta mide la sentencia).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import uuid
 from datetime import UTC, datetime
@@ -19,7 +22,11 @@ from typing import Any
 import pytest
 
 from tests.factories import make_context
-from vigia_platform.fleet.adapters.postgres.episode_photo_queries import StoredImage
+from vigia_platform.fleet.adapters.postgres import episode_photo_queries
+from vigia_platform.fleet.adapters.postgres.episode_photo_queries import (
+    EpisodePhotoSummary,
+    StoredImage,
+)
 from vigia_platform.fleet.application.episode_photo_purge import EpisodePhotoPurger
 from vigia_platform.fleet.application.episode_photo_read import (
     EpisodePhotoReader,
@@ -126,6 +133,23 @@ def test_the_purger_needs_batches_of_at_least_one(field: str, value: int) -> Non
             queries=untouchable,
             **{field: value},
         )
+
+
+def _selected(statement: Any) -> list[str]:
+    """Las columnas del primer ``SELECT … FROM`` de una sentencia ``text()``, sin alias."""
+    sql = str(statement.text)
+    columns = sql[sql.index("SELECT ") + len("SELECT ") : sql.index(" FROM ")]
+    return [column.strip().removeprefix("p.") for column in columns.split(",")]
+
+
+def test_the_listing_statements_never_select_the_image_nor_its_sum() -> None:
+    """r22 (revisión de Fable): las columnas de ``_PAGE`` son exactamente los campos de
+    ``EpisodePhotoSummary``, en su orden; ni ``image`` ni ``sha256`` salen de la base en ninguna
+    página, y el cursor solo lee su clave."""
+    summary = [item.name for item in dataclasses.fields(EpisodePhotoSummary)]
+    assert _selected(episode_photo_queries._PAGE) == summary
+    assert not {"image", "sha256"} & set(_selected(episode_photo_queries._PAGE))
+    assert _selected(episode_photo_queries._CURSOR) == ["started_at", "photo_id"]
 
 
 def test_both_routes_declare_exactly_commissioning_run() -> None:

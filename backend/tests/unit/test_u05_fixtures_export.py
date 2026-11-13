@@ -145,6 +145,7 @@ def test_the_episode_photos_example_has_the_shape_of_the_routes(committed: dict[
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         "Content-Disposition": "inline",
+        "Cross-Origin-Resource-Policy": "same-origin",
     }
     assert section["audit_operation"] == "episode_photo_read"
 

@@ -72,6 +72,8 @@ IMAGE_HEADERS: Final = {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "content-disposition": "inline",
+    # Defensa en profundidad (revisión de Fable, ronda 1): ningún otro origen la incrusta.
+    "cross-origin-resource-policy": "same-origin",
 }
 LISTED_KEYS: Final = frozenset(
     {
@@ -448,11 +450,11 @@ def test_the_installer_with_an_expired_concession_gets_not_found(stack: FleetSta
         duration=dt.timedelta(days=2),
     )
     who: Who = (authz.open_session(authz.provider_organization_id, installer), concession)
-    for path in (photo.image_path, LIST_PATH.format(zone_id=photo.zone_id)):
-        response = get(stack, who, path)
-        assert _code(response) in ("not_found", "unauthenticated"), response.text
-        assert response.headers.get("content-type") != "image/jpeg"
-    assert all(e["outcome"] == "denied" for e in image_audit(stack, photo.photo_id))
+    # La cadena no da contexto con la concesión vencida (BR-NUC-04): igual que un inexistente.
+    _assert_hidden(stack, who, photo)
+    # Sin contexto no hay cadena a la que atribuir la petición: ninguna episode_photo_read
+    # (precisión de A-112: una entrada por petición **con contexto**).
+    assert image_audit(stack, photo.photo_id) == []
 
 
 def _assert_hidden(stack: FleetStack, who: Who, photo: Stored) -> None:

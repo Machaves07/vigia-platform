@@ -45,7 +45,7 @@ from sqlalchemy.dialects.postgresql.asyncpg import dialect as asyncpg_dialect
 
 from tests.authz_support import Site
 from tests.dispatch_support import metric_points, metrics_with_reader
-from tests.episode_photo_read_support import Stored, image_audit, stored, usage
+from tests.episode_photo_read_support import Stored, get, image_audit, stored, usage
 from tests.fleet_alarm_support import blocked_or_done, system
 from tests.fleet_http_support import CONCESSION_HEADER, SAME_ORIGIN, FleetStack, fleet_stack
 from tests.integration.conftest import PostgresEndpoint
@@ -187,6 +187,37 @@ def test_after_the_usage_gate_is_approved_the_next_purge_removes_the_whole_zone(
     later = _photo(stack, site)
     assert _purge(stack, site.organization_id, stack.authz.now(), metrics) == PurgeReport()
     assert _alive(stack, later) == {later.photo_id}
+
+
+def test_a_usage_gate_revoked_before_the_purge_still_purges_the_older_photos(
+    stack: FleetStack,
+) -> None:
+    """La otra mitad del desvío 4 (sonda S8 de la revisión de Fable, ronda 1): la zona pasó a
+    ``productive`` y se revocó **antes** de que pasara la purga. Las fotos anteriores a la
+    aprobación siguen retiradas para la lectura y la purga las borra como ``productive``; la foto
+    recibida tras la revocación y las de la zona vecina se quedan (r17: comparar
+    ``effective_until`` con ``now`` en vez de con ``received_at`` las dejaría guardadas)."""
+    site = stack.site(plants=1, zones=2)
+    plant, zone = _zone(site)
+    old = [_photo(stack, site) for _ in range(2)]
+    neighbour = _photo(stack, site, zone_index=1)
+    stack.tick(1)
+    usage(stack, site.organization_id, plant, zone, approved=True, at=stack.authz.now())
+    stack.tick(60)
+    usage(stack, site.organization_id, plant, zone, approved=False, at=stack.authz.now())
+    stack.tick(60)
+    later = _photo(stack, site)
+    installer = stack.installer(site)
+    seen = [get(stack, installer, photo.image_path).status_code for photo in (*old, later)]
+    assert seen == [404, 404, 200]
+    metrics, reader = metrics_with_reader()
+    report = _purge(stack, site.organization_id, stack.authz.now(), metrics)
+    assert sorted(report.retired) == sorted(photo.photo_id for photo in old)
+    assert report.expired == ()
+    assert _alive(stack, *old, later, neighbour) == {later.photo_id, neighbour.photo_id}
+    assert _purged(reader) == {"productive": 2.0}
+    # Repetida, nada.
+    assert _purge(stack, site.organization_id, stack.authz.now(), metrics) == PurgeReport()
 
 
 def test_a_photo_both_expired_and_retired_counts_once_as_productive(stack: FleetStack) -> None:
