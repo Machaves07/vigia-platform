@@ -273,7 +273,7 @@ REJECTIONS: Final[dict[str, tuple[Any, tuple[int, str, str | None]]]] = {
         lambda stack, site: stack.photo(site, photo=image(jpeg(), sha256="ab" * 32)),
         (422, "clip_hash_mismatch", "image.sha256"),
     ),
-    "tamaño alterado": (
+    "tamano alterado": (
         lambda stack, site: stack.photo(site, photo=image(jpeg(), size_bytes=10)),
         (422, "clip_hash_mismatch", "image.size_bytes"),
     ),
@@ -283,7 +283,7 @@ REJECTIONS: Final[dict[str, tuple[Any, tuple[int, str, str | None]]]] = {
         ),
         (422, "schema_invalid", "image.data_base64"),
     ),
-    "cámara fuera del catálogo": (
+    "camara fuera del catalogo": (
         lambda stack, site: stack.photo(site, camera_id=uuid.uuid4()),
         (422, "schema_invalid", "camera_id"),
     ),

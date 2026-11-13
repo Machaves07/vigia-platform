@@ -82,7 +82,7 @@ nombre = "m_sin_tamano: no se compara size_bytes"
 archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
 buscar = "    if len(data) != image[\"size_bytes\"]:\n"
 reemplazar = "    if False:\n"
-prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[tamaño alterado]"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[tamano alterado]"
 
 [[guarda]]
 nombre = "m_sin_ancho: no se compara el ancho del SOF"
@@ -131,7 +131,7 @@ nombre = "m_sin_camara: la cámara fuera del catálogo pasa"
 archivo = "backend/src/vigia_platform/fleet/domain/episode_photo.py"
 buscar = "    if camera is not None and not any(_uuid(camera) in item.cameras for item in citing):\n"
 reemplazar = "    if False:\n"
-prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[cámara fuera del catálogo]"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_each_rejection_has_its_code_and_writes_nothing[camara fuera del catalogo]"
 
 [[guarda]]
 nombre = "m_sin_estandar: un estándar que no está en el catálogo pasa"

@@ -65,6 +65,7 @@ const NOT_CONSUMED: Readonly<Record<string, string>> = {
   'POST /api/nodes/credential-rotations': NODES,
   'POST /api/nodes/detection-reviews': NODES,
   'POST /api/nodes/enrollment': NODES,
+  'POST /api/nodes/episode-photos': NODES,
   'POST /api/nodes/findings': NODES,
   'POST /api/nodes/heartbeats': NODES,
   'POST /api/nodes/observability-events': NODES,
