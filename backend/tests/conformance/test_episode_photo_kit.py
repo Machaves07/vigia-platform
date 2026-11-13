@@ -34,6 +34,7 @@ from vigia_contracts.conformance.checks._core import derive_seed, draw_seeded
 from vigia_contracts.conformance.checks._platform import PlatformSession, Reply
 from vigia_contracts.conformance.cli import load_provision
 from vigia_contracts.conformance.generators import episode_photo
+from vigia_contracts.conformance.generators._primitives import format_ms, parse_ms
 from vigia_contracts.models import api
 
 from tests.conformance.conftest import PlatformTarget, conformance_seed
@@ -66,16 +67,44 @@ def session(platform_target: PlatformTarget) -> Iterator[PlatformSession]:
         built.close()
 
 
-def _photo(session: PlatformSession, **image_changes: Any) -> dict[str, Any]:
-    """Una foto del generador del kit para la zona aprobada, trasladada a ahora y con un
-    ``photo_id`` nuevo; ``image_changes`` sustituye campos de la imagen."""
+SHORT_SEGMENT_MS: Final = 5_000
+"""Tramo fijo de la foto: corto y terminado un segundo antes de ahora (``rebased``)."""
+SEEDS: Final = 50
+"""Semillas del generador que recorre la prueba de independencia del sorteo (revisión 1)."""
+
+
+def _short_segment(document: dict[str, Any]) -> dict[str, Any]:
+    """El tramo de ``document`` acotado a ``SHORT_SEGMENT_MS`` que termina donde termina, con el
+    reloj sincronizado y un desfase pequeño, el cuadro dentro del tramo y la duración coherente.
+
+    El generador sortea tramos de hasta 1 h y el estado del reloj; con el reloj sincronizado, la
+    plataforma mira la compuerta de montaje en ``started_at ± tolerancia`` y la zona de la
+    plataforma de conformidad se aprueba al aprovisionarla, segundos antes. Un tramo largo empezaría
+    antes de la aprobación (``zone_gate_not_approved``, correcto pero ajeno a lo que se prueba)."""
+    node_time = document["node_time"]
+    end = parse_ms(node_time["ended_at"])
+    start = end - SHORT_SEGMENT_MS
+    node_time["started_at"] = format_ms(start)
+    node_time["clock"] = {**node_time["clock"], "synchronized": True, "offset_ms": 12}
+    document["episode_duration_ms"] = SHORT_SEGMENT_MS
+    if "frame_at" in document:
+        document["frame_at"] = format_ms(start + 1_000)
+    return document
+
+
+def _photo(
+    session: PlatformSession, *, seed: int | None = None, **image_changes: Any
+) -> dict[str, Any]:
+    """Una foto del generador del kit para la zona aprobada, trasladada a ahora, con un tramo
+    corto (``_short_segment``) y un ``photo_id`` nuevo; ``image_changes`` sustituye campos de la
+    imagen."""
     zone = session.primary.approved_zone
     assert zone is not None
     drawn = draw_seeded(
         episode_photo(dict(zone.catalog), node_id=session.primary.node_id, with_image=True),
-        session.seed,
+        session.seed if seed is None else seed,
     )
-    document = session.rebased(drawn)
+    document = _short_segment(session.rebased(drawn))
     document["photo_id"] = session.fresh_uuid7()
     document["image"] = {**document["image"], **image_changes}
     return document
@@ -138,3 +167,17 @@ def test_the_a75_guard_rejects_what_is_not_anonymized(
     assert (reply.status, reply.code, reply.field) == (422, *NOT_ANONYMIZED), reply.outcome_es()
     assert reply.rejection is not None and reply.rejection["retryable"] is False
     assert _stored(platform_target, document["photo_id"]) == []
+
+
+def test_any_seed_of_the_generator_is_accepted(
+    session: PlatformSession, platform_target: PlatformTarget
+) -> None:
+    """Revisión de VIG-452: la prueba no depende de la semilla de conformidad. Con el tramo
+    corto, las fotos de 50 semillas distintas del generador se aceptan todas."""
+    refused = []
+    for index in range(SEEDS):
+        seed = derive_seed(conformance_seed(), "foto-del-episodio-semillas", index)
+        reply = _submit(session, _photo(session, seed=seed))
+        if reply.receipt is None:
+            refused.append((index, reply.outcome_es()))
+    assert refused == [], refused

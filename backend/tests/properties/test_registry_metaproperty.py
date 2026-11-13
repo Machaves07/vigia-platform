@@ -699,6 +699,30 @@ class _GuardOnOtherSchema(ContentModel):
     note: Annotated[StrictBool, BeforeValidator(_strict_true_guard())]
 
 
+class _GuardOnTrueOrOther(ContentModel):
+    """La guarda delante de un literal con más valores que ``True``."""
+
+    zone_id: UUID
+    flag: Annotated[Literal[True, "otro"], BeforeValidator(_strict_true_guard())]
+
+
+class _GuardOnOne(ContentModel):
+    """La guarda delante de ``Literal[1]``: ``1 == True`` en Python, pero no es ``const: true``."""
+
+    zone_id: UUID
+    flag: Annotated[Literal[1], BeforeValidator(_strict_true_guard())]
+
+
+@pytest.mark.parametrize("model", [_GuardOnTrueOrOther, _GuardOnOne])
+def test_the_strict_true_exemption_needs_a_literal_of_exactly_true_by_identity(
+    model: type[ContentModel],
+) -> None:
+    """Revisión de VIG-452: la excepción compara el literal por identidad y con un solo valor."""
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert "validador de función before, wrap o plain" in str(raised.value)
+
+
 def test_the_strict_true_guard_of_the_contract_is_accepted_and_only_narrows() -> None:
     """v1.5.0 (vigia-contracts#98): ``Literal[True]`` con la guarda que rechaza ``1`` y ``1.0``.
     Sin esta excepción, ningún tipo con un catálogo v1.5.0 se registra y la plataforma no arranca

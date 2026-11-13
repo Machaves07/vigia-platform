@@ -465,6 +465,112 @@ def test_the_check_rejects_an_image_with_its_reason_or_neither(
     }
 
 
+@pytest.mark.parametrize("size_bytes", [204_801, 0])
+def test_the_check_bounds_the_declared_size(stack: PhotoStack, size_bytes: int) -> None:
+    site = stack.site()
+    data = jpeg()
+    with pytest.raises(asyncpg.CheckViolationError) as raised:
+        stack.execute(
+            "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id,"
+            " node_id, episode_id, segment_index, classified_as, family, standard_id,"
+            " standard_version, max_confidence, started_at, ended_at, received_at, expires_at,"
+            " camera_id, frame_at, width, height, size_bytes, sha256, blur_params_version, image,"
+            " image_absent_reason, canonical_sha256, platform_record_id) VALUES ($1, $2, $3, $4,"
+            " $5, $6, 0, 'finding', 'coexistence', $7, 1, 0.9, $8, $8, $8,"
+            " $8::timestamptz + interval '30 days', $9, $8, 320, 240, $10, $11, 'blur-v1', $12,"
+            " NULL, $13, $14)",
+            site.organization_id,
+            uuid.uuid4(),
+            site.plant_id,
+            site.zone_id,
+            site.node_id,
+            uuid.uuid4(),
+            site.standard_id,
+            stack.now(),
+            site.camera_id,
+            size_bytes,
+            hashlib.sha256(data).hexdigest(),
+            data,
+            "cd" * 32,
+            uuid.uuid4(),
+        )
+    assert raised.value.constraint_name == "episode_photo_size_bytes"
+
+
+# --- Privacidad: una imagen rechazada no llega a la base (A-75, A-112) ----------------------------
+
+MARKER: Final = b"VIG452-IMAGEN-RECHAZADA-" * 4
+"""Bytes sintéticos reconocibles dentro de los datos del barrido de la imagen rechazada."""
+
+
+def _heap_hits(stack: PhotoStack, marker: bytes) -> int:
+    """Tuplas (vivas o muertas) de cualquier página de ``fleet.episode_photo`` y de su tabla
+    TOAST cuyo contenido lleva ``marker`` (``pageinspect``, como superusuario)."""
+    stack.execute("CREATE EXTENSION IF NOT EXISTS pageinspect")
+    hits = 0
+    relations = ["fleet.episode_photo"]
+    (toast,) = stack.fetch(
+        "SELECT reltoastrelid::regclass::text AS name FROM pg_class"
+        " WHERE oid = 'fleet.episode_photo'::regclass AND reltoastrelid <> 0"
+    ) or [{"name": None}]
+    if toast["name"] is not None:
+        relations.append(toast["name"])
+    for relation in relations:
+        (row,) = stack.fetch(
+            "SELECT count(*) AS n FROM generate_series(0,"
+            " (pg_relation_size($1::regclass) / current_setting('block_size')::int) - 1) AS p,"
+            " heap_page_items(get_raw_page($1::text, p::int)) AS t"
+            " WHERE t.t_data IS NOT NULL AND position($2::bytea IN t.t_data) > 0",
+            relation,
+            marker,
+        )
+        hits += int(row["n"])
+    return hits
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        {"marked": False},
+        {"exif": True},
+        {"trailing": b"cola"},
+    ],
+    ids=["sin-marca", "app1-exif", "cola-tras-eoi"],
+)
+def test_a_rejected_image_never_reaches_the_heap_nor_the_toast(
+    stack: PhotoStack, defect: dict[str, Any]
+) -> None:
+    site = stack.site()
+    marker = MARKER + uuid.uuid4().hex.encode()
+    data = jpeg(scan=b"\x12\x34" + marker, **defect)
+    response = stack.post(site, stack.photo(site, photo=image(data)))
+    assert response.json().get("code") == "clip_not_anonymized", response.text
+    assert stack.rows(site.organization_id) == []
+    assert _heap_hits(stack, marker) == 0
+    # La sonda no es muda: una imagen aceptada con su propia marca sí está en el montón.
+    accepted = MARKER + uuid.uuid4().hex.encode()
+    good = stack.post(site, stack.photo(site, photo=image(jpeg(scan=b"\x12\x34" + accepted))))
+    assert good.status_code == 200, good.text
+    assert _heap_hits(stack, accepted) == 1
+
+
+def test_a_rejected_image_with_a_taken_photo_id_is_still_a_conflict(stack: PhotoStack) -> None:
+    # El orden visible de BR-GOB-84 no cambia: con el photo_id ya aceptado, idempotency_conflict
+    # (paso 5) aunque la imagen no pase (paso 6), y sin INSERT.
+    site = stack.site()
+    first = stack.photo(site)
+    assert stack.post(site, first).status_code == 200
+    marker = MARKER + uuid.uuid4().hex.encode()
+    bad = stack.photo(
+        site,
+        photo_id=uuid.UUID(first["photo_id"]),
+        photo=image(jpeg(marked=False, scan=b"\x12\x34" + marker)),
+    )
+    assert _rejection(stack.post(site, bad)) == (409, "idempotency_conflict", "photo_id")
+    assert _heap_hits(stack, marker) == 0
+    assert len(stack.rows(site.organization_id)) == 1
+
+
 # --- Seguimiento de VIG-449: lectura válida de una señal no_data ----------------------------------
 
 

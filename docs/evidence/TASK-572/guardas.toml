@@ -10,15 +10,15 @@ comando = "uv run --frozen --project backend pytest -q -p no:cacheprovider -x -p
 [[guarda]]
 nombre = "m_idempotencia_al_final: la idempotencia se resuelve después de la imagen, el catálogo y la compuerta"
 archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
-buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                previous = await self._claim(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if image is not None and data is not None:\n                violation = image_violation(image, data)\n                if violation is not None:\n                    raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
-reemplazar = "            # (6) imagen.\n            if image is not None and data is not None:\n                violation = image_violation(image, data)\n                if violation is not None:\n                    raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                previous = await self._claim(transaction, row)\n            if previous is not None:\n                return previous\n"
+buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
+reemplazar = "            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n"
 prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_resent_photo_is_a_duplicate_after_the_gate_and_the_catalog_changed"
 
 [[guarda]]
 nombre = "m_idempotencia_al_final (propiedad del orden)"
 archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
-buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                previous = await self._claim(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if image is not None and data is not None:\n                violation = image_violation(image, data)\n                if violation is not None:\n                    raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
-reemplazar = "            # (6) imagen.\n            if image is not None and data is not None:\n                violation = image_violation(image, data)\n                if violation is not None:\n                    raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                previous = await self._claim(transaction, row)\n            if previous is not None:\n                return previous\n"
+buscar = "            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n"
+reemplazar = "            # (6) imagen.\n            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)\n            # (7) antigüedad, catálogo y cámara.\n            with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):\n                await self._check_catalog(transaction, node, zone_id, submission, fact)\n            # (8) compuerta de montaje.\n            with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):\n                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)\n            if not usage_approved_during(spans, fact.gate_window):\n                raise IngestRejected(\n                    RejectionCode.ZONE_GATE_NOT_APPROVED, field=\"zone_id\", zone_id=zone_id\n                )\n            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada\n            # solo se consulta la que ya estaba, sin INSERT.\n            with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):\n                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n            if previous is not None:\n                return previous\n"
 prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_resent_photo_is_a_duplicate_even_after_the_catalog_or_the_gate_changed"
 
 [[guarda]]
@@ -164,7 +164,7 @@ prueba = "backend/tests/unit/test_episode_photo_domain.py::test_the_body_must_de
 [[guarda]]
 nombre = "m_sin_imagen_verificada: el paso 6 no se ejecuta"
 archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
-buscar = "            if image is not None and data is not None:\n"
+buscar = "            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita\n"
 reemplazar = "            if False:\n"
 prueba = "backend/tests/unit/test_episode_photo_domain.py::test_a_photo_with_a_bad_image_writes_nothing"
 
@@ -206,7 +206,7 @@ prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_stric
 [[guarda]]
 nombre = "m_registro_guarda_en_otro_esquema: la guarda de StrictTrue se admite delante de cualquier esquema"
 archivo = "backend/src/vigia_platform/ledger/registry.py"
-buscar = "        and inner.get(\"type\") == \"literal\"\n        and list(inner.get(\"expected\", ())) == [True]\n"
+buscar = "        and inner.get(\"type\") == \"literal\"\n        and _only_true(inner.get(\"expected\"))\n"
 reemplazar = ""
 prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_is_by_function_and_by_the_literal_it_guards"
 
@@ -216,6 +216,41 @@ archivo = "backend/src/vigia_platform/ledger/registry.py"
 buscar = "                or _is_strict_true(node, target)\n"
 reemplazar = ""
 prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_guard_of_the_contract_is_accepted_and_only_narrows"
+
+[[guarda]]
+nombre = "m_imagen_al_monton: la imagen rechazada también se inserta (y se revierte)"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "                if violation is None:\n                    previous = await self._claim(transaction, row)\n                else:\n                    previous = await self._existing(transaction, row)\n"
+reemplazar = "                previous = await self._claim(transaction, row)\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_rejected_image_never_reaches_the_heap_nor_the_toast"
+
+[[guarda]]
+nombre = "m_conflicto_sin_insert_perdido: con la imagen rechazada no se consulta la foto ya aceptada"
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+buscar = "        return None if stored is None else self._resolve(stored, row)\n"
+reemplazar = "        return None\n"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_rejected_image_with_a_taken_photo_id_is_still_a_conflict"
+
+[[guarda]]
+nombre = "m_strict_true_por_igualdad: el literal se compara con == (Literal[1] pasa)"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "len(expected) == 1 and expected[0] is True"
+reemplazar = "len(expected) == 1 and expected[0] == True"
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_needs_a_literal_of_exactly_true_by_identity"
+
+[[guarda]]
+nombre = "m_strict_true_varios_valores: un literal con más valores que True pasa"
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+buscar = "len(expected) == 1 and expected[0] is True"
+reemplazar = "len(expected) >= 1 and expected[0] is True"
+prueba = "backend/tests/properties/test_registry_metaproperty.py::test_the_strict_true_exemption_needs_a_literal_of_exactly_true_by_identity"
+
+[[guarda]]
+nombre = "m_check_sin_tope_tamano: la base admite size_bytes por encima de 204 800"
+archivo = "backend/migrations/versions/gob_0042_episode_photo.py"
+buscar = "CHECK (size_bytes BETWEEN 1 AND 204800)"
+reemplazar = "CHECK (size_bytes >= 1)"
+prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_the_check_bounds_the_declared_size"
 
 [[guarda]]
 nombre = "m_check_sin_xor: la base admite imagen y motivo a la vez"
@@ -237,6 +272,21 @@ archivo = "backend/src/vigia_platform/shared/api/declarations.py"
 buscar = "    EPISODE_PHOTO = (\"post_episode_photo\", \"POST\", \"/episode-photos\", 307_200)\n"
 reemplazar = "    EPISODE_PHOTO = (\"post_episode_photo\", \"POST\", \"/episode-photos\", 262_144)\n"
 prueba = "backend/tests/integration/test_node_api_episode_photos.py::test_a_body_over_307200_bytes_is_payload_too_large"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "violation = None if image is None or data is None else image_violation(image, data)"
+motivo = "la cubren m_sin_imagen_verificada y m_imagen_al_monton"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/fleet/application/episode_photos.py"
+texto = "if violation is None:"
+motivo = "la cubre m_imagen_al_monton"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/ledger/registry.py"
+texto = "return isinstance(expected, list | tuple) and len(expected) == 1 and expected[0] is True"
+motivo = "la cubren m_strict_true_por_igualdad, m_strict_true_varios_valores y m_registro_guarda_en_otro_esquema"
 
 [[exenta]]
 archivo = "backend/migrations/versions/gob_0042_episode_photo.py"

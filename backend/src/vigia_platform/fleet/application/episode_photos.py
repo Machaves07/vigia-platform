@@ -190,18 +190,24 @@ class EpisodePhotoService:
             canonical_sha256=canonical_sha256(submission),
             platform_record_id=uuid7(deps.clock),
         )
+        # La imagen se mira en memoria, antes de la transacción: una imagen que no pasa nunca llega
+        # a la base, ni como tupla muerta del montón ni en el WAL (A-75, A-112). El código que
+        # recibe el nodo sigue siendo el de BR-GOB-84: la idempotencia (5) antes que la imagen (6).
+        violation = None if image is None or data is None else image_violation(image, data)
         attributes = {"node_id": str(node.node_id), "zone_id": str(zone_id)}
         async with deps.database.transaction(node.context) as transaction:
-            # (5) idempotencia: la fila entra, o la que ya estaba decide.
+            # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada
+            # solo se consulta la que ya estaba, sin INSERT.
             with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):
-                previous = await self._claim(transaction, row)
+                if violation is None:
+                    previous = await self._claim(transaction, row)
+                else:
+                    previous = await self._existing(transaction, row)
             if previous is not None:
                 return previous
             # (6) imagen.
-            if image is not None and data is not None:
-                violation = image_violation(image, data)
-                if violation is not None:
-                    raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)
+            if violation is not None:  # paso 6: el rechazo de la imagen, sin fila escrita
+                raise IngestRejected(violation.code, field=violation.field, zone_id=zone_id)
             # (7) antigüedad, catálogo y cámara.
             with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):
                 await self._check_catalog(transaction, node, zone_id, submission, fact)
@@ -226,6 +232,18 @@ class EpisodePhotoService:
         stored = await store.stored(transaction, row.photo_id)
         if stored is None:  # pragma: no cover - la clave existe si el INSERT chocó con ella
             raise RuntimeError("foto del episodio sin fila tras el conflicto de clave")
+        return self._resolve(stored, row)
+
+    async def _existing(self, transaction: Transaction, row: EpisodePhotoRow) -> IngestReply | None:
+        """El paso 5 sin ``INSERT`` (imagen rechazada): ``None`` si no hay fila con ese
+        ``photo_id``; si la hay, ``idempotency_conflict`` (un cuerpo con una imagen que no pasa
+        nunca es el de una foto aceptada)."""
+        stored = await self._deps.store.stored(transaction, row.photo_id)
+        return None if stored is None else self._resolve(stored, row)
+
+    @staticmethod
+    def _resolve(stored: StoredPhoto, row: EpisodePhotoRow) -> IngestReply:
+        """``accepted_duplicate`` con el recibo original, o ``idempotency_conflict``."""
         if stored.canonical_sha256 != row.canonical_sha256:
             raise IngestRejected(
                 RejectionCode.IDEMPOTENCY_CONFLICT, field="photo_id", zone_id=row.zone_id

@@ -559,8 +559,14 @@ def _is_strict_true(node: Mapping[str, Any], function: object) -> bool:
         and function is _STRICT_TRUE_GUARD
         and isinstance(inner, Mapping)
         and inner.get("type") == "literal"
-        and list(inner.get("expected", ())) == [True]
+        and _only_true(inner.get("expected"))
     )
+
+
+def _only_true(expected: object) -> bool:
+    """El literal admite exactamente ``True``, comparado por identidad: ``Literal[1]`` no vale
+    (``1 == True`` en Python) ni un literal con más valores."""
+    return isinstance(expected, list | tuple) and len(expected) == 1 and expected[0] is True
 
 
 _SEQUENCE_SCHEMAS: Final = frozenset({"list", "tuple", "set", "frozenset"})
