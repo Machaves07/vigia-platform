@@ -1769,7 +1769,8 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             *U02_RECORD_TYPES,
             *(d for d in COVERAGE_TYPES if d.record_type not in fleet_names),
             *ADMISSION_TYPES,
-            *(compiled.definition for compiled in fleet_types.latest()),
+            # Todas las versiones, en orden (``ingest_rejected`` está en la 1 y la 2, VIG-457).
+            *(compiled.definition for compiled in fleet_types.all_versions()),
         ):
             registry.register(definition)
         register_loop_record_types(registry)

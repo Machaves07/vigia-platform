@@ -212,9 +212,12 @@ def _published(
     payload_version: int | None = None,
     changed_fields: tuple[str, ...] = ("standards",),
     source_key: str | None = None,
+    payload_zone: str | None = None,
 ) -> str:
     """Un ``catalog_version_published`` histórico (v1): firma sintética de baja entropía."""
     payload = _catalog_v1_1_0(catalog_version if payload_version is None else payload_version)
+    if payload_zone is not None:
+        payload["zone_id"] = payload_zone
     envelope = {
         "payload": payload,
         "payload_canonical_sha256": hashlib.sha256(canonicalize(payload)).hexdigest(),
@@ -285,8 +288,12 @@ def test_the_v1_envelope_is_the_one_of_v1_1_0() -> None:
             _published(4, payload_version=3),
             "el sobre firmado es de otra zona o de otra versión del catálogo",
         ),
+        (
+            _published(3, payload_zone="5d6e7f80-9a1b-4c2d-ae3f-4b5c6d7e8f90"),
+            "el sobre firmado es de otra zona o de otra versión del catálogo",
+        ),
     ],
-    ids=["source_key", "changed_fields", "envelope"],
+    ids=["source_key", "changed_fields", "envelope", "envelope_zone"],
 )
 def test_the_frozen_v1_keeps_the_rules_between_fields(document: str, message: str) -> None:
     with pytest.raises(ValidationError, match=message):
