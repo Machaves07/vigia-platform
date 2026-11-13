@@ -138,8 +138,13 @@ def test_exactly_the_26_types_and_the_15_events_are_declared() -> None:
     assert len(U03_EVENTS) == 15
 
 
-LATEST_VERSIONS: Final = {"walk_test_result": 2}
-"""Tipos con una versión posterior a la 1 (TASK-216 amplía el acta); la 1 sigue registrada."""
+LATEST_VERSIONS: Final = {
+    "walk_test_result": 2,
+    "catalog_version_published": 2,
+    "ingest_rejected": 2,
+}
+"""Tipos con una versión posterior a la 1 (TASK-216 amplía el acta; VIG-457, los contratos v1.4.0 y
+v1.5.0 amplían el sobre del catálogo y ``record_kind``); la 1 sigue registrada."""
 
 
 def test_every_type_is_written_by_u03_in_the_plant_chain_at_version_1() -> None:
