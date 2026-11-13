@@ -79,6 +79,7 @@ export type BodyOperationId =
 export type QueryOperationId =
   | 'catalog_history_zones__zone_id__catalog_versions_get'
   | 'commissioning_clips_zones__zone_id__commissioning_clips_get'
+  | 'episode_photos_zones__zone_id__episode_photos_get'
   | 'fleet_node_fleet_nodes__node_id__get'
   | 'get_adoption_accreditation_adoption_get'
   | 'get_exposure_accreditation_exposure_get'

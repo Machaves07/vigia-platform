@@ -58,6 +58,12 @@ class Ids:
     """Paso abierto de esa sesión (VIG-150)."""
     commissioning_record: uuid.UUID
     """Acta cerrada de otra sesión de la zona (VIG-158)."""
+    episode_zone: uuid.UUID = field(default_factory=uuid7)
+    """Zona en ``commissioning`` (sin compuerta de uso aprobada) con un episodio de la sombra
+    (TASK-573): la zona de los recursos de U-04 ya está en ``productive`` y su listado sería
+    ``not_found`` también para la instaladora."""
+    episode_photo: uuid.UUID = field(default_factory=uuid7)
+    """Foto del episodio con imagen sintética en ``episode_zone`` (TASK-573, A-112)."""
     finding: uuid.UUID = field(default_factory=uuid7)
     detection: uuid.UUID = field(default_factory=uuid7)
     action: uuid.UUID = field(default_factory=uuid7)

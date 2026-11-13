@@ -215,6 +215,63 @@ async def test_the_provider_reads_only_the_conceded_plant(app: Any, world: World
         assert result == INSUFFICIENT_PRIVILEGE, (target.plant_id, result)
 
 
+async def _delete(
+    connection: Any,
+    organization_id: uuid.UUID,
+    target: FleetScope,
+    *,
+    actor_kind: str = "user",
+    concession_id: uuid.UUID | None = None,
+) -> int:
+    """Cuántas fotos de ``target`` borra (y revierte) un ``DELETE`` con ese contexto."""
+    deleted = -1
+    try:
+        async with connection.transaction():
+            await set_scope(
+                connection, organization_id, actor_kind=actor_kind, concession_id=concession_id
+            )
+            status = await connection.execute(
+                "DELETE FROM fleet.episode_photo WHERE organization_id = $1 AND plant_id = $2",
+                target.organization_id,
+                target.plant_id,
+            )
+            deleted = int(status.split()[-1])
+            raise _Rollback
+    except _Rollback:
+        pass
+    return deleted
+
+
+async def _update(connection: Any, organization_id: uuid.UUID) -> str:
+    """``ok`` o el SQLSTATE de un ``UPDATE`` (revertido) de las fotos propias."""
+    try:
+        async with connection.transaction():
+            await set_scope(connection, organization_id)
+            await connection.execute("UPDATE fleet.episode_photo SET image_absent_reason = NULL")
+            raise _Rollback
+    except asyncpg.PostgresError as error:
+        return str(error.sqlstate)
+    except _Rollback:
+        return "ok"
+
+
+@pytest.mark.asyncio
+async def test_the_purge_privilege_deletes_only_inside_the_organization_and_the_concession(
+    app: Any, world: World
+) -> None:
+    """TASK-573 (``gob_0043``): ``vigia_app`` borra, pero la RLS acota el ``DELETE`` como la
+    lectura: nada de otra organización ni, bajo concesión, de otra planta. ``UPDATE``, nunca."""
+    a, b = world.identity.a.organization_id, world.identity.b.organization_id
+    # Con el contexto de B, ninguna foto de A; con el de A, la suya sí (la guarda no es «nada»).
+    assert await _delete(app, b, world.conceded) == 0
+    assert await _delete(app, a, world.conceded) == 1
+    provider = {"actor_kind": PROVIDER, "concession_id": world.concession_id}
+    assert await _delete(app, a, world.other_plant, **provider) == 0
+    assert await _delete(app, b, world.other_organization, **provider) == 0
+    assert await _delete(app, a, world.conceded, **provider) == 1
+    assert await _update(app, a) == INSUFFICIENT_PRIVILEGE
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("policy", ["provider_concession_scope", "organization_isolation"])
 async def test_removing_a_policy_is_detected(superuser: Any, world: World, policy: str) -> None:

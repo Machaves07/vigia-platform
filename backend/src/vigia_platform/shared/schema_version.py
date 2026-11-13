@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 42
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0042`` (la tabla
+MINIMUM_SCHEMA_VERSION: Final = 43
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0043`` (el ``DELETE`` de
+``vigia_app`` sobre ``fleet.episode_photo`` con el que ``purge_episode_photos`` borra las fotos
+vencidas o de una zona en ``productive``, TASK-573), que incluye ``gob_0042`` (la tabla
 ``fleet.episode_photo`` de la foto del episodio de la sombra, TASK-572), que incluye ``laz_0041``
 (la columna ``loop.assistant_request.rejection_reason`` que el consumidor del asistente escribe
 al rechazar una salida y la consulta de estado lee, VIG-344), que incluye ``laz_0040`` (la frontera

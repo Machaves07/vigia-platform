@@ -15,7 +15,7 @@ backend no instala CDK) y se contrastan con el catálogo:
 - los umbrales copiados en la pila son los del núcleo: objetivos p95 de NFR-NUC-01, 26 h de las
   tareas de la condición y ``RESTORE_DRILL_OVERDUE_DAYS``;
 - U-03 (VIG-167): una alarma ``latency-node-*`` por cada ruta de ``NodeRoute`` que ``vigia-api``
-  publica; las siete tareas de ``U03_TASKS`` con su alarma ``periodic-task-stale-*`` a tres
+  publica; las ocho tareas de ``U03_TASKS`` con su alarma ``periodic-task-stale-*`` a tres
   cadencias; las métricas de U-03 fuera de ``PENDING_UNIT_METRICS``, y ``node_id`` solo en los
   contadores y medidores por nodo del catálogo (NFR-GOB-13).
 
@@ -256,11 +256,12 @@ def test_certificate_and_ingest_routes_are_contract_routes() -> None:
     }
 
 
-def test_the_seven_u03_tasks_have_their_stale_alarm_at_three_cadences() -> None:
-    """Prueba cruzada contra el catálogo real del worker (``U03_TASKS``, VIG-163)."""
+def test_the_eight_u03_tasks_have_their_stale_alarm_at_three_cadences() -> None:
+    """Prueba cruzada contra el catálogo real del worker (``U03_TASKS``, VIG-163 y TASK-573)."""
     ages: Mapping[str, int] = TABLE["PERIODIC_TASK_MAX_AGE_SECONDS"]
     pending: Mapping[str, str] = TABLE["PENDING_UNIT_TASKS"]
-    assert len(U03_TASKS) == 7
+    assert len(U03_TASKS) == 8
+    assert ages["purge_episode_photos"] == 72 * 3600  # diaria, como las otras dos diarias
     assert task_problems(ages, pending) == []
     assert set(TABLE["FLEET_PERIODIC_TASKS"]) == set(U03_TASKS)
     assert not set(pending) & set(U03_TASKS)

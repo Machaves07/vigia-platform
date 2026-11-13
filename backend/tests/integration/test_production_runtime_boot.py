@@ -90,8 +90,9 @@ STOP_SECONDS: Final = 150.0
 """Tope de la prueba para la parada ordenada (el worker espera hasta 115 s)."""
 U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
-U03_TASKS: Final = 7
-"""Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
+U03_TASKS: Final = 8
+"""Las ocho tareas de U-03 (VIG-163, TASK-227; ``purge_episode_photos``, TASK-573): la raíz las
+registra en los tres procesos."""
 U04_TASKS: Final = 10
 """``review_reminders`` (TASK-309), ``monthly_package`` (TASK-342 a 344, VIG-239),
 ``verify_loop_projection`` (TASK-306, VIG-221), ``email_delivery_events_poll`` (TASK-325),

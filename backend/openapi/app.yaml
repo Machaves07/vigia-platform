@@ -3214,6 +3214,97 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/episode-photos":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Episodios de la sombra de la zona (metadatos sin imagen), el más reciente primero"
+      "operationId": "episode_photos_zones__zone_id__episode_photos_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 36
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Limit"
+        - "name": "from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "To"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EpisodePhotosOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/episode-photos/{photo_id}/image":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Imagen difuminada de un episodio de la sombra (auditada en cada petición)"
+      "operationId": "episode_photo_image_episode_photos__photo_id__image_get"
+      "parameters":
+        - "name": "photo_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Photo Id"
+      "responses":
+        "200":
+          "description": "JPEG difuminado del episodio (mismo origen, no-store); la sha256 se verifica antes de servirlo"
+          "content":
+            "image/jpeg":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/api/nodes/clip-uploads":
     "post":
       "tags":
@@ -9422,6 +9513,148 @@
         - "max_segment_ms"
       "title": "EpisodeParameters"
       "description": "Agrupación de observaciones en episodios de zona y tope de duración de cada tramo (BR-CTR-33, BR-CTR-34)."
+    "EpisodePhotoImageOut":
+      "properties":
+        "width":
+          "type": "integer"
+          "title": "Width"
+        "height":
+          "type": "integer"
+          "title": "Height"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "blur_params_version":
+          "type": "string"
+          "title": "Blur Params Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "width"
+        - "height"
+        - "size_bytes"
+        - "blur_params_version"
+      "title": "EpisodePhotoImageOut"
+      "description": "Lo declarado de la imagen guardada: nunca sus bytes, su suma ni una URL."
+    "EpisodePhotoOut":
+      "properties":
+        "photo_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Photo Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "episode_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Episode Id"
+        "segment_index":
+          "type": "integer"
+          "title": "Segment Index"
+        "classified_as":
+          "type": "string"
+          "title": "Classified As"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "standard":
+          "$ref": "#/components/schemas/EpisodePhotoStandardOut"
+        "max_confidence":
+          "type": "number"
+          "title": "Max Confidence"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "ended_at":
+          "type": "string"
+          "title": "Ended At"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "camera_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Camera Id"
+        "frame_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Frame At"
+        "image":
+          "anyOf":
+            - "$ref": "#/components/schemas/EpisodePhotoImageOut"
+            - "type": "null"
+        "image_absent_reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Image Absent Reason"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "photo_id"
+        - "zone_id"
+        - "node_id"
+        - "episode_id"
+        - "segment_index"
+        - "classified_as"
+        - "family"
+        - "standard"
+        - "max_confidence"
+        - "started_at"
+        - "ended_at"
+        - "received_at"
+        - "expires_at"
+        - "camera_id"
+        - "frame_at"
+        - "image"
+        - "image_absent_reason"
+      "title": "EpisodePhotoOut"
+      "description": "Un episodio de la sombra: sus metadatos y la imagen o el motivo de su ausencia."
+    "EpisodePhotoStandardOut":
+      "properties":
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "version":
+          "type": "integer"
+          "title": "Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+      "title": "EpisodePhotoStandardOut"
+    "EpisodePhotosOut":
+      "properties":
+        "photos":
+          "items":
+            "$ref": "#/components/schemas/EpisodePhotoOut"
+          "type": "array"
+          "title": "Photos"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "photos"
+        - "next_after"
+      "title": "EpisodePhotosOut"
     "EvidenceAttachmentBody":
       "properties":
         "attachment_id":

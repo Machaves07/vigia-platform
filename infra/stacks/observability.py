@@ -131,6 +131,8 @@ PERIODIC_TASK_MAX_AGE_SECONDS: Final = {
     "mark_orphan_clips": 10_800,  # 3 h
     "expire_walk_test_sessions": 259_200,  # 72 h
     "alert_expiring_certificates": 259_200,
+    # TASK-573 (A-112): la purga diaria de la foto del episodio de la sombra.
+    "purge_episode_photos": 259_200,
 }
 """``periodic_task_last_success_age_seconds`` por tarea: una alarma ``periodic-task-stale-*``."""
 
@@ -205,9 +207,11 @@ FLEET_PERIODIC_TASKS: Final = (
     "mark_orphan_clips",
     "expire_walk_test_sessions",
     "alert_expiring_certificates",
+    "purge_episode_photos",
 )
-"""Las siete tareas de U-03 (LC-GOB-18, ``U03_TASKS`` del worker), estén o no pendientes: el panel
-de duración, resultado y edad del último éxito las recorre todas (nota de VIG-155)."""
+"""Las ocho tareas de U-03 (LC-GOB-18 y TASK-573, ``U03_TASKS`` del worker), estén o no
+pendientes: el panel de duración, resultado y edad del último éxito las recorre todas (nota de
+VIG-155)."""
 
 FLEET_PER_NODE_METRICS: Final = (
     "fleet_heartbeats_total",
@@ -386,6 +390,9 @@ APPLICATION_ALARM_METRICS: Final = {
         ("periodic_task_last_success_age_seconds", ("task",)),
     ),
     "periodic-task-stale-alert-expiring-certificates": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-purge-episode-photos": (
         ("periodic_task_last_success_age_seconds", ("task",)),
     ),
     "latency-node-findings": (("http_server_duration_ms", ("route",)),),

@@ -1,4 +1,4 @@
-"""PR-GOB-12 sobre las siete tareas periódicas de U-03 (TASK-228; LC-GOB-18; D-7, nota T-07).
+"""PR-GOB-12 sobre las ocho tareas periódicas de U-03 (TASK-228 y 573; LC-GOB-18; D-7, nota T-07).
 
 **Catálogo de casos** (``TASK_CASES``): una entrada por tarea del ``PeriodicTaskRegistry`` que
 compone la raíz con **todas** las unidades registradas (``registered_units``), con su clase:
@@ -126,13 +126,15 @@ _U04_GROUPING_WHY = (
 )
 
 TASK_CASES: Final[dict[str, TaskCase]] = {
-    # --- U-03 (LC-GOB-18): las seis por organización y la global (D-7) ---
+    # --- U-03 (LC-GOB-18): las siete por organización y la global (D-7) ---
     "detect_mute_nodes": TaskCase(TaskKind.PER_ORGANIZATION),
     "evaluate_fleet_alarms": TaskCase(TaskKind.PER_ORGANIZATION),
     "expire_enrollment_codes": TaskCase(TaskKind.PER_ORGANIZATION),
     "mark_orphan_clips": TaskCase(TaskKind.PER_ORGANIZATION),
     "expire_walk_test_sessions": TaskCase(TaskKind.PER_ORGANIZATION),
     "alert_expiring_certificates": TaskCase(TaskKind.PER_ORGANIZATION),
+    # TASK-573 (A-112): la purga de la foto del episodio vencida o de una zona en productive.
+    "purge_episode_photos": TaskCase(TaskKind.PER_ORGANIZATION),
     REVOCATION_LIST: TaskCase(
         TaskKind.GLOBAL, "lista global de vigia-node-ca: excepción D-7 (nota T-07)"
     ),
@@ -276,7 +278,7 @@ def test_every_registered_task_has_its_isolation_case() -> None:
         else:
             assert case.kind is TaskKind.INHERITED and case.why, task.task_name
             assert task.iteration is TaskIteration.PER_ORGANIZATION, task.task_name
-    assert len(PER_ORGANIZATION_TASKS) == 6
+    assert len(PER_ORGANIZATION_TASKS) == 7
     assert sorted(n for n, c in TASK_CASES.items() if c.kind is TaskKind.GLOBAL) == sorted(
         [REVOCATION_LIST, "email_delivery_events_poll"]
     )
@@ -370,7 +372,7 @@ def _iteration_leaks(
     )
 
 
-# --- Las seis por organización -------------------------------------------------------------------
+# --- Las siete por organización ------------------------------------------------------------------
 
 
 @pytest.mark.integration

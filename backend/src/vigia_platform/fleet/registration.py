@@ -6,10 +6,11 @@
   ``register_fleet_record_types``, trece y trece) y los 15 eventos (``register_catalog_event_types``
   y ``register_fleet_event_types``, cinco y diez) de VIG-139, todos, también los que todavía no
   escribe ninguna ruta;
-- **las siete tareas periódicas** de U-03 con sus nombres y cadencias definitivos (nota de
-  cadencias de BL §2.6, NFR-GOB-12 y la nota de U-03 en ``domain-entities.md`` §4.3 de U-02), con
-  las funciones ``register_*`` de cada módulo: ``catalog_tasks`` (``expire_walk_test_sessions``) y
-  ``fleet_tasks`` (las otras seis). Las seis por organización heredan del planificador de U-02 el
+- **las ocho tareas periódicas** de U-03 con sus nombres y cadencias definitivos (nota de
+  cadencias de BL §2.6, NFR-GOB-12 y la nota de U-03 en ``domain-entities.md`` §4.3 de U-02; desde
+  TASK-573, ``purge_episode_photos``, diaria, A-112), con las funciones ``register_*`` de cada
+  módulo: ``catalog_tasks`` (``expire_walk_test_sessions``) y ``fleet_tasks`` (las otras siete).
+  Las siete por organización heredan del planificador de U-02 el
   arrendamiento, una transacción y un contexto por organización, el cursor y las métricas
   (LC-NUC-24); ``regenerate_revocation_list`` es la única ``global`` (D-7);
 - **la comprobación de arranque** (``missing_u03_registrations``, NFR-GOB-20 y BR-NUC-52): la
@@ -18,7 +19,7 @@
   tarea cambió de cadencia, unidad o iteración, ``vigia-api``, ``vigia-worker`` y ``vigia-admin``
   no arrancan y la salida nombra lo que falta (``RegistrationIncomplete``).
 
-Los tres procesos registran las siete tareas (``OutboxCatalog.synchronize`` no arranca si la base
+Los tres procesos registran las ocho tareas (``OutboxCatalog.synchronize`` no arranca si la base
 tiene una tarea que el proceso no registra), pero solo el worker las ejecuta: lo que necesita un
 depósito o una variable que el proceso no tiene (``vigia-evidence`` para ``mark_orphan_clips``;
 ``VIGIA_NODE_CA_KEY_ARN``, ``VIGIA_EDGE_BUCKET`` y ``VIGIA_NODE_TRUST_STORE_ARN`` para la lista de
@@ -50,6 +51,10 @@ from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
 from vigia_platform.fleet.application.enrollment_code_expiry import (
     EnrollmentCodeExpirer,
     register_expire_enrollment_codes,
+)
+from vigia_platform.fleet.application.episode_photo_purge import (
+    EpisodePhotoPurger,
+    register_purge_episode_photos,
 )
 from vigia_platform.fleet.application.expiring_certificates import (
     ExpiringCertificateAlerter,
@@ -171,8 +176,11 @@ U03_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     "alert_expiring_certificates": (Schedule.daily(hour=3), _EACH_ORGANIZATION),
     # Barrido de 60 s con la marca; la regeneración diaria la decide el manejador (D-7).
     "regenerate_revocation_list": (Schedule.every(60), TaskIteration.GLOBAL),
+    # TASK-573 (A-112): la foto del episodio vencida o de una zona que pasó a productive.
+    "purge_episode_photos": (Schedule.daily(hour=4), _EACH_ORGANIZATION),
 }
-"""Las siete tareas de U-03: nombre → (cadencia, iteración); todas con ``unit = U-03``."""
+"""Las ocho tareas de U-03 (las siete de TASK-227 y la purga de la foto del episodio de TASK-573):
+nombre → (cadencia, iteración); todas con ``unit = U-03``."""
 
 
 def missing_u03_registrations(
@@ -214,7 +222,8 @@ def catalog_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> Non
 
 
 def fleet_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
-    """Las seis tareas de ``fleet`` con sus manejadores (VIG-152, VIG-155, VIG-161 y TASK-227)."""
+    """Las siete tareas de ``fleet`` con sus manejadores (VIG-152, VIG-155, VIG-161, TASK-227 y
+    TASK-573)."""
     alarms = AlarmDependencies(
         clock=services.clock, outbox=services.outbox, metrics=services.metrics
     )
@@ -229,6 +238,12 @@ def fleet_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
             store=ClipObjectStore(_EvidenceOnFirstUse(services)),
             clock=services.clock,
             metrics=services.metrics,
+        ),
+    )
+    register_purge_episode_photos(
+        registry,
+        EpisodePhotoPurger(
+            database=services.database, clock=services.clock, metrics=services.metrics
         ),
     )
     edge = _EdgeOnFirstUse(services)

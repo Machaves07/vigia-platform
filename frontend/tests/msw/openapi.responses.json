@@ -1657,6 +1657,41 @@
       }
     },
     {
+      "operationId": "episode_photos_zones__zone_id__episode_photos_get",
+      "method": "get",
+      "path": "/zones/{zone_id}/episode-photos",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/EpisodePhotosOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "episode_photo_image_episode_photos__photo_id__image_get",
+      "method": "get",
+      "path": "/episode-photos/{photo_id}/image",
+      "responses": {
+        "200": {
+          "image/jpeg": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "post_clip_upload",
       "method": "post",
       "path": "/api/nodes/clip-uploads",
@@ -7779,6 +7814,182 @@
       "required": [
         "grouping_window_ms",
         "max_segment_ms"
+      ]
+    },
+    "EpisodePhotoImageOut": {
+      "properties": {
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "blur_params_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "size_bytes",
+        "blur_params_version"
+      ]
+    },
+    "EpisodePhotoOut": {
+      "properties": {
+        "photo_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "zone_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "node_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "episode_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "segment_index": {
+          "type": "integer"
+        },
+        "classified_as": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "standard": {
+          "$ref": "#/components/schemas/EpisodePhotoStandardOut"
+        },
+        "max_confidence": {
+          "type": "number"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "ended_at": {
+          "type": "string"
+        },
+        "received_at": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "camera_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/EpisodePhotoImageOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_absent_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "photo_id",
+        "zone_id",
+        "node_id",
+        "episode_id",
+        "segment_index",
+        "classified_as",
+        "family",
+        "standard",
+        "max_confidence",
+        "started_at",
+        "ended_at",
+        "received_at",
+        "expires_at",
+        "camera_id",
+        "frame_at",
+        "image",
+        "image_absent_reason"
+      ]
+    },
+    "EpisodePhotoStandardOut": {
+      "properties": {
+        "standard_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "standard_id",
+        "version"
+      ]
+    },
+    "EpisodePhotosOut": {
+      "properties": {
+        "photos": {
+          "items": {
+            "$ref": "#/components/schemas/EpisodePhotoOut"
+          },
+          "type": "array"
+        },
+        "next_after": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "photos",
+        "next_after"
       ]
     },
     "EvidenceAttachmentBody": {

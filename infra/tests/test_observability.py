@@ -608,9 +608,10 @@ def test_the_four_provisional_latency_targets_say_so(pilot: Synthesized) -> None
             assert ("NFR-GOB-01" in description) is not provisional, key
 
 
-def test_u03_periodic_tasks_have_their_seven_stale_alarms(deployment: Synthesized) -> None:
-    """Siete ``periodic-task-stale-*`` de U-03 con las tres cadencias (LC-GOB-18): 180 s en 3
-    periodos de 1 min, 3 h y 72 h. La prueba cruzada del backend las contrasta con ``U03_TASKS``."""
+def test_u03_periodic_tasks_have_their_eight_stale_alarms(deployment: Synthesized) -> None:
+    """Ocho ``periodic-task-stale-*`` de U-03 con las tres cadencias (LC-GOB-18; la purga de la
+    foto del episodio, TASK-573): 180 s en 3 periodos de 1 min, 3 h y 72 h. La prueba cruzada del
+    backend las contrasta con ``U03_TASKS``."""
     cadences = {
         "detect_mute_nodes": 180,
         "evaluate_fleet_alarms": 180,
@@ -619,6 +620,7 @@ def test_u03_periodic_tasks_have_their_seven_stale_alarms(deployment: Synthesize
         "mark_orphan_clips": 3 * 3600,
         "expire_walk_test_sessions": 72 * 3600,
         "alert_expiring_certificates": 72 * 3600,
+        "purge_episode_photos": 72 * 3600,
     }
     assert set(FLEET_PERIODIC_TASKS) == set(cadences)
     assert not set(PENDING_UNIT_TASKS) & set(cadences)

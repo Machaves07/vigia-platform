@@ -141,6 +141,7 @@ from vigia_platform.fleet.application.enrollment_codes import (
     NodeCaRoots,
     RootsUnavailable,
 )
+from vigia_platform.fleet.application.episode_photo_read import EpisodePhotoReader
 from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
@@ -878,6 +879,14 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 audit=services.audit,
                 provider_organization_id=services.provider_organization_id,
+            ),
+            # TASK-573 (A-112, QF10): los episodios de la sombra para la instaladora en SCR-06; su
+            # purga diaria, en ``fleet_tasks``.
+            episode_photos=EpisodePhotoReader(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
             ),
         )
     }

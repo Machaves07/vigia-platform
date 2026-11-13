@@ -164,6 +164,8 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         "mark_orphan_clips",
         "expire_walk_test_sessions",
         "alert_expiring_certificates",
+        # U-03 (TASK-573, A-112): la purga de la foto del episodio, también de 20 o más caracteres.
+        "purge_episode_photos",
         # U-04 (TASK-326): catálogo completo desde el arranque, también los nombres largos
         # que el registro dinámico rechaza por parecer material sensible.
         "evaluate_deadlines",
@@ -235,6 +237,8 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     ),
     # Foto del episodio de la sombra (TASK-572, A-112): si el registro trae imagen o su motivo.
     "image_presence": ("present", "absent"),
+    # Su purga (TASK-573): la causa del borrado, vencida o zona en productive.
+    "cause": ("expired", "productive"),
     # U-04 (TASK-349, LC-LAZ-38 a 40): fijas aquí porque varias (``rejected_blocked_vocabulary``,
     # ``email_delivery_events``…) tienen forma de token y ``register`` las rechazaría. Son las
     # dimensiones de ``loop.observability.metrics`` y los atributos del trabajo largo

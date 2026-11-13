@@ -1,4 +1,4 @@
-"""PR-GOB-32: las siete tareas de U-03 con arranques, muertes y solapamientos (TASK-227).
+"""PR-GOB-32: las ocho tareas de U-03 con arranques, muertes y solapamientos (TASK-227 y 573).
 
 ``RuleBasedStateMachine`` (perfil ``ci``, semilla fija y semilla de la sesión registradas por
 ``tests/conftest.py``) con el **planificador real** (``PeriodicScheduler`` con ``SqlLeaseStore``)
@@ -13,7 +13,8 @@ nodo mudo con la cola por encima del umbral y la credencial a punto de vencer
 (``detect_mute_nodes``, ``evaluate_fleet_alarms``, ``alert_expiring_certificates``; NFR-GOB-47),
 un código de alta vencido, una
 concesión de clip de más de 24 h sin registro, una sesión de walk-test sin actividad desde hace 8
-días y una marca de la lista de revocación. Las reglas:
+días, una foto del episodio vencida (``purge_episode_photos``, TASK-573) y una marca de la lista
+de revocación. Las reglas:
 
 - ``run``: un worker ejecuta lo que vence; ``overlap``: los dos a la vez (``asyncio.gather``);
 - ``crash``: el worker ejecuta (solo o a la vez que el otro) y **muere** en la n-ésima organización
@@ -63,6 +64,7 @@ from hypothesis.stateful import (
 )
 
 from tests.conftest import CI_PROFILES, _active_profile, _seeds_for_profile
+from tests.episode_photo_support import jpeg
 from tests.fleet_credentials_support import MemoryKms, root_bundle_for
 from tests.fleet_http_support import FleetStack, fleet_stack
 from tests.fleet_inventory_support import InventoryWorld, NodeState
@@ -312,6 +314,20 @@ class Organization:
     code_id: uuid.UUID
     clip_id: uuid.UUID
     session_id: uuid.UUID
+    photo_id: uuid.UUID | None = None
+    """Foto del episodio vencida hace una hora (``purge_episode_photos``, TASK-573)."""
+
+
+_PHOTO: Final = jpeg()
+_INSERT_PHOTO: Final = (
+    "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id, node_id,"
+    " episode_id, segment_index, classified_as, family, standard_id, standard_version,"
+    " max_confidence, started_at, ended_at, received_at, expires_at, camera_id, frame_at, width,"
+    " height, size_bytes, sha256, blur_params_version, image, image_absent_reason,"
+    " canonical_sha256, platform_record_id) VALUES ($1, $2, $3, $4, $5, $6, 0, 'finding',"
+    " 'coexistence', $7, 1, 0.9, $8, $8, $8, $9, $10, $8, 320, 240, $11, $12, 'blur-v1', $13,"
+    " NULL, $14, $15)"
+)
 
 
 def _seed(stack: FleetStack, now: datetime) -> Organization:
@@ -391,7 +407,27 @@ def _seed(stack: FleetStack, now: datetime) -> Organization:
         node,
         now - timedelta(days=8),
     )
-    return Organization(organization, node, code_id, clip_id, session_id)
+    # Una foto del episodio que venció hace una hora (TASK-573).
+    photo_id = uuid.uuid4()
+    stack.execute(
+        _INSERT_PHOTO,
+        organization,
+        photo_id,
+        plant,
+        zones[0],
+        node,
+        uuid.uuid4(),
+        uuid.uuid4(),
+        now - timedelta(days=30, hours=1),
+        now - timedelta(hours=1),
+        uuid.uuid4(),
+        len(_PHOTO),
+        hashlib.sha256(_PHOTO).hexdigest(),
+        _PHOTO,
+        hashlib.sha256(photo_id.bytes).hexdigest(),
+        uuid.uuid4(),
+    )
+    return Organization(organization, node, code_id, clip_id, session_id, photo_id)
 
 
 async def _mark(stack: FleetStack, now: datetime) -> int:
@@ -602,6 +638,10 @@ class PeriodicTasks(RuleBasedStateMachine):
                 assert counts.get((organization.mute_node, kind)) == 1, (kind, counts)
             assert self._mute_transitions(organization) == 1
             assert self._statuses(organization) == ("expired", "orphan", "incomplete")
+            # La foto vencida, borrada (TASK-573): exactamente una vez, aunque hubo muertes.
+            assert not self.stack.fetch(
+                "SELECT 1 FROM fleet.episode_photo WHERE photo_id = $1", organization.photo_id
+            )
         state = self.stack.revocation_state()
         assert state["published_generation"] == state["dirty_generation"]
 

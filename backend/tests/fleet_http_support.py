@@ -8,7 +8,8 @@ de U-02 y los cinco de la flota que escriben, la bandeja con los eventos ``node_
 ``ContextAuthorizer``. ``FleetStack`` da las personas (instalador del proveedor bajo concesión,
 miembros del cliente), las peticiones y lo que quedó escrito. Desde TASK-224, también el inventario
 (``FleetInventory``) y los umbrales por planta (``FleetThresholdsService``); desde TASK-226, la
-versión objetivo (``TargetVersionService``).
+versión objetivo (``TargetVersionService``); desde TASK-573, la lectura de los episodios de la
+sombra (``EpisodePhotoReader``).
 
 Solo datos generados (NFR-CTR-43). Las marcas salen del reloj simulado, que arranca en la hora de
 la base (retro 14). Topes de las esperas de la base: 60 s (retro 15).
@@ -44,6 +45,7 @@ from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnro
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.episode_photo_read import EpisodePhotoReader
 from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
@@ -380,6 +382,12 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
                 authorizer=authz.authorizer,
                 audit=sessions.audit,
                 provider_organization_id=authz.provider_organization_id,
+            ),
+            episode_photos=EpisodePhotoReader(
+                database=database,
+                authorizer=authz.authorizer,
+                audit=sessions.audit,
+                clock=sessions.clock,
             ),
         )
         app = World(clock=sessions.clock).app(

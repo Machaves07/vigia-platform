@@ -1555,6 +1555,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/zones/{zone_id}/episode-photos': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Episodios de la sombra de la zona (metadatos sin imagen), el más reciente primero */
+    get: operations['episode_photos_zones__zone_id__episode_photos_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/episode-photos/{photo_id}/image': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Imagen difuminada de un episodio de la sombra (auditada en cada petición) */
+    get: operations['episode_photo_image_episode_photos__photo_id__image_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/nodes/clip-uploads': {
     parameters: {
       query?: never;
@@ -4636,6 +4670,87 @@ export interface components {
       grouping_window_ms: number;
       /** Max Segment Ms */
       max_segment_ms: number;
+    };
+    /**
+     * EpisodePhotoImageOut
+     * @description Lo declarado de la imagen guardada: nunca sus bytes, su suma ni una URL.
+     */
+    EpisodePhotoImageOut: {
+      /** Width */
+      width: number;
+      /** Height */
+      height: number;
+      /** Size Bytes */
+      size_bytes: number;
+      /** Blur Params Version */
+      blur_params_version: string;
+    };
+    /**
+     * EpisodePhotoOut
+     * @description Un episodio de la sombra: sus metadatos y la imagen o el motivo de su ausencia.
+     */
+    EpisodePhotoOut: {
+      /**
+       * Photo Id
+       * Format: uuid
+       */
+      photo_id: string;
+      /**
+       * Zone Id
+       * Format: uuid
+       */
+      zone_id: string;
+      /**
+       * Node Id
+       * Format: uuid
+       */
+      node_id: string;
+      /**
+       * Episode Id
+       * Format: uuid
+       */
+      episode_id: string;
+      /** Segment Index */
+      segment_index: number;
+      /** Classified As */
+      classified_as: string;
+      /** Family */
+      family: string;
+      standard: components['schemas']['EpisodePhotoStandardOut'];
+      /** Max Confidence */
+      max_confidence: number;
+      /** Started At */
+      started_at: string;
+      /** Ended At */
+      ended_at: string;
+      /** Received At */
+      received_at: string;
+      /** Expires At */
+      expires_at: string;
+      /** Camera Id */
+      camera_id: string | null;
+      /** Frame At */
+      frame_at: string | null;
+      image: components['schemas']['EpisodePhotoImageOut'] | null;
+      /** Image Absent Reason */
+      image_absent_reason: string | null;
+    };
+    /** EpisodePhotoStandardOut */
+    EpisodePhotoStandardOut: {
+      /**
+       * Standard Id
+       * Format: uuid
+       */
+      standard_id: string;
+      /** Version */
+      version: number;
+    };
+    /** EpisodePhotosOut */
+    EpisodePhotosOut: {
+      /** Photos */
+      photos: components['schemas']['EpisodePhotoOut'][];
+      /** Next After */
+      next_after: string | null;
     };
     /**
      * EvidenceAttachmentBody
@@ -12179,6 +12294,73 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['FleetAlarmPage'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  episode_photos_zones__zone_id__episode_photos_get: {
+    parameters: {
+      query?: {
+        after?: string | null;
+        limit?: number;
+        from?: string | null;
+        to?: string | null;
+      };
+      header?: never;
+      path: {
+        zone_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EpisodePhotosOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  episode_photo_image_episode_photos__photo_id__image_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        photo_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description JPEG difuminado del episodio (mismo origen, no-store); la sha256 se verifica antes de servirlo */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'image/jpeg': string;
         };
       };
       /** @description Error genérico (ApiError) */
