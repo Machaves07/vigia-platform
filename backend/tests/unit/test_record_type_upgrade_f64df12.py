@@ -21,11 +21,14 @@ actualización contra PostgreSQL 16 con las migraciones reales y un registro his
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
+from vigia_contracts.canonical import canonicalize
 
 from tests.record_type_upgrade_support import (
     F64DF12_COMMIT,
@@ -140,6 +143,154 @@ def test_the_v1_list_of_record_kinds_is_the_one_of_v1_1_0() -> None:
     with pytest.raises(ValidationError):
         registry.get("ingest_rejected", schema_version=1).validate_json(episode_photo)
     registry.get("ingest_rejected", schema_version=2).validate_json(episode_photo)
+
+
+_ZONE = "3c1f0a52-7d4e-4b8a-9e21-5f6d7c8b9a01"
+
+
+def _catalog_v1_1_0(version: int) -> dict[str, Any]:
+    """Un ``ZoneCatalog`` con la forma de v1.1.0: sin ``guard_conditions`` ni ``no_data``."""
+    return {
+        "zone_id": _ZONE,
+        "zone_code": "ZN-PRENSAS",
+        "plant_id": "7a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d",
+        "organization_id": "1f2e3d4c-5b6a-4978-8a6b-5c4d3e2f1a0b",
+        "version": version,
+        "issued_at": "2026-11-01T08:00:00.000Z",
+        "cameras": [
+            {
+                "camera_id": "9e8d7c6b-5a49-4382-a716-05f4e3d2c1b0",
+                "code": "CAM-01",
+                "role_in_zone": "primary",
+                "declared_min_fps": 10.0,
+            }
+        ],
+        "minimum_coverage": {
+            "required_count": 1,
+            "required_camera_ids": ["9e8d7c6b-5a49-4382-a716-05f4e3d2c1b0"],
+        },
+        "signals": [
+            {
+                "signal_id": "4b5c6d7e-8f90-4a1b-9c2d-3e4f5a6b7c8e",
+                "code": "SIG-ENERGIA",
+                "role": "energy",
+                "asserted_level": "high",
+                "source": {"reader": "plc-prensa", "channel": 3},
+                "description_es": "Energía de la prensa",
+            }
+        ],
+        "standards": [
+            {
+                "standard_id": "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+                "version": 1,
+                "family": "dwell",
+                "title_es": "Permanencia en la zona de la prensa",
+                "declared_text": "Nadie permanece en la zona mientras la prensa está energizada.",
+                "declared_by": {
+                    "user_id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+                    "display_name": "Coordinación SST sintética",
+                    "role": "coordinator_sst",
+                },
+                "effective_from": "2026-11-01T08:00:00.000Z",
+                "tier_policy": "tier_1_when_signal_valid",
+                "predicate": {
+                    "all_of": [{"presence": True}, {"signal_role": "energy", "value": "asserted"}],
+                    "min_duration_ms": 5000,
+                },
+            }
+        ],
+        "thresholds": {"review": 0.4, "publication": 0.7},
+        "clip_window": {"pre_seconds": 10, "post_seconds": 10},
+        "episode": {"grouping_window_ms": 3000, "max_segment_ms": 900000},
+        "commissioning_watermark": True,
+    }
+
+
+def _published(
+    catalog_version: int = 3,
+    *,
+    payload_version: int | None = None,
+    changed_fields: tuple[str, ...] = ("standards",),
+    source_key: str | None = None,
+) -> str:
+    """Un ``catalog_version_published`` histórico (v1): firma sintética de baja entropía."""
+    payload = _catalog_v1_1_0(catalog_version if payload_version is None else payload_version)
+    envelope = {
+        "payload": payload,
+        "payload_canonical_sha256": hashlib.sha256(canonicalize(payload)).hexdigest(),
+        "signature": "A" * 86 + "==",
+        "key_id": "catalog-sintetica-1",
+        "signed_at": "2026-11-01T08:00:01.000Z",
+    }
+    return json.dumps(
+        {
+            "source_key": source_key or f"{_ZONE}:{catalog_version}",
+            "zone_id": _ZONE,
+            "catalog_version": catalog_version,
+            "changed_fields": list(changed_fields),
+            "reason_es": "Ajuste del estándar de permanencia",
+            "envelope": envelope,
+        }
+    )
+
+
+def test_a_historical_v1_catalog_version_still_validates_with_its_version_and_v2() -> None:
+    registry = _registry()
+    historical = _published()
+    registry.get("catalog_version_published", schema_version=1).validate_json(historical)
+    registry.get("catalog_version_published", schema_version=2).validate_json(historical)
+
+
+def test_the_v1_envelope_is_the_one_of_v1_1_0() -> None:
+    """``guard_conditions`` (v1.2.0, A-77) no existe en la versión 1: la 2 sí la admite."""
+    registry = _registry()
+    document = json.loads(_published())
+    payload = document["envelope"]["payload"]
+    guard = {
+        "signal_id": "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d",
+        "code": "SIG-JUMBO",
+        "role": "guard",
+        "asserted_level": "high",
+        "source": {"reader": "plc-prensa", "channel": 4},
+        "description_es": "Jumbo en posición",
+    }
+    payload["signals"].append(guard)
+    payload["standards"][0]["family"] = "coexistence"
+    payload["standards"][0]["predicate"] = {
+        "all_of": [{"presence": True}, {"signal_role": "energy", "value": "asserted"}],
+        "min_duration_ms": 0,
+        "guard_conditions": [{"signal_id": guard["signal_id"], "value": "asserted"}],
+    }
+    document["envelope"]["payload_canonical_sha256"] = hashlib.sha256(
+        canonicalize(payload)
+    ).hexdigest()
+    widened = json.dumps(document)
+    with pytest.raises(ValidationError):
+        registry.get("catalog_version_published", schema_version=1).validate_json(widened)
+    registry.get("catalog_version_published", schema_version=2).validate_json(widened)
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        (
+            _published(3, source_key=f"{_ZONE}:4"),
+            "source_key debe ser <zone_id>:<catalog_version>",
+        ),
+        (
+            _published(3, changed_fields=("standards", "standards")),
+            "changed_fields no admite valores repetidos",
+        ),
+        (
+            _published(4, payload_version=3),
+            "el sobre firmado es de otra zona o de otra versión del catálogo",
+        ),
+    ],
+    ids=["source_key", "changed_fields", "envelope"],
+)
+def test_the_frozen_v1_keeps_the_rules_between_fields(document: str, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        CatalogVersionPublishedV1.__pydantic_validator__.validate_json(document, strict=True)
 
 
 def test_reintroducing_the_change_without_a_new_version_prevents_startup() -> None:
