@@ -51,7 +51,7 @@ async function requestDraft(loop: ReturnType<typeof fakeLoop>) {
 
 /** La plantilla guiada sigue: el primer porqué se guarda en el servidor. */
 async function expectGuidedTemplate(loop: ReturnType<typeof fakeLoop>, statement: string) {
-  const field = screen.getByRole('textbox', { name: `${text('scr11.statement')} 1` });
+  const field = screen.getByRole('textbox', { name: `${text('scr11.statement')} 1 (${text('components_forms.reason.required')})` });
   fireEvent.change(field, { target: { value: statement } });
   fireEvent.click(screen.getByRole('button', { name: text('scr11.save_step') }));
   await screen.findByText(text('scr11.step_saved'), { selector: '[data-part="step-sync"]' }, WAIT);

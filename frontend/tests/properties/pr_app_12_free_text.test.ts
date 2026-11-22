@@ -9,6 +9,9 @@
  * corpus acepta y les aplican transformaciones cuyo veredicto el servidor fija: insertar un
  * carácter de cada clase rechazada, insertar un fragmento de marcado, descomponer en NFD (el
  * normalizado no cambia) y cruzar los límites de longitud.
+ *
+ * Con recorte (A-126, TASK-580): el campo del lazo envía el texto sin los espacios ni saltos de
+ * línea de los extremos, y su veredicto coincide con el del oráculo sobre ese texto recortado.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +20,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
+import { reasonIssueKey, reasonVerdict, submittedText } from '@/components/ReasonField/ReasonField';
 import { checkFreeText, type FreeTextLimits, type FreeTextVerdict } from '@/ports/validation';
 import { codePointLength, type FreeTextRejection } from '@/ports/validation/freeText';
 
@@ -331,5 +335,142 @@ describe('PR-APP-12: bordes', () => {
       ok: false,
       reason: 'markup',
     });
+  });
+});
+
+/**
+ * PR-APP-12 con recorte (A-126, TASK-580): el campo del lazo (`reasonVerdict` con `loopText`) mide
+ * y envía el texto sin los espacios ni saltos de línea de los extremos. Para todo texto generado,
+ * su veredicto coincide por igualdad con el del oráculo sobre el texto **recortado**: con saltos
+ * finales, saltos intermedios, espacios no ASCII e invisibles.
+ */
+function fieldVerdictOf(
+  text: string,
+  route: string,
+): { verdict: string; normalized: string | null } {
+  const result = reasonVerdict(text, limitsOf(route), { loopText: true });
+  if (!result.ok) return { verdict: result.reason, normalized: null };
+  return { verdict: 'accepted', normalized: result.sent?.normalize('NFC') ?? null };
+}
+
+/** Espacios y saltos de línea que el campo recorta en los extremos (`White_Space`). */
+const EDGE = [
+  ' ',
+  '\t',
+  '\n',
+  '\r',
+  '\r\n',
+  '\v',
+  '\f',
+  '\u0085',
+  ' ',
+  ' ',
+  ' ',
+  ' ',
+  ' ',
+  '　',
+  '\u2028',
+  '\u2029',
+];
+const LINE_BREAKS = ['\n', '\r', '\r\n', '\v', '\f', '\u0085', '\u2028', '\u2029'];
+const INNER_SPACES = [' ', ' ', ' ', '　'];
+const EDGE_INVISIBLES = ['​', '﻿', '⁠', '­'];
+
+/** Vectores cuyo texto ya está recortado: el oráculo del texto recortado es el propio vector. */
+const trimmed = corpus.vectors.filter(
+  (vector) => vector.text !== '' && submittedText(vector.text) === vector.text,
+);
+const trimmedAccepted = trimmed.filter(
+  (vector) => vector.verdict === 'accepted' && Array.from(vector.text).length >= 2,
+);
+const padding = fc.array(fc.constantFrom(...EDGE), { maxLength: 4 }).map((parts) => parts.join(''));
+
+describe('PR-APP-12 con recorte: el campo del lazo contra el oráculo del texto recortado', () => {
+  it('hay vectores de todos los veredictos ya recortados', () => {
+    expect(new Set(trimmed.map((vector) => vector.verdict))).toEqual(new Set(corpus.verdicts));
+  });
+
+  it('espacios y saltos de línea en los extremos no cambian el veredicto ni el normalizado', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...trimmed), padding, padding, (vector, before, after) => {
+        expect(fieldVerdictOf(`${before}${vector.text}${after}`, vector.route)).toEqual({
+          verdict: vector.verdict,
+          normalized: vector.normalized,
+        });
+      }),
+    );
+  });
+
+  it('un Enter final se recorta: lo que se envía es exactamente el texto sin él', () => {
+    for (const vector of trimmedAccepted) {
+      const result = reasonVerdict(`${vector.text}\n`, limitsOf(vector.route), { loopText: true });
+      expect(result).toEqual({ ok: true, sent: vector.text });
+    }
+  });
+
+  it('un salto de línea intermedio da control_character, con la clave del salto de línea', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...trimmedAccepted),
+        fc.constantFrom(...LINE_BREAKS),
+        fc.nat(),
+        padding,
+        (vector, lineBreak, at, after) => {
+          const chars = Array.from(vector.text);
+          const index = 1 + (at % (chars.length - 1));
+          const text = [...chars.slice(0, index), lineBreak, ...chars.slice(index)].join('');
+          const expected = expectedAfterInsert(text, vector.route, 'control_character');
+          expect(fieldVerdictOf(`${text}${after}`, vector.route).verdict).toBe(expected);
+          if (expected === 'control_character') {
+            expect(
+              reasonIssueKey(`${text}${after}`, limitsOf(vector.route), { loopText: true }),
+            ).toBe('validation.free_text.line_break');
+          }
+        },
+      ),
+    );
+  });
+
+  it('un espacio no ASCII intermedio se conserva y solo cuenta como un carácter más', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...trimmedAccepted),
+        fc.constantFrom(...INNER_SPACES),
+        fc.nat(),
+        (vector, space, at) => {
+          const chars = Array.from(vector.text);
+          const text = insertOutsideCluster(vector.text, 1 + (at % (chars.length - 1)), space);
+          const sent = submittedText(text);
+          const { maxLength } = limitsOf(vector.route);
+          const length = codePointLength(sent.normalize('NFC'));
+          const expected =
+            length > maxLength || codePointLength(sent) > 4 * maxLength
+              ? { verdict: 'too_long', normalized: null }
+              : { verdict: 'accepted', normalized: sent.normalize('NFC') };
+          expect(fieldVerdictOf(text, vector.route)).toEqual(expected);
+          // El interior nunca se toca: o se envía el espacio, o cayó en un extremo y se recortó.
+          expect([text, vector.text]).toContain(sent);
+        },
+      ),
+    );
+  });
+
+  it('un invisible en un extremo no se recorta: da invisible_character, como el servidor', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...trimmedAccepted),
+        fc.constantFrom(...EDGE_INVISIBLES),
+        fc.boolean(),
+        padding,
+        (vector, invisible, atStart, outside) => {
+          const text = atStart
+            ? `${outside}${invisible}${vector.text}`
+            : `${vector.text}${invisible}${outside}`;
+          expect(fieldVerdictOf(text, vector.route).verdict).toBe(
+            expectedAfterInsert(submittedText(text), vector.route, 'invisible_character'),
+          );
+        },
+      ),
+    );
   });
 });

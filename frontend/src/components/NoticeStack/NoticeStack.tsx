@@ -8,7 +8,7 @@
  * `retry_after_seconds` del servidor, con el reductor puro de cuenta regresiva y el `Clock`
  * inyectado. El `correlation_id` se muestra copiable y nunca se escribe en la URL (BR-APP-75).
  */
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useReducer, useState, type ReactNode } from 'react';
 
 import { behaviourFor, type Behaviour } from '@/ports/errors/map';
 import type { Clock } from '@/state/clock';
@@ -194,6 +194,15 @@ export function NoticeStack({ notices, clock, onDismiss, onRetry }: NoticeStackP
 export interface FieldNoticeProps {
   readonly id: string;
   readonly notice: Notice;
+  /**
+   * Texto del catálogo que sustituye al mensaje (A-126: el 400 sin `detail_code` de un texto del
+   * lazo); lo decide la pantalla, nunca el servidor.
+   */
+  readonly textKey?: string;
+  /** Mensaje principal que trae la propia respuesta (la sugerencia de un rechazo, A-73). */
+  readonly message?: string | undefined;
+  /** Detalle del rechazo, dentro del mismo aviso que el campo referencia. */
+  readonly children?: ReactNode;
 }
 
 /**
@@ -201,7 +210,7 @@ export interface FieldNoticeProps {
  * `detail_code`) junto al campo, que lo referencia con `aria-describedby`; lo escrito se conserva
  * porque el aviso no toca el valor del campo.
  */
-export function FieldNotice({ id, notice }: FieldNoticeProps) {
+export function FieldNotice({ id, notice, textKey, message, children }: FieldNoticeProps) {
   const behaviour = behaviourFor(notice.error);
   const correlation = correlationOf(notice);
   return (
@@ -210,11 +219,12 @@ export function FieldNotice({ id, notice }: FieldNoticeProps) {
       className={styles.field}
       role="alert"
       data-code={notice.error.code}
-      data-text-key={behaviour.text_key}
+      data-text-key={textKey ?? behaviour.text_key}
     >
       <p className={styles.message} data-part="message">
-        {behaviour.message_es}
+        {textKey === undefined ? (message ?? behaviour.message_es) : text(textKey)}
       </p>
+      {children}
       {correlation === null ? null : <CorrelationCopy value={correlation} />}
     </div>
   );

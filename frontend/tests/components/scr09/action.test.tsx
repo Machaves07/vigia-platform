@@ -13,6 +13,7 @@ import { detail, FINDING, INSTANT, renderScreen, USER, WAIT } from './classify_s
 const DESCRIPTION = 'Instalar un enclavamiento en la puerta del acceso lateral de la prensa';
 const EXPECTED = 'La puerta abierta detiene el ciclo de la prensa';
 const DESCRIPTION_NAME = `${text('scr09.loop.action_description')} (${text('components_forms.reason.required')})`;
+const EXPECTED_NAME = `${text('scr09.loop.expected_outcome')} (${text('components_forms.reason.optional')})`;
 const DEADLINE_NAME = `${text('scr09.loop.deadline_days')} (${text('scr09.loop.deadline_default')}: 15)`;
 const validate = openApiValidators(
   (readAppYaml().components as { schemas: Record<string, unknown> }).schemas,
@@ -47,7 +48,7 @@ async function fill(user: ReturnType<typeof userEvent.setup>) {
   );
   await user.type(screen.getByRole('textbox', { name: DESCRIPTION_NAME }), DESCRIPTION);
   await user.type(
-    screen.getByRole('textbox', { name: text('scr09.loop.expected_outcome') }),
+    screen.getByRole('textbox', { name: EXPECTED_NAME }),
     EXPECTED,
   );
   await user.click(screen.getByRole('button', { name: text('scr09.loop.submit') }));
@@ -142,7 +143,7 @@ describe('SCR-09 acción sobre la zona', { timeout: 40_000 }, () => {
     });
     expect(description.value).toBe(DESCRIPTION);
     const expected = screen.getByRole<HTMLTextAreaElement>('textbox', {
-      name: text('scr09.loop.expected_outcome'),
+      name: EXPECTED_NAME,
     });
     expect(expected.value).toBe(EXPECTED);
     expect(form.querySelector('[data-part="action_saved"]')).toBeNull();

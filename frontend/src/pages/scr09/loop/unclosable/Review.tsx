@@ -1,7 +1,7 @@
 /** La revisión renueva con fecha o convierte en una acción nueva completa (T11/T12). */
 import { DateInput } from '@/components/DateFields/DateFields';
 import { useState } from 'react';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import { ReasonField, reasonIssueKey, submittedText } from '@/components/ReasonField/ReasonField';
 import { SignatureBlock } from '@/components/SignatureBlock/SignatureBlock';
 import {
   closureClock,
@@ -19,7 +19,7 @@ import { label } from '@/texts/labels';
 import { Failure, type ClosureContext } from '../closure/common';
 import { reviewInstant, validReviewDate } from '../closure/dates';
 import { LONG_TEXT } from '../closure/Evidence';
-import { ActionFields, emptyAction, validAction } from '../reopening/ActionFields';
+import { ActionFields, actionPayload, emptyAction, validAction } from '../reopening/ActionFields';
 
 export function Review({
   context,
@@ -52,7 +52,10 @@ export function Review({
   return (
     <section aria-label={text('scr09.unclosable.review')}>
       <h2>{text('scr09.unclosable.review')}</h2>
-      <Failure error={notice?.field === 'signature' ? null : mutation.error} />
+      <Failure
+        error={notice?.field === 'signature' ? null : mutation.error}
+        written={[note, action.action_description, action.expected_outcome ?? ''].join('\n')}
+      />
       {invalid && <p role="alert">{text('scr09.closure.invalid')}</p>}
       <label>
         {text('scr09.unclosable.declaration')}
@@ -96,6 +99,7 @@ export function Review({
         value={note}
         onChange={setNote}
         limits={LONG_TEXT}
+        loopText
         showErrors={invalid}
       />
       {outcome === 'renewed' ? (
@@ -118,13 +122,13 @@ export function Review({
             display_name: context.principal.display_name,
             professional_license: context.principal.professional_license ?? null,
           }}
-          textToSign={`${label('unclosable_review_outcome', outcome)}\n${note}\n${outcome === 'renewed' ? day : action.action_description}`}
+          textToSign={`${label('unclosable_review_outcome', outcome)}\n${submittedText(note)}\n${outcome === 'renewed' ? day : action.action_description}`}
           pending={mutation.status === 'pending'}
           notice={notice?.field === 'signature' ? notice : undefined}
           onSign={(snapshot) => {
             if (
               declaration === '' ||
-              reasonIssueKey(note, LONG_TEXT) !== null ||
+              reasonIssueKey(note, LONG_TEXT, { loopText: true }) !== null ||
               (outcome === 'renewed'
                 ? !validReviewDate(day, closureClock(), timeZone)
                 : !validAction(action))
@@ -135,10 +139,10 @@ export function Review({
             void mutation
               .run({
                 outcome,
-                review_note: note,
+                review_note: submittedText(note),
                 new_review_due_at:
                   outcome === 'renewed' ? reviewInstant(day, closureClock(), timeZone) : null,
-                action: outcome === 'converted_to_action' ? action : null,
+                action: outcome === 'converted_to_action' ? actionPayload(action) : null,
                 professional_license: snapshot.professional_license,
               })
               .then(onWritten)

@@ -4,12 +4,17 @@
  * Las aserciones comparan claves del catálogo, etiquetas de las unidades dueñas, códigos y nombres
  * accesibles exactos; nunca subcadenas de texto con datos (VIG-194).
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 
 import Page from '@/pages/scr11/root_cause';
+import { ROOT_CAUSE_TEXT_LIMITS } from '@/ports/scr11RootCause';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
@@ -31,6 +36,19 @@ import {
 } from './support';
 
 const detail = loopLabels.loop_detail_code;
+
+/** Rutas de texto libre del corpus exportado (sus sustitutos sueltos no los admite el JSON de Vite). */
+const fixtures = JSON.parse(
+  readFileSync(
+    resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../../backend/openapi/u05-fixtures.json',
+    ),
+    'utf8',
+  ),
+) as {
+  free_text: { routes: { route: string; min_length: number; max_length: number }[] };
+};
 
 /** Validador de `ApiErrorBody` contra `backend/openapi/app.yaml` (el archivo, no la copia). */
 function errorBody() {
@@ -57,7 +75,14 @@ async function start() {
 }
 
 function statement(index: number) {
-  return screen.getByRole('textbox', { name: `${text('scr11.statement')} ${String(index)}` });
+  const requirement = index === 1 ? 'required' : 'optional';
+  return screen.getByRole('textbox', {
+    name: `${text('scr11.statement')} ${String(index)} (${text(`components_forms.reason.${requirement}`)})`,
+  });
+}
+
+function rootName(key: string): string {
+  return `${text(key)} (${text('components_forms.reason.required')})`;
 }
 
 async function saveWhy(index: number, value: string) {
@@ -77,10 +102,10 @@ async function toSummary() {
   fireEvent.change(screen.getByRole('combobox', { name: text('scr11.root_category') }), {
     target: { value: 'engineering' },
   });
-  fireEvent.change(screen.getByRole('textbox', { name: text('scr11.root_statement') }), {
+  fireEvent.change(screen.getByRole('textbox', { name: rootName('scr11.root_statement') }), {
     target: { value: 'Enunciado sintético de la causa raíz de ingeniería.' },
   });
-  fireEvent.change(screen.getByRole('textbox', { name: text('scr11.conclusion') }), {
+  fireEvent.change(screen.getByRole('textbox', { name: rootName('scr11.conclusion') }), {
     target: { value: 'Conclusión sintética del análisis de la zona.' },
   });
   next();
@@ -175,7 +200,7 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     expect(anchored.querySelector('[data-part="message"]')?.textContent).toBe(
       detail.loop_analysis_step_out_of_order,
     );
-    expect(statement(3).getAttribute('aria-describedby')).toBe(anchored.id);
+    expect(statement(3).getAttribute('aria-describedby')?.split(' ')).toContain(anchored.id);
     expect((statement(3) as HTMLTextAreaElement).value).toBe('Tercer porqué sin el segundo.');
     expect(loop.calls.steps.map((call) => call.index)).toEqual([1, 3]);
   });
@@ -380,7 +405,7 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     await saveWhy(1, 'Primer porqué sintético antes del borrador.');
     for (let index = 1; index <= 5; index += 1) next();
     expect(
-      screen.getByRole<HTMLTextAreaElement>('textbox', { name: text('scr11.root_statement') })
+      screen.getByRole<HTMLTextAreaElement>('textbox', { name: rootName('scr11.root_statement') })
         .value,
     ).toBe(readyRequest().draft?.draft_text);
     expect(
@@ -522,5 +547,218 @@ describe('SCR-11 retoma el análisis en curso (VIG-363)', { timeout: 60_000 }, (
   it('axe sin violaciones con el análisis en curso', async () => {
     const { view } = await resumed(readyRequest().request_id);
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+// --- A-126 (TASK-580): textos de la causa raíz que guían en vez de rechazar ---------------------
+
+const CHARACTERS = text('components_forms.reason.characters');
+const MINIMUM = text('components_forms.reason.minimum');
+
+function whyPart(index: number): HTMLElement {
+  const part = document.querySelector<HTMLElement>(`[data-part="why-${String(index)}"]`);
+  if (part === null) throw new Error(`falta el porqué ${String(index)}`);
+  return part;
+}
+
+function saveButton() {
+  return screen.getByRole('button', { name: text('scr11.save_step') });
+}
+
+/** El aviso anclado al campo: el elemento que el campo referencia y tiene `role="alert"`. */
+function anchoredTo(field: HTMLElement): HTMLElement | null {
+  const ids = field.getAttribute('aria-describedby')?.split(' ') ?? [];
+  return (
+    ids
+      .map((id) => document.getElementById(id))
+      .find((element) => element?.getAttribute('role') === 'alert') ?? null
+  );
+}
+
+describe('SCR-11 A-126: textos que guían en vez de rechazar', { timeout: 60_000 }, () => {
+  it('los límites de los textos son los de U-04 en el corpus exportado (igualdad)', () => {
+    const routes = new Map(
+      fixtures.free_text.routes.map((route) => [
+        route.route,
+        { minLength: route.min_length, maxLength: route.max_length },
+      ]),
+    );
+    expect(ROOT_CAUSE_TEXT_LIMITS).toEqual({
+      why_statement: routes.get('root_cause_analysis/why_steps[*]/statement'),
+      root_cause_statement: routes.get('root_cause_analysis/root_cause_statement'),
+      conclusion: routes.get('root_cause_analysis/conclusion'),
+    });
+  });
+
+  it('un porqué de 40 caracteres y un Enter se envía sin el salto', async () => {
+    const { loop } = await setup();
+    await start();
+    const forty = 'Porqué sintético de cuarenta caracteres.';
+    expect(Array.from(forty)).toHaveLength(40);
+    fireEvent.change(statement(1), { target: { value: `${forty}\n` } });
+    expect(whyPart(1).querySelector('[data-part="line_break"]')).toBeNull();
+    fireEvent.click(saveButton());
+    await screen.findByText(
+      text('scr11.step_saved'),
+      { selector: '[data-part="step-sync"]' },
+      WAIT,
+    );
+    expect(loop.calls.steps).toEqual([
+      { index: 1, body: { statement: forty, evidence_refs: [], category: null } },
+    ]);
+  });
+
+  it('con 14 caracteres el contador lo dice, el error sale al guardar y no hay petición', async () => {
+    const { loop } = await setup();
+    await start();
+    fireEvent.change(statement(1), { target: { value: 'Catorce letras' } });
+    expect(whyPart(1).querySelector('[data-part="counter"]')?.textContent).toBe(
+      `14 / 1000 ${CHARACTERS} (${MINIMUM} 20)`,
+    );
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(
+        whyPart(1).querySelector('[data-part="local_error"]')?.getAttribute('data-text-key'),
+      ).toBe('validation.free_text.too_short');
+    }, WAIT);
+    expect(loop.calls.steps).toEqual([]);
+    expect((statement(1) as HTMLTextAreaElement).value).toBe('Catorce letras');
+  });
+
+  it('un salto en medio avisa en vivo, no envía y «Unir en una línea» deja un espacio', async () => {
+    const { loop } = await setup();
+    await start();
+    fireEvent.change(statement(1), {
+      target: { value: 'Primer porqué sintético\ncon un salto en medio' },
+    });
+    const warning = whyPart(1).querySelector('[data-part="line_break"]');
+    expect(warning?.querySelector('[data-text-key]')?.getAttribute('data-text-key')).toBe(
+      'validation.free_text.line_break',
+    );
+    fireEvent.click(saveButton());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(loop.calls.steps).toEqual([]);
+    expect((statement(1) as HTMLTextAreaElement).value).toBe(
+      'Primer porqué sintético\ncon un salto en medio',
+    );
+    fireEvent.click(
+      within(whyPart(1)).getByRole('button', { name: text('components_forms.reason.join_lines') }),
+    );
+    expect((statement(1) as HTMLTextAreaElement).value).toBe(
+      'Primer porqué sintético con un salto en medio',
+    );
+    fireEvent.click(saveButton());
+    await screen.findByText(
+      text('scr11.step_saved'),
+      { selector: '[data-part="step-sync"]' },
+      WAIT,
+    );
+    expect(loop.calls.steps.map((call) => call.body.statement)).toEqual([
+      'Primer porqué sintético con un salto en medio',
+    ]);
+  });
+
+  it('una atribución a persona muestra la sugerencia anclada al porqué y conserva lo escrito', async () => {
+    const { loop } = await setup();
+    await start();
+    const suggestion = 'Sugerencia sintética del patrón 580';
+    loop.state.stepResponse = () =>
+      mswApiError('invalid_request', 400, {
+        detailCode: 'loop_person_attribution_detected',
+        rejection: { code: 'person_attribution_detected', suggestion },
+      });
+    const written = 'Porqué sintético que el validador rechaza.';
+    fireEvent.change(statement(1), { target: { value: written } });
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(anchoredTo(statement(1))).not.toBeNull();
+    }, WAIT);
+    const alert = anchoredTo(statement(1));
+    expect(alert?.querySelector('[data-part="message"]')?.textContent).toBe(suggestion);
+    expect(alert?.querySelector('[data-part="rejection-suggestion"]')?.textContent).toBe(
+      suggestion,
+    );
+    expect((statement(1) as HTMLTextAreaElement).value).toBe(written);
+  });
+
+  it('un 400 sin detail_code dice qué revisar, con el correlation_id, nunca el genérico', async () => {
+    const { loop } = await setup();
+    await start();
+    const response = apiError('invalid_request', 400);
+    const body = (await response.clone().json()) as { correlation_id: string };
+    loop.state.stepResponse = () => response.clone();
+    const written = 'Porqué sintético que el servidor rechaza.';
+    fireEvent.change(statement(1), { target: { value: written } });
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(anchoredTo(statement(1))).not.toBeNull();
+    }, WAIT);
+    const alert = anchoredTo(statement(1));
+    expect(alert?.getAttribute('data-text-key')).toBe('components_forms.reason.review');
+    expect(alert?.querySelector('[data-part="message"]')?.textContent).toBe(
+      text('components_forms.reason.review'),
+    );
+    expect(alert?.querySelector('[data-part="correlation_id"]')?.textContent).toBe(
+      body.correlation_id,
+    );
+    expect((statement(1) as HTMLTextAreaElement).value).toBe(written);
+  });
+
+  it('una causa raíz con un salto en medio no firma; con un Enter final firma recortada', async () => {
+    const { loop } = await setup();
+    await start();
+    await saveWhy(1, 'Primer porqué sintético con más de veinte caracteres.');
+    next();
+    for (let index = 2; index <= 5; index += 1) next();
+    fireEvent.change(screen.getByRole('combobox', { name: text('scr11.root_category') }), {
+      target: { value: 'engineering' },
+    });
+    const statementField = screen.getByRole('textbox', { name: rootName('scr11.root_statement') });
+    fireEvent.change(statementField, {
+      target: { value: 'Enunciado sintético\nde la causa raíz de ingeniería.' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: rootName('scr11.conclusion') }), {
+      target: { value: 'Conclusión sintética del análisis de la zona.\n' },
+    });
+    next();
+    const block = await screen.findByRole(
+      'region',
+      { name: text('components_forms.signature.title') },
+      WAIT,
+    );
+    fireEvent.click(
+      within(block).getByRole('button', { name: text('components_forms.signature.sign') }),
+    );
+    await screen.findByText(
+      text('components_forms.reason.fix_before_send'),
+      { selector: '[data-part="local_error"]' },
+      WAIT,
+    );
+    expect(loop.calls.signatures).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: text('components_structure.wizard.back') }));
+    fireEvent.click(
+      screen.getByRole('button', { name: text('components_forms.reason.join_lines') }),
+    );
+    next();
+    const again = await screen.findByRole(
+      'region',
+      { name: text('components_forms.signature.title') },
+      WAIT,
+    );
+    fireEvent.click(
+      within(again).getByRole('button', { name: text('components_forms.signature.sign') }),
+    );
+    await screen.findByRole('region', { name: text('scr11.signed_title') }, WAIT);
+    expect(loop.calls.signatures).toEqual([
+      {
+        professional_license: LICENSE,
+        root_cause_category: 'engineering',
+        root_cause_statement: 'Enunciado sintético de la causa raíz de ingeniería.',
+        conclusion: 'Conclusión sintética del análisis de la zona.',
+        cause_effect_branches: [],
+      },
+    ]);
   });
 });

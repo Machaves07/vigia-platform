@@ -112,7 +112,7 @@ describe('PR-APP-14 · consulta del asistente', () => {
             expect(loop.calls.statusAt.length).toBeLessThanOrEqual(23);
             // El flujo guiado: la plantilla, su primer porqué editable y sus acciones.
             expect(screen.getByRole('region', { name: text('scr11.wizard_title') })).toBeDefined();
-            const statement = screen.getByRole('textbox', { name: `${text('scr11.statement')} 1` });
+            const statement = screen.getByRole('textbox', { name: `${text('scr11.statement')} 1 (${text('components_forms.reason.required')})` });
             expect(statement).toHaveProperty('disabled', false);
             expect(screen.getByRole('button', { name: text('scr11.save_step') })).toHaveProperty(
               'disabled',

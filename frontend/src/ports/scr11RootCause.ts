@@ -16,6 +16,7 @@ import type { components } from '@/client/schema';
 import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
 import type { HttpError } from './errors/map';
+import type { FreeTextLimits } from './validation';
 
 export type Analysis =
   components['schemas']['vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut'];
@@ -83,6 +84,21 @@ export function plantTimeZone(
 export function rootCauseClock() {
   return currentTransport().clock;
 }
+
+/**
+ * Límites de los textos del análisis de U-04 (`STATEMENT_FIELD` de 20 a 1000;
+ * `ROOT_STATEMENT_FIELD` y `CONCLUSION_FIELD` de 20 a 2000). El esquema generado no los publica
+ * (`AnalysisStepBody` y `AnalysisSignatureBody` declaran `str` sin longitudes), así que la prueba
+ * los compara por igualdad con las rutas `root_cause_analysis/*` del corpus exportado
+ * `u05-fixtures.json`, que sale de esos mismos `FreeTextField`. El servidor decide.
+ */
+export const ROOT_CAUSE_TEXT_LIMITS: Readonly<
+  Record<'why_statement' | 'root_cause_statement' | 'conclusion', FreeTextLimits>
+> = {
+  why_statement: { minLength: 20, maxLength: 1000 },
+  root_cause_statement: { minLength: 20, maxLength: 2000 },
+  conclusion: { minLength: 20, maxLength: 2000 },
+};
 
 /** La respuesta HTTP de un fallo del puerto, si la hubo. */
 export function httpErrorOf(error: unknown): HttpError | null {

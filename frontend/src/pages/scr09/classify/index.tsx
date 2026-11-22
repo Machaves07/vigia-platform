@@ -14,8 +14,8 @@
 import { useId, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { canEnterGroup } from '@/app/navigation';
-import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import { ReasonField, reasonIssueKey, submittedText } from '@/components/ReasonField/ReasonField';
+import { TextNotice } from '@/components/ReasonField/TextNotice';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
 import { FindingActions, findingAccess, RESUMING_STATE } from '@/pages/shared/FindingActions';
 import layout from '@/pages/shared/findingLayout.module.css';
@@ -115,14 +115,14 @@ function ClassifyForm({
         if (
           outcome === '' ||
           category === '' ||
-          reasonIssueKey(reason, CLASSIFICATION_REASON_LIMITS) !== null
+          reasonIssueKey(reason, CLASSIFICATION_REASON_LIMITS, { loopText: true }) !== null
         )
           return;
         void mutation
           .run({
             outcome,
             reason_category: category,
-            reason_text: reason,
+            reason_text: submittedText(reason),
             reinforced_reason: reinforced,
           })
           .then((result) => {
@@ -141,7 +141,9 @@ function ClassifyForm({
       }}
     >
       <h2>{text('scr09.classify.form')}</h2>
-      {formNotice !== null && <FieldNotice id={`${formId}-notice`} notice={formNotice} />}
+      {formNotice !== null && (
+        <TextNotice id={`${formId}-notice`} notice={formNotice} written={reason} loopText />
+      )}
       {local === 'invalid_input' && <p role="alert">{text('scr09.classify.invalid')}</p>}
       {local === 'unavailable' && <p role="alert">{text('screen_state.unavailable')}</p>}
       {inReview && detail !== undefined && (
@@ -218,6 +220,7 @@ function ClassifyForm({
         name="reason_text"
         value={reason}
         limits={CLASSIFICATION_REASON_LIMITS}
+        loopText
         showErrors={showErrors}
         notice={notice?.field === 'reason_text' ? notice : undefined}
         onChange={(value) => {
