@@ -1,10 +1,10 @@
 {
   "format": "vigia-platform/u05-fixtures",
-  "schema_version": 3,
+  "schema_version": 4,
   "generated": {
     "by": "uv run python -m vigia_platform.shared.api.export_u05_fixtures",
     "check": "uv run python -m vigia_platform.shared.api.export_u05_fixtures --check",
-    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del ciclo de vida del hallazgo que aplica el servidor. episode_photos es un ejemplo sint\u00e9tico de los episodios de la sombra (la imagen es un JPEG gris generado)."
+    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del ciclo de vida del hallazgo que aplica el servidor. episode_photos es un ejemplo sint\u00e9tico de los episodios de la sombra (la imagen es un JPEG gris generado). inbox_states son los estados que admite el filtro de la bandeja, en su orden."
   },
   "permissions": {
     "source": "identity/authz/matrix.py (MATRIX) evaluada como identity/authz/authorize.py",
@@ -4637,5 +4637,14 @@
       "pending_cap"
     ],
     "audit_operation": "episode_photo_read"
-  }
+  },
+  "inbox_states": [
+    "received",
+    "in_review",
+    "open",
+    "action_assigned",
+    "overdue",
+    "unclosable",
+    "suspended_by_reclassification"
+  ]
 }

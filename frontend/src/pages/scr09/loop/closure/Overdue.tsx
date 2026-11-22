@@ -84,7 +84,15 @@ export function Overdue({
       ),
   });
   // Se muestran todos los vencidos del lazo: no hay filtros de estado, periodo ni clasificación.
-  const local = detail.actions.filter((action) => action.counts_as_overdue);
+  // O-4 (TASK-582): vencida es lo que declaró el servidor (`state = overdue`, `evaluate_deadlines`,
+  // BR-LAZ-46) y que cuenta para los vencimientos (`counts_as_overdue`, falso con el lazo
+  // suspendido, BR-LAZ-24). `counts_as_overdue` solo no significa «vencida», y `due_at` nunca se
+  // compara con el reloj del navegador: las vigencias tienen un solo reloj.
+  const local = detail.actions.filter(
+    (action) => action.state === 'overdue' && action.counts_as_overdue,
+  );
+  // La acción vigente se muestra con su plazo, no como vencida.
+  const live = detail.actions.filter((action) => action.state === 'assigned');
   const zoneNames = Object.fromEntries(
     context.plants.flatMap((plant) => plant.zones.map((zone) => [zone.zone_id, zone.name])),
   );
@@ -121,13 +129,20 @@ export function Overdue({
             .find((zone) => zone.zone_id === detail.zone_id)?.name ??
             text('scr09.overdue.zone_unknown')}
         </p>
-        <p>
+        <p data-part="overdue_count">
           {text('scr09.overdue.count')}: {local.length}
         </p>
         {local.map((action) => (
-          <p key={action.action_id}>
+          <p key={action.action_id} data-part="overdue_action">
             {action.action_description} ·{' '}
             <TimestampWithOffset instant={action.due_at} timeZone={timeZone} />
+          </p>
+        ))}
+        {live.map((action) => (
+          <p key={action.action_id} data-part="live_action">
+            {action.action_description} ·{' '}
+            <span data-part="due_on">{text('scr09.overdue.due_on')}</span>{' '}
+            <TimestampWithOffset instant={action.due_at} timeZone={timeZone} dateOnly />
           </p>
         ))}
         <ul>

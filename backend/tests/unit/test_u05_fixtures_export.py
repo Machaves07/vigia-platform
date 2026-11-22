@@ -12,6 +12,10 @@
   se nombra en la diferencia (VIG-359).
 - La sección ``episode_photos`` (TASK-573) tiene la forma de las respuestas de sus rutas y su
   imagen es un JPEG **generado** que se decodifica y que la ingesta aceptaría (A-112).
+- La sección ``inbox_states`` (TASK-582) es, por igualdad y en orden, la lista de los siete
+  estados activos de la bandeja (BR-LAZ-02, LC-LAZ-05), es exactamente lo que acepta el filtro de
+  ``GET /loop/findings`` (otro estado da 400) y un estado cambiado sin regenerar se nombra en la
+  diferencia.
 """
 
 from __future__ import annotations
@@ -35,9 +39,12 @@ from vigia_platform.fleet.domain.episode_photo import image_violation
 from vigia_platform.identity.authz.authorize import route_role
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
 from vigia_platform.ledger.free_text import FreeTextRejection, apply_base_policy
+from vigia_platform.loop.adapters.http.findings_routes import _states
+from vigia_platform.loop.adapters.postgres.inbox_query import INBOX_STATES
 from vigia_platform.loop.domain.enums import FindingLifecycleState
 from vigia_platform.loop.domain.lifecycle import TRANSITIONS, Transition
 from vigia_platform.shared.api import export_u05_fixtures
+from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.export_u05_fixtures import (
     ACCEPTED,
     DEFAULT_OUTPUT,
@@ -49,6 +56,7 @@ from vigia_platform.shared.api.export_u05_fixtures import (
     differences,
     evaluate,
     free_text_routes,
+    inbox_states_section,
     lifecycle_section,
     main,
     permission_differences,
@@ -120,7 +128,43 @@ def test_the_file_is_ascii_with_its_header(committed: dict[str, Any]) -> None:
         "free_text",
         "lifecycle",
         "episode_photos",
+        "inbox_states",
     ]
+
+
+# --- Estados de la bandeja (TASK-582) -----------------------------------------------------------
+
+
+def test_the_inbox_states_are_the_seven_active_states_in_order(committed: dict[str, Any]) -> None:
+    # Oráculo literal del diseño (BR-LAZ-02, LC-LAZ-05, laz_0029): no reutiliza INBOX_STATES.
+    assert committed["inbox_states"] == [
+        "received",
+        "in_review",
+        "open",
+        "action_assigned",
+        "overdue",
+        "unclosable",
+        "suspended_by_reclassification",
+    ]
+    assert committed["inbox_states"] == [state.value for state in INBOX_STATES]
+
+
+@pytest.mark.parametrize("state", [state.value for state in FindingLifecycleState])
+def test_the_inbox_states_are_what_the_server_filter_accepts(
+    committed: dict[str, Any], state: str
+) -> None:
+    if state in committed["inbox_states"]:
+        assert _states([state]) == (FindingLifecycleState(state),)
+    else:
+        with pytest.raises(ApiError) as raised:
+            _states([state])
+        assert (raised.value.code, raised.value.status_code) == (ApiErrorCode.INVALID_REQUEST, 400)
+
+
+def test_a_changed_inbox_state_without_regenerating_is_named(committed: dict[str, Any]) -> None:
+    changed = (*INBOX_STATES, FindingLifecycleState.CLOSED)
+    current = {**committed, "inbox_states": inbox_states_section(changed)}
+    assert differences(committed, current) == [("field_differs", "inbox_states")]
 
 
 # --- Episodios de la sombra (TASK-573) ----------------------------------------------------------

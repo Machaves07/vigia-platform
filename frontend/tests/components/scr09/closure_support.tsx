@@ -90,6 +90,7 @@ export async function renderClosure(
     now = START,
     license = LICENSE,
     entryState = null,
+    detail: shown = detail,
   }: {
     permissions?: string[];
     records?: LedgerRecord[];
@@ -97,6 +98,8 @@ export async function renderClosure(
     license?: string | null;
     /** Estado de la navegación con que se llega (la revisión destacada del lazo, VIG-363). */
     entryState?: unknown;
+    /** El detalle que sirve el servidor (TASK-582: acciones vigentes y vencidas). */
+    detail?: Detail;
   } = {},
 ) {
   const clock = new FakeClock(now);
@@ -163,7 +166,7 @@ export async function renderClosure(
         ],
       }),
     ),
-    http.get(`http://localhost/loop/findings/${FINDING}`, () => HttpResponse.json(detail)),
+    http.get(`http://localhost/loop/findings/${FINDING}`, () => HttpResponse.json(shown)),
     http.get('http://localhost/ledger/records', () =>
       HttpResponse.json({ items: history, next_cursor: null }),
     ),
