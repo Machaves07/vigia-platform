@@ -1,12 +1,19 @@
 /** La firma es explícita; ni la falta de licencia ni el estado ocultan la acción. */
 import { useState } from 'react';
+import closeBody from '../../../../../openapi/bodies/close_loop_findings__finding_state_id__closure_post.json';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import { reasonLimits } from '@/components/ReasonField/limits';
+import {
+  optionalText,
+  ReasonField,
+  reasonIssueKey,
+  submittedText,
+} from '@/components/ReasonField/ReasonField';
+import { textFields } from '@/components/ReasonField/TextNotice';
 import { SignatureBlock, type SignerProfile } from '@/components/SignatureBlock/SignatureBlock';
 import { closureNotice, closurePort, type ClosureBody } from '@/ports/scr09Closure';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
-import { LONG_TEXT } from './Evidence';
 import { Failure, type ClosureContext } from './common';
 
 export function Close({
@@ -19,6 +26,10 @@ export function Close({
   const [description, setDescription] = useState('');
   const [verification, setVerification] = useState('');
   const [invalid, setInvalid] = useState(false);
+  const [limits] = useState(() => ({
+    description: reasonLimits(closeBody, 'closure_description'),
+    verification: reasonLimits(closeBody, 'verification_note'),
+  }));
   const mutation = useScreenMutation({
     write: (body: ClosureBody) =>
       closurePort.close.write({ path: { finding_state_id: context.findingId }, body }),
@@ -28,16 +39,21 @@ export function Close({
     loop_signer_license_missing: 'signature',
     loop_closure_evidence_missing: 'evidence',
     loop_closure_requires_assigned_action: 'action',
+    ...textFields({ closure_description: description, verification_note: verification }),
   });
+  const textNotice = (field: string) => (notice?.field === field ? notice : undefined);
   const sign = (snapshot: SignerProfile) => {
-    if (reasonIssueKey(description, LONG_TEXT) !== null) {
+    if (
+      reasonIssueKey(description, limits.description, { loopText: true }) !== null ||
+      reasonIssueKey(verification, limits.verification, { loopText: true, optional: true }) !== null
+    ) {
       setInvalid(true);
       return;
     }
     void mutation
       .run({
-        closure_description: description,
-        verification_note: verification.trim() === '' ? null : verification,
+        closure_description: submittedText(description),
+        verification_note: optionalText(verification),
         professional_license: snapshot.professional_license,
       })
       .then(onWritten)
@@ -51,19 +67,22 @@ export function Close({
         label={text('scr09.closure.sign_description')}
         value={description}
         onChange={setDescription}
-        limits={LONG_TEXT}
+        limits={limits.description}
+        loopText
         showErrors={invalid}
+        notice={textNotice('closure_description')}
       />
-      <label>
-        {text('scr09.closure.verification')}
-        <textarea
-          maxLength={1000}
-          value={verification}
-          onChange={(e) => {
-            setVerification(e.target.value);
-          }}
-        />
-      </label>
+      <ReasonField
+        name="verification_note"
+        label={text('scr09.closure.verification')}
+        value={verification}
+        onChange={setVerification}
+        limits={limits.verification}
+        optional
+        loopText
+        showErrors={invalid}
+        notice={textNotice('verification_note')}
+      />
       {notice?.field === 'action' || notice?.field === 'evidence' ? (
         <div data-anchor={notice.field}>
           <FieldNotice id={notice.id} notice={notice} />
@@ -75,8 +94,10 @@ export function Close({
             )}
           </p>
         </div>
-      ) : notice?.field === 'signature' ? null : (
-        <Failure error={mutation.error} />
+      ) : notice?.field === 'signature' ||
+        notice?.field === 'closure_description' ||
+        notice?.field === 'verification_note' ? null : (
+        <Failure error={mutation.error} written={[description, verification].join('\n')} />
       )}
       {context.principal !== null && (
         <SignatureBlock
@@ -84,7 +105,7 @@ export function Close({
             display_name: context.principal.display_name,
             professional_license: context.principal.professional_license ?? null,
           }}
-          textToSign={`${text('scr09.closure.sign_text')}\n${description}\n${verification}`}
+          textToSign={`${text('scr09.closure.sign_text')}\n${submittedText(description)}\n${submittedText(verification)}`}
           notice={notice?.field === 'signature' ? notice : undefined}
           pending={mutation.status === 'pending'}
           onSign={sign}

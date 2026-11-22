@@ -1,13 +1,28 @@
 /** Acción nueva completa, reutilizada solo dentro de las subrutas de VIG-328. */
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import reopenBody from '../../../../../openapi/bodies/reopen_loop_findings__finding_state_id__reopening_post.json';
+import { reasonLimits } from '@/components/ReasonField/limits';
+import {
+  optionalText,
+  ReasonField,
+  reasonIssueKey,
+  submittedText,
+} from '@/components/ReasonField/ReasonField';
 import { ACTION_TYPES, closurePort, type ReopeningBody } from '@/ports/scr09Closure';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import type { ClosureContext } from '../closure/common';
-import { LONG_TEXT } from '../closure/Evidence';
 
 export type ActionDraft = Omit<ReopeningBody, 'reason_text'>;
+
+/** Límites de la acción nueva, del esquema generado de la reapertura (BR-APP-44). */
+function actionLimits() {
+  return {
+    description: reasonLimits(reopenBody, 'action_description'),
+    expected: reasonLimits(reopenBody, 'expected_outcome'),
+  };
+}
+
 export function emptyAction(userId: string): ActionDraft {
   return {
     action_type: '',
@@ -18,11 +33,24 @@ export function emptyAction(userId: string): ActionDraft {
   };
 }
 export function validAction(action: ActionDraft): boolean {
+  const limits = actionLimits();
   return (
     action.action_type !== '' &&
     action.assignee_user_id !== '' &&
-    reasonIssueKey(action.action_description, LONG_TEXT) === null
+    reasonIssueKey(action.action_description, limits.description, { loopText: true }) === null &&
+    reasonIssueKey(action.expected_outcome ?? '', limits.expected, {
+      loopText: true,
+      optional: true,
+    }) === null
   );
+}
+/** La acción que se envía: sus textos recortados en los extremos (A-126). */
+export function actionPayload(action: ActionDraft): ActionDraft {
+  return {
+    ...action,
+    action_description: submittedText(action.action_description),
+    expected_outcome: optionalText(action.expected_outcome ?? ''),
+  };
 }
 export function ActionFields({
   context,
@@ -37,6 +65,7 @@ export function ActionFields({
   readonly onChange: (value: ActionDraft) => void;
   readonly invalid?: boolean;
 }) {
+  const limits = actionLimits();
   const configuration = useScreenQuery({
     key: screenKey({
       screen: 'scr09',
@@ -76,20 +105,22 @@ export function ActionFields({
         onChange={(action_description) => {
           onChange({ ...value, action_description });
         }}
-        limits={LONG_TEXT}
+        limits={limits.description}
+        loopText
         showErrors={invalid}
       />
-      <label>
-        {text('scr09.reopening.expected_outcome')}
-        <textarea
-          name="expected_outcome"
-          maxLength={1000}
-          value={value.expected_outcome ?? ''}
-          onChange={(e) => {
-            onChange({ ...value, expected_outcome: e.target.value || null });
-          }}
-        />
-      </label>
+      <ReasonField
+        name="expected_outcome"
+        label={text('scr09.reopening.expected_outcome')}
+        value={value.expected_outcome ?? ''}
+        onChange={(expected) => {
+          onChange({ ...value, expected_outcome: expected === '' ? null : expected });
+        }}
+        limits={limits.expected}
+        optional
+        loopText
+        showErrors={invalid}
+      />
       <label>
         {text('scr09.reopening.assignee')}
         <select

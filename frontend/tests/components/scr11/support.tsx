@@ -165,11 +165,34 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Límites en caracteres Unicode tras NFC, como `FreeTextField` del servidor. */
+interface PolicyLimits {
+  readonly min: number;
+  readonly max: number;
+}
+
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+
+/**
+ * La política base del servidor, simulada a mano (`apply_base_policy` de U-02): un carácter de
+ * control (un salto de línea lo es) o una longitud fuera de los límites del campo responde 400
+ * `invalid_request` **sin** `detail_code`, como `AnalysisRequestInvalid` (A-126). No usa el espejo
+ * de la interfaz: si la pantalla enviara sin recortar, este servidor la rechaza.
+ */
+function basePolicyRejects(value: unknown, limits: PolicyLimits): boolean {
+  if (typeof value !== 'string') return false;
+  const length = Array.from(value.normalize('NFC')).length;
+  return CONTROL.test(value) || length < limits.min || length > limits.max;
+}
+
 /** Respuesta guionizada de una consulta de estado del asistente. */
 type StatusStep = () => Response | Promise<Response>;
 
-/** Servidor falso de U-04 con estado: valida el orden de los porqués y la firma. */
-export function fakeLoop() {
+/** Servidor falso de U-04 con estado: valida el orden de los porqués, sus textos y la firma. */
+export function fakeLoop({
+  statement = { min: 20, max: 1000 },
+  rootText = { min: 20, max: 2000 },
+}: { statement?: PolicyLimits; rootText?: PolicyLimits } = {}) {
   const calls = {
     start: 0,
     inProgress: 0,
@@ -230,6 +253,8 @@ export function fakeLoop() {
             calls.steps.push({ index, body });
             const scripted = state.stepResponse?.(index) ?? null;
             if (scripted !== null) return scripted;
+            if (basePolicyRejects(body.statement, statement))
+              return apiError('invalid_request', 400);
             if (index > current.why_steps.length + 1)
               return apiError('conflict', 409, 'loop_analysis_step_out_of_order');
             const step = {
@@ -262,6 +287,11 @@ export function fakeLoop() {
             calls.signatures.push(body);
             const scripted = state.signatureResponse?.() ?? null;
             if (scripted !== null) return scripted;
+            if (
+              basePolicyRejects(body.root_cause_statement, rootText) ||
+              basePolicyRejects(body.conclusion, rootText)
+            )
+              return apiError('invalid_request', 400);
             if (current.state === 'signed')
               return apiError('conflict', 409, 'loop_transition_not_allowed');
             if (body.professional_license == null)

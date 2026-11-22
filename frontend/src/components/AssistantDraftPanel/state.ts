@@ -43,7 +43,7 @@ export interface AssistantRequestView {
   readonly draft: AssistantDraft | null;
 }
 
-export type RejectionCode = 'blocked_vocabulary_term' | 'person_attribution_detected';
+type RejectionCode = 'blocked_vocabulary_term' | 'person_attribution_detected';
 
 /** Rechazo de los validadores de U-04; sin término ni sugerencia si la respuesta no los trae. */
 export interface AssistantRejection {
@@ -99,7 +99,7 @@ function rejectionText(value: unknown): string | null {
 }
 
 /** Código cerrado del rechazo, con o sin el prefijo `loop_` del `detail_code` (pendiente nº 33). */
-export function rejectionCode(value: unknown): RejectionCode | null {
+function rejectionCode(value: unknown): RejectionCode | null {
   if (typeof value !== 'string') return null;
   const code = value.startsWith('loop_') ? value.slice('loop_'.length) : value;
   return code === 'blocked_vocabulary_term' || code === 'person_attribution_detected' ? code : null;

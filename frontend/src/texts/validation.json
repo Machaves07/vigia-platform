@@ -19,5 +19,6 @@
   "validation.free_text.control_character": "El texto contiene caracteres de control.",
   "validation.free_text.invisible_character": "El texto contiene caracteres invisibles de formato.",
   "validation.free_text.disallowed_character": "El texto contiene caracteres no admitidos.",
-  "validation.free_text.markup": "El texto contiene marcado o secuencias de escape de marcado."
+  "validation.free_text.markup": "El texto contiene marcado o secuencias de escape de marcado.",
+  "validation.free_text.line_break": "El texto no admite saltos de línea; únalos en una sola línea."
 }

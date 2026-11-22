@@ -2,6 +2,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
+import { TextNotice } from '@/components/ReasonField/TextNotice';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
@@ -45,8 +46,22 @@ function useClosureContext() {
 }
 export type ClosureContext = ReturnType<typeof useClosureContext>;
 
-export function Failure({ error }: { readonly error: Error | null }) {
+/**
+ * El fallo de una lectura o de una escritura. En un formulario de textos del lazo (`written`), el
+ * rechazo de un texto dice su motivo real (`TextNotice`, A-126).
+ */
+export function Failure({
+  error,
+  written,
+}: {
+  readonly error: Error | null;
+  /** Los textos que envió el formulario; sin ellos, el fallo no es de un texto. */
+  readonly written?: string;
+}) {
   const notice = closureNotice(error);
+  if (notice !== null && written !== undefined) {
+    return <TextNotice id={notice.id} notice={notice} written={written} loopText />;
+  }
   if (notice !== null) return <FieldNotice id={notice.id} notice={notice} />;
   return error === null ? null : <p role="alert">{text('screen_state.unavailable')}</p>;
 }
