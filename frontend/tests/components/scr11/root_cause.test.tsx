@@ -706,6 +706,30 @@ describe('SCR-11 A-126: textos que guían en vez de rechazar', { timeout: 60_000
     expect((statement(1) as HTMLTextAreaElement).value).toBe(written);
   });
 
+  it('un 400 sin detail_code al firmar dice qué revisar junto a la firma, con el correlation_id', async () => {
+    const { loop } = await setup();
+    await start();
+    const block = await toSummary();
+    const response = apiError('invalid_request', 400);
+    const body = (await response.clone().json()) as { correlation_id: string };
+    loop.state.signatureResponse = () => response.clone();
+    fireEvent.click(
+      within(block).getByRole('button', { name: text('components_forms.signature.sign') }),
+    );
+    const alert = await waitFor(() => {
+      const found = document.getElementById('signature-text');
+      if (found === null) throw new Error('Aún no hay aviso junto a la firma.');
+      return found;
+    }, WAIT);
+    expect(alert.getAttribute('data-text-key')).toBe('components_forms.reason.review');
+    expect(alert.querySelector('[data-part="correlation_id"]')?.textContent).toBe(
+      body.correlation_id,
+    );
+    expect(document.querySelectorAll('[role="alert"][data-code="invalid_request"]')).toHaveLength(
+      1,
+    );
+  });
+
   it('una causa raíz con un salto en medio no firma; con un Enter final firma recortada', async () => {
     const { loop } = await setup();
     await start();

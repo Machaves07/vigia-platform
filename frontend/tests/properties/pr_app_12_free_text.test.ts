@@ -363,18 +363,18 @@ const EDGE = [
   '\v',
   '\f',
   '\u0085',
-  ' ',
-  ' ',
-  ' ',
-  ' ',
-  ' ',
-  '　',
+  '\u00a0',
+  '\u1680',
+  '\u2007',
+  '\u202f',
+  '\u205f',
+  '\u3000',
   '\u2028',
   '\u2029',
 ];
 const LINE_BREAKS = ['\n', '\r', '\r\n', '\v', '\f', '\u0085', '\u2028', '\u2029'];
-const INNER_SPACES = [' ', ' ', ' ', '　'];
-const EDGE_INVISIBLES = ['​', '﻿', '⁠', '­'];
+const INNER_SPACES = ['\u00a0', '\u2007', '\u202f', '\u3000'];
+const EDGE_INVISIBLES = ['\u200b', '\ufeff', '\u2060', '\u00ad'];
 
 /** Vectores cuyo texto ya está recortado: el oráculo del texto recortado es el propio vector. */
 const trimmed = corpus.vectors.filter(

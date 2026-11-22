@@ -47,10 +47,7 @@ async function fill(user: ReturnType<typeof userEvent.setup>) {
     'engineering',
   );
   await user.type(screen.getByRole('textbox', { name: DESCRIPTION_NAME }), DESCRIPTION);
-  await user.type(
-    screen.getByRole('textbox', { name: EXPECTED_NAME }),
-    EXPECTED,
-  );
+  await user.type(screen.getByRole('textbox', { name: EXPECTED_NAME }), EXPECTED);
   await user.click(screen.getByRole('button', { name: text('scr09.loop.submit') }));
 }
 

@@ -278,12 +278,12 @@ function serverNotice(
 describe('A-126: el texto del lazo se mide y se envía recortado en los extremos', () => {
   it('el contador cuenta lo que se enviaría: NFC y sin espacios ni saltos de los extremos', () => {
     const { container } = render(<LoopHarness />);
-    fireEvent.change(loopField(), { target: { value: `  ${'a'.repeat(14)}\n　\n` } });
+    fireEvent.change(loopField(), { target: { value: ` \u00a0${'a'.repeat(14)}\n\u3000\n` } });
     expect(counter(container)).toBe(counterText(14, LOOP));
     fireEvent.blur(loopField());
     expect(localErrorKey(container)).toBe('validation.free_text.too_short');
     // NFD: e + U+0301 cuenta como un carácter, como en el servidor.
-    fireEvent.change(loopField(), { target: { value: 'é'.repeat(3) } });
+    fireEvent.change(loopField(), { target: { value: 'e\u0301'.repeat(3) } });
     expect(counter(container)).toBe(counterText(3, LOOP));
   });
 
@@ -300,9 +300,13 @@ describe('A-126: el texto del lazo se mide y se envía recortado en los extremos
   });
 
   it('el recorte nunca toca el interior ni quita invisibles de los extremos', () => {
-    expect(submittedText(`  uno  dos tres  `)).toBe('uno  dos tres');
-    expect(submittedText(`​${VALID}﻿`)).toBe(`​${VALID}﻿`);
-    expect(reasonIssueKey(`​${VALID}`, LOOP, { loopText: true })).toBe(
+    expect(submittedText(`  uno  dos\u00a0tres  `)).toBe('uno  dos\u00a0tres');
+    expect(submittedText(`\u200b${VALID}\ufeff`)).toBe(`\u200b${VALID}\ufeff`);
+    // Un invisible suelto no es «en blanco»: da su motivo, como el servidor.
+    expect(reasonIssueKey('\ufeff', LOOP, { loopText: true })).toBe(
+      'validation.free_text.invisible_character',
+    );
+    expect(reasonIssueKey(`\u200b${VALID}`, LOOP, { loopText: true })).toBe(
       'validation.free_text.invisible_character',
     );
   });
