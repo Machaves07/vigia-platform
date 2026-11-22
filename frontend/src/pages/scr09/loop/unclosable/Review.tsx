@@ -122,7 +122,7 @@ export function Review({
             display_name: context.principal.display_name,
             professional_license: context.principal.professional_license ?? null,
           }}
-          textToSign={`${label('unclosable_review_outcome', outcome)}\n${submittedText(note)}\n${outcome === 'renewed' ? day : action.action_description}`}
+          textToSign={`${label('unclosable_review_outcome', outcome)}\n${submittedText(note)}\n${outcome === 'renewed' ? day : submittedText(action.action_description)}`}
           pending={mutation.status === 'pending'}
           notice={notice?.field === 'signature' ? notice : undefined}
           onSign={(snapshot) => {

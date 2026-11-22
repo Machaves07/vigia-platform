@@ -71,9 +71,15 @@ interface RootDraft {
 const EMPTY_ROOT: RootDraft = { category: '', statement: '', conclusion: '' };
 const LOOP_TEXT = { loopText: true } as const;
 
-/** Un porqué posterior al primero puede quedar en blanco: entonces no se guarda. */
-function whyOptions(offset: number) {
-  return { loopText: true, optional: offset > 0 };
+/**
+ * Un porqué posterior al primero puede quedar en blanco mientras no esté guardado: entonces no se
+ * guarda. Uno ya guardado no se puede vaciar: en blanco es «obligatorio», anclado al campo.
+ */
+function whyOptions(analysis: Analysis, offset: number) {
+  return {
+    loopText: true,
+    optional: offset > 0 && analysis.why_steps.every((step) => step.step_index !== offset + 1),
+  };
 }
 
 function savedStep(analysis: Analysis, index: number) {
@@ -144,7 +150,7 @@ function WhyStep({
         name={`why-${String(index)}`}
         value={draft.statement}
         limits={ROOT_CAUSE_TEXT_LIMITS.why_statement}
-        {...whyOptions(offset)}
+        {...whyOptions(analysis, offset)}
         showErrors={showErrors}
         notice={fieldNotice}
         onChange={(statement) => {
@@ -355,7 +361,7 @@ export function Workspace({
     const verdict = reasonVerdict(
       draft.statement,
       ROOT_CAUSE_TEXT_LIMITS.why_statement,
-      whyOptions(offset),
+      whyOptions(analysis, offset),
     );
     setNotice(field, null);
     // Con un error local no hay petición: el error queda en el campo (A-126). Un porqué opcional

@@ -335,7 +335,7 @@ const DECLARATION_FORM: Form = {
       within(wizard).getByRole('textbox', {
         name: reasonName('scr09.unclosable.rejection_reason'),
       }),
-      { target: { value: DESCRIPTION } },
+      { target: { value: `${DESCRIPTION}\n` } },
     );
     await next();
     await next();
@@ -345,7 +345,7 @@ const DECLARATION_FORM: Form = {
       within(wizard).getByRole('textbox', {
         name: reasonName('scr09.unclosable.compensatory_measure'),
       }),
-      { target: { value: DESCRIPTION } },
+      { target: { value: `${DESCRIPTION}\n` } },
     );
     await next();
     changeDate(within(wizard).getByLabelText(text('scr09.unclosable.review_due_at')), '2026-10-25');
@@ -505,6 +505,102 @@ describe.each(DIRECT)('SCR-09 $name: validar mientras se escribe', { timeout: 60
     });
     expect(state.bodies).toEqual([]);
     expect(form.textbox().value).toBe('Catorce letras');
+  });
+});
+
+describe('SCR-09 textos secundarios', { timeout: 60_000 }, () => {
+  it('declaración: el motivo del rechazo y la medida compensatoria se envían recortados', async () => {
+    const state = install(DECLARATION_FORM);
+    const user = await DECLARATION_FORM.open();
+    await send(DECLARATION_FORM, user, TEXT);
+    await waitFor(() => {
+      expect(state.bodies).toHaveLength(1);
+    }, WAIT);
+    expect({
+      rejection_reason: state.bodies[0]?.rejection_reason,
+      compensatory_measure: state.bodies[0]?.compensatory_measure,
+    }).toEqual({ rejection_reason: DESCRIPTION, compensatory_measure: DESCRIPTION });
+  });
+
+  it('evidencia: la nota de verificación en blanco es null y escrita va recortada', async () => {
+    const state = install(EVIDENCE);
+    const user = await EVIDENCE.open();
+    const note = () =>
+      screen.getAllByRole('textbox', {
+        name: `${text('scr09.closure.verification')} (${text('components_forms.reason.optional')})`,
+      })[0] as HTMLTextAreaElement;
+    fireEvent.change(note(), { target: { value: ' \n ' } });
+    await send(EVIDENCE, user, TEXT);
+    await waitFor(() => {
+      expect(state.bodies).toHaveLength(1);
+    }, WAIT);
+    expect(state.bodies[0]?.verification_note).toBeNull();
+    fireEvent.change(note(), { target: { value: 'Nota sintética de verificación\n' } });
+    await EVIDENCE.submit(user);
+    await waitFor(() => {
+      expect(state.bodies).toHaveLength(2);
+    }, WAIT);
+    expect(state.bodies[1]?.verification_note).toBe('Nota sintética de verificación');
+  });
+
+  it('acción: el resultado esperado con un error local no envía', async () => {
+    const state = install(ACTION_FORM);
+    const user = await ACTION_FORM.open();
+    const expected = screen.getByRole('textbox', {
+      name: `${text('scr09.loop.expected_outcome')} (${text('components_forms.reason.optional')})`,
+    });
+    fireEvent.change(expected, { target: { value: 'Resultado <b>sintético</b>' } });
+    await send(ACTION_FORM, user, TEXT);
+    await waitFor(() => {
+      const keys = (expected.getAttribute('aria-describedby')?.split(' ') ?? []).map((id) =>
+        document.getElementById(id)?.getAttribute('data-text-key'),
+      );
+      expect(keys).toContain('validation.free_text.markup');
+    }, WAIT);
+    await act(async () => {
+      await new Promise((done) => {
+        setTimeout(done, 50);
+      });
+    });
+    expect(state.bodies).toEqual([]);
+  });
+
+  it('revisión del incerrable: la acción nueva se envía recortada y se firma como se envía', async () => {
+    const state = install(REVIEW);
+    const user = await REVIEW.open();
+    const region = reviewRegion();
+    await user.selectOptions(
+      within(region).getByLabelText(text('scr09.unclosable.outcome')),
+      'converted_to_action',
+    );
+    await user.selectOptions(
+      within(region).getByLabelText(text('scr09.reopening.action_type')),
+      'engineering',
+    );
+    fireEvent.change(
+      within(region).getByRole('textbox', {
+        name: reasonName('scr09.reopening.action_description'),
+      }),
+      { target: { value: `${DESCRIPTION}\n` } },
+    );
+    fireEvent.change(REVIEW.textbox(), { target: { value: TEXT } });
+    const signed = within(region).getByText(
+      (_content, element) => element?.getAttribute('data-part') === 'text_to_sign',
+    );
+    expect(signed.textContent).toBe(
+      [label('unclosable_review_outcome', 'converted_to_action'), TEXT, DESCRIPTION].join('\n'),
+    );
+    await REVIEW.submit(user);
+    await waitFor(() => {
+      expect(state.bodies).toHaveLength(1);
+    }, WAIT);
+    expect(state.bodies[0]?.action).toEqual({
+      action_type: 'engineering',
+      action_description: DESCRIPTION,
+      expected_outcome: null,
+      assignee_user_id: USER,
+      deadline_days: null,
+    });
   });
 });
 

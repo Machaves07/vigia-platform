@@ -74,11 +74,16 @@ async function start() {
   return screen.findByRole('region', { name: text('scr11.wizard_title') }, WAIT);
 }
 
+/** Nombre accesible del porqué: obligatorio el primero y todo porqué ya guardado. */
+function statementName(index: number, requirement: 'required' | 'optional'): string {
+  return `${text('scr11.statement')} ${String(index)} (${text(`components_forms.reason.${requirement}`)})`;
+}
+
 function statement(index: number) {
-  const requirement = index === 1 ? 'required' : 'optional';
-  return screen.getByRole('textbox', {
-    name: `${text('scr11.statement')} ${String(index)} (${text(`components_forms.reason.${requirement}`)})`,
-  });
+  return (
+    screen.queryByRole('textbox', { name: statementName(index, 'required') }) ??
+    screen.getByRole('textbox', { name: statementName(index, 'optional') })
+  );
 }
 
 function rootName(key: string): string {
@@ -588,6 +593,31 @@ describe('SCR-11 A-126: textos que guían en vez de rechazar', { timeout: 60_000
       root_cause_statement: routes.get('root_cause_analysis/root_cause_statement'),
       conclusion: routes.get('root_cause_analysis/conclusion'),
     });
+  });
+
+  it('un porqué guardado no se puede vaciar: en blanco es «obligatorio» y no hay petición', async () => {
+    const { loop } = await setup();
+    await start();
+    await saveWhy(1, 'Primer porqué sintético con más de veinte caracteres.');
+    next();
+    // Sin guardar, el porqué 2 es opcional; guardado, pasa a obligatorio.
+    expect(screen.queryByRole('textbox', { name: statementName(2, 'optional') })).not.toBeNull();
+    await saveWhy(2, 'Segundo porqué sintético con más de veinte caracteres.');
+    expect(screen.queryByRole('textbox', { name: statementName(2, 'required') })).not.toBeNull();
+    const before = loop.calls.steps.length;
+    fireEvent.change(statement(2), { target: { value: '' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(
+        whyPart(2).querySelector('[data-part="local_error"]')?.getAttribute('data-text-key'),
+      ).toBe('validation.required');
+    }, WAIT);
+    await act(async () => {
+      await new Promise((done) => {
+        setTimeout(done, 50);
+      });
+    });
+    expect(loop.calls.steps).toHaveLength(before);
   });
 
   it('un porqué de 40 caracteres y un Enter se envía sin el salto', async () => {
