@@ -33,7 +33,11 @@ const COLUMNS = [
 
 export const FAMILIES = ['coexistence', 'guard_bypass', 'dwell', 'startup_transition'] as const;
 export const TIERS = ['tier_1', 'tier_2'] as const;
-export const STATES = [
+/**
+ * Etiquetas de estado: los nueve de `finding_lifecycle_state`. Cerrado y descartado siguen aquí
+ * porque se pintan fuera de la bandeja (detalle, lazos e histórico, TASK-586).
+ */
+const STATES = [
   'received',
   'in_review',
   'discarded',
@@ -44,6 +48,21 @@ export const STATES = [
   'unclosable',
   'suspended_by_reclassification',
 ] as const;
+/**
+ * Opciones del filtro «Estado del lazo» (O-11, TASK-582): la bandeja es una cola de trabajo y el
+ * servidor solo admite sus siete estados activos (`INBOX_STATES`, BR-LAZ-02, LC-LAZ-05); otro
+ * estado da 400. Es, por igualdad y en orden, la sección `inbox_states` de
+ * `backend/openapi/u05-fixtures.json`, y una prueba lo contrasta.
+ */
+export const INBOX_STATES = [
+  'received',
+  'in_review',
+  'open',
+  'action_assigned',
+  'overdue',
+  'unclosable',
+  'suspended_by_reclassification',
+] as const satisfies readonly (typeof STATES)[number][];
 export function findingLabel(kind: 'family' | 'tier' | 'state', value: string) {
   const allowed: readonly string[] =
     kind === 'family' ? FAMILIES : kind === 'tier' ? TIERS : STATES;

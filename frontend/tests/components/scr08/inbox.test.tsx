@@ -1,17 +1,37 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import Inbox from '@/pages/scr08/inbox';
+import { findingLabel } from '@/pages/scr08/inbox/FindingsView';
 import { readInbox } from '@/ports/scr08Findings';
 import { text } from '@/texts';
+import { apiError } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { settle } from '../../support/queryCache';
 import { changeDate } from '../../support/dateFields';
 import { finding, fixture, gate, INSTANT, page, PLANT, zone } from './support';
 
 const WAIT = { timeout: 10_000 };
+
+/**
+ * Oráculos del servidor (`backend/openapi/u05-fixtures.json`): `inbox_states`, los estados que
+ * admite el filtro de la bandeja (`INBOX_STATES`, BR-LAZ-02), y `lifecycle.states`, los nueve de
+ * `finding_lifecycle_state`.
+ */
+const FIXTURES = JSON.parse(
+  readFileSync(
+    resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../../backend/openapi/u05-fixtures.json',
+    ),
+    'utf8',
+  ),
+) as { inbox_states: string[]; lifecycle: { states: string[] } };
 
 /** Campo de día del filtro: su etiqueta lleva además la zona horaria de la planta. */
 function dayField(key: string): HTMLElement {
@@ -128,7 +148,7 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     );
     await user.selectOptions(
       screen.getByRole('combobox', { name: text('scr08.inbox.state') }),
-      'closed',
+      'unclosable',
     );
     changeDate(dayField('scr08.inbox.from'), '2025-12-01');
     changeDate(dayField('scr08.inbox.to'), '2025-12-31');
@@ -143,7 +163,7 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     expect(query?.getAll('zone_id')).toEqual([zone().zone_id]);
     expect(query?.get('family')).toBe('dwell');
     expect(query?.get('tier')).toBe('tier_2');
-    expect(query?.getAll('lifecycle_state')).toEqual(['closed']);
+    expect(query?.getAll('lifecycle_state')).toEqual(['unclosable']);
     // Los días se cuentan en la hora de la planta (America/Bogota, UTC−5), no en UTC (S3-11).
     expect(query?.get('from')).toBe('2025-12-01T05:00:00.000Z');
     expect(query?.get('to')).toBe(INSTANT.replace('T12:00', 'T05:00'));
@@ -463,5 +483,67 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
       items.map((item) => `/findings/${item.finding_state_id}`),
     );
     expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('O-11: el filtro de estado ofrece, por igualdad y en orden, inbox_states; ninguna opción da 400', async () => {
+    const { Wrapper, cache } = await fixture({ path: '/findings' });
+    const inbox = FIXTURES.inbox_states;
+    // El simulador aplica INBOX_STATES como el servidor: otro estado es 400 (O-11).
+    const statuses: number[] = [];
+    server.use(
+      http.get('http://localhost/loop/findings', ({ request }) => {
+        const states = new URL(request.url).searchParams.getAll('lifecycle_state');
+        if (states.some((state) => !inbox.includes(state))) {
+          statuses.push(400);
+          return apiError('invalid_request', 400);
+        }
+        statuses.push(200);
+        return HttpResponse.json(page());
+      }),
+    );
+    render(<Inbox />, { wrapper: Wrapper });
+    await screen.findByText(text('scr08.inbox.empty'), {}, WAIT);
+    const select = screen.getByRole<HTMLSelectElement>('combobox', {
+      name: text('scr08.inbox.state'),
+    });
+    expect([...select.options].map((option) => [option.value, option.textContent])).toEqual([
+      ['', text('scr08.inbox.all')],
+      ...inbox.map((state) => [state, text(`scr08.inbox.state.${state}`)]),
+    ]);
+    expect(['closed', 'discarded'].filter((state) => inbox.includes(state))).toEqual([]);
+    const user = userEvent.setup();
+    for (const [index, state] of inbox.entries()) {
+      await user.selectOptions(select, state);
+      await user.click(screen.getByRole('button', { name: text('scr08.inbox.apply') }));
+      await waitFor(() => {
+        expect(statuses).toHaveLength(index + 2);
+        expect(cache.client.isFetching()).toBe(0);
+      }, WAIT);
+    }
+    expect(statuses).toEqual(Array.from({ length: inbox.length + 1 }, () => 200));
+    expect(screen.queryByRole('button', { name: text('screen_state.retry') })).toBeNull();
+  });
+
+  it('las etiquetas siguen con los nueve estados: un hallazgo cerrado muestra la suya', async () => {
+    const states = FIXTURES.lifecycle.states;
+    expect(states.map((state) => findingLabel('state', state))).toEqual(
+      states.map((state) => text(`scr08.inbox.state.${state}`)),
+    );
+    const { Wrapper, cache } = await fixture({ path: '/findings' });
+    server.use(
+      http.get('http://localhost/loop/findings', () =>
+        HttpResponse.json(page([{ ...finding(), lifecycle_state: 'closed' }])),
+      ),
+    );
+    const { container } = render(<Inbox />, { wrapper: Wrapper });
+    await screen.findByRole('link', { name: zone().name }, WAIT);
+    await waitFor(() => {
+      expect(cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    const chip = container.querySelector('tbody [data-state]');
+    expect([chip?.getAttribute('data-state'), chip?.textContent]).toEqual([
+      'closed',
+      text('status_chip.closed'),
+    ]);
   });
 });

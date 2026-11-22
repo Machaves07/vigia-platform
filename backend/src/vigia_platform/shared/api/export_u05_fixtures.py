@@ -5,7 +5,7 @@ Uso (desde ``backend/``)::
     uv run python -m vigia_platform.shared.api.export_u05_fixtures          # escribe el archivo
     uv run python -m vigia_platform.shared.api.export_u05_fixtures --check  # 0 si no hay diferencia
 
-El archivo tiene cuatro secciones, que ``frontend/`` consume por igualdad y no por heurística:
+El archivo tiene cinco secciones, que ``frontend/`` consume por igualdad y no por heurística:
 
 - ``permissions`` (BR-APP-02, PR-APP-01, PAT-APP-SEG-06): el registro consolidado de claves de
   ``PermissionKey`` (U-02 §2.6 con las notas fechadas de U-03 y U-04, A-13), la columna de cada uno
@@ -33,6 +33,10 @@ El archivo tiene cuatro secciones, que ``frontend/`` consume por igualdad y no p
   la respuesta de ``GET /episode-photos/{photo_id}/image``: sus cabeceras y el JPEG en base64. La
   imagen la **genera** ``synthetic_episode_jpeg`` (gris uniforme de 64 x 64, decodificable, con la
   marca ``vigia_anonymized=1``): nunca una foto real (NFR-CTR-43).
+- ``inbox_states`` (TASK-582, A-126; BR-LAZ-02, LC-LAZ-05): los siete estados activos que admite
+  el filtro ``lifecycle_state`` de ``GET /loop/findings``, en el orden de ``INBOX_STATES`` (el
+  índice parcial de la bandeja). La bandeja es una cola de trabajo: otro estado da 400. El filtro
+  de la interfaz ofrece exactamente esta lista, y una prueba suya lo contrasta por igualdad.
 
 ``--check`` compara byte a byte con el archivo versionado y termina en 1 si difiere o falta;
 entonces imprime cada diferencia con su clave, rol, ruta o caso, y el principio del diff. El JSON
@@ -73,6 +77,7 @@ from vigia_platform.ledger.free_text import (
     FreeTextRejected,
     FreeTextRejection,
 )
+from vigia_platform.loop.adapters.postgres.inbox_query import INBOX_STATES
 from vigia_platform.loop.domain.enums import FindingLifecycleState
 from vigia_platform.loop.domain.lifecycle import TRANSITIONS, Transition
 from vigia_platform.shared.context import Role
@@ -94,6 +99,7 @@ __all__ = [
     "evaluate",
     "free_text_routes",
     "free_text_section",
+    "inbox_states_section",
     "lifecycle_section",
     "main",
     "permission_differences",
@@ -105,8 +111,9 @@ __all__ = [
 DEFAULT_OUTPUT: Final = Path(__file__).resolve().parents[4] / "openapi/u05-fixtures.json"
 """``backend/openapi/u05-fixtures.json``."""
 FORMAT: Final = "vigia-platform/u05-fixtures"
-SCHEMA_VERSION: Final = 3
-"""2: la sección ``lifecycle`` (VIG-359); 3: la sección ``episode_photos`` (TASK-573)."""
+SCHEMA_VERSION: Final = 4
+"""2: la sección ``lifecycle`` (VIG-359); 3: la sección ``episode_photos`` (TASK-573); 4: la
+sección ``inbox_states`` (TASK-582)."""
 """Versión del formato del archivo: sube si cambia la forma, no si cambian los datos."""
 CORPUS_SEED: Final = 462
 """Semilla del corpus (TASK-462): elige rutas y relleno; el mismo código da el mismo archivo."""
@@ -520,6 +527,18 @@ def lifecycle_section(transitions: Mapping[str, Transition]) -> dict[str, Any]:
     }
 
 
+# --- Estados de la bandeja (TASK-582) -----------------------------------------------------------
+
+
+def inbox_states_section(
+    states: Sequence[FindingLifecycleState] = INBOX_STATES,
+) -> list[str]:
+    """Los estados que admite el filtro ``lifecycle_state`` de la bandeja, en el orden de
+    ``INBOX_STATES`` (BR-LAZ-02, LC-LAZ-05). Cerrado y descartado no están: la bandeja es una cola
+    de trabajo y pedirlos da 400. La interfaz ofrece exactamente esta lista (O-11)."""
+    return [state.value for state in states]
+
+
 # --- Episodios de la sombra (TASK-573) ----------------------------------------------------------
 
 _EXAMPLE_ZONE: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000a112")
@@ -644,6 +663,7 @@ def build_document(
     routes: Sequence[FreeTextRoute],
     policy: FreeTextPolicyRegistry,
     transitions: Mapping[str, Transition] = TRANSITIONS,
+    inbox_states: Sequence[FindingLifecycleState] = INBOX_STATES,
 ) -> dict[str, Any]:
     """El documento completo, con su cabecera de formato."""
     return {
@@ -660,13 +680,15 @@ def build_document(
                 "NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres "
                 "Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del "
                 "ciclo de vida del hallazgo que aplica el servidor. episode_photos es un ejemplo "
-                "sintético de los episodios de la sombra (la imagen es un JPEG gris generado)."
+                "sintético de los episodios de la sombra (la imagen es un JPEG gris generado). "
+                "inbox_states son los estados que admite el filtro de la bandeja, en su orden."
             ),
         },
         "permissions": permissions_section(keys, matrix),
         "free_text": free_text_section(routes, policy),
         "lifecycle": lifecycle_section(transitions),
         "episode_photos": episode_photos_section(),
+        "inbox_states": inbox_states_section(inbox_states),
     }
 
 
@@ -682,7 +704,14 @@ def differences(committed: object, current: Mapping[str, Any]) -> list[tuple[str
         return [("invalid_file",)]
     found: list[tuple[str, ...]] = [
         ("field_differs", name)
-        for name in ("format", "schema_version", "generated", "lifecycle", "episode_photos")
+        for name in (
+            "format",
+            "schema_version",
+            "generated",
+            "lifecycle",
+            "episode_photos",
+            "inbox_states",
+        )
         if committed.get(name) != current[name]
     ]
     permissions = committed.get("permissions")
