@@ -5,13 +5,26 @@ import {
   DirectUploadField,
   type UploadFailure,
 } from '@/components/DirectUploadField/DirectUploadField';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import evidenceBody from '../../../../../openapi/bodies/add_evidence_loop_actions__action_id__evidence_post.json';
+import { reasonLimits } from '@/components/ReasonField/limits';
+import {
+  optionalText,
+  ReasonField,
+  reasonIssueKey,
+  submittedText,
+} from '@/components/ReasonField/ReasonField';
+import { textFields } from '@/components/ReasonField/TextNotice';
 import { closureNotice, closurePort, type Detail, type EvidenceBody } from '@/ports/scr09Closure';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import { Failure } from './common';
 import { executionInstant } from './dates';
 
+/**
+ * Límites de los textos del lazo que el esquema generado no publica (motivo de la reapertura,
+ * declaración y revisión del incerrable, de 20 a 2000): la prueba los compara por igualdad con sus
+ * rutas del corpus `u05-fixtures.json` (`free_text.routes`). El servidor decide.
+ */
 export const LONG_TEXT = { minLength: 20, maxLength: 2000 };
 export function Evidence({
   detail,
@@ -32,6 +45,10 @@ export function Evidence({
   const [invalid, setInvalid] = useState(false);
   const [uploadError, setUploadError] = useState<Error | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [limits] = useState(() => ({
+    description: reasonLimits(evidenceBody, 'description'),
+    verification: reasonLimits(evidenceBody, 'verification_note'),
+  }));
   const mutation = useScreenMutation({
     write: (body: EvidenceBody) =>
       closurePort.evidence.write({ path: { action_id: action }, body }),
@@ -43,7 +60,9 @@ export function Evidence({
     loop_attachment_hash_mismatch: 'attachments',
     loop_attachment_too_large: 'attachments',
     loop_attachment_type_not_allowed: 'attachments',
+    ...textFields({ description, verification_note: verification }),
   });
+  const anchored = notice?.field === 'description' || notice?.field === 'verification_note';
   const uploadFailure = (failure: UploadFailure) => {
     setUploading(false);
     if (failure.kind === 'store') setDegraded(true);
@@ -65,7 +84,9 @@ export function Evidence({
           instant === null ||
           role.trim() === '' ||
           role.length > 64 ||
-          reasonIssueKey(description, LONG_TEXT) !== null ||
+          reasonIssueKey(description, limits.description, { loopText: true }) !== null ||
+          reasonIssueKey(verification, limits.verification, { loopText: true, optional: true }) !==
+            null ||
           attachments.length > 5
         ) {
           setInvalid(true);
@@ -73,10 +94,10 @@ export function Evidence({
         }
         void mutation
           .run({
-            description,
+            description: submittedText(description),
             performed_at: instant,
             performed_by_role: role,
-            verification_note: verification.trim() === '' ? null : verification,
+            verification_note: optionalText(verification),
             attachments,
           })
           .then(() => {
@@ -88,7 +109,10 @@ export function Evidence({
       }}
     >
       <h2>{text('scr09.closure.evidence')}</h2>
-      <Failure error={notice?.field === 'attachments' ? null : mutation.error} />
+      <Failure
+        error={notice?.field === 'attachments' || anchored ? null : mutation.error}
+        written={[description, verification].join('\n')}
+      />
       {invalid && <p role="alert">{text('scr09.closure.invalid')}</p>}
       <label>
         {text('scr09.closure.action')}
@@ -114,21 +138,23 @@ export function Evidence({
         label={text('scr09.closure.description')}
         value={description}
         onChange={setDescription}
-        limits={LONG_TEXT}
+        limits={limits.description}
+        loopText
         showErrors={invalid}
+        notice={notice?.field === 'description' ? notice : undefined}
         name="description"
       />
-      <label>
-        {text('scr09.closure.verification')}
-        <textarea
-          name="verification_note"
-          value={verification}
-          maxLength={1000}
-          onChange={(e) => {
-            setVerification(e.target.value);
-          }}
-        />
-      </label>
+      <ReasonField
+        label={text('scr09.closure.verification')}
+        value={verification}
+        onChange={setVerification}
+        limits={limits.verification}
+        optional
+        loopText
+        showErrors={invalid}
+        notice={notice?.field === 'verification_note' ? notice : undefined}
+        name="verification_note"
+      />
       <label>
         {text('scr09.closure.performed_at')}
         <DateTimeInput name="performed_at" value={performed} onChange={setPerformed} required />

@@ -1,12 +1,12 @@
 /** Reabrir añade una acción nueva; jamás sustituye el historial consultado. */
 import { useState } from 'react';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import { ReasonField, reasonIssueKey, submittedText } from '@/components/ReasonField/ReasonField';
 import { closurePort, type ReopeningBody } from '@/ports/scr09Closure';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import { ClosureScreen, Failure, type ClosureContext } from '../closure/common';
 import { LONG_TEXT } from '../closure/Evidence';
-import { ActionFields, emptyAction, validAction } from './ActionFields';
+import { ActionFields, actionPayload, emptyAction, validAction } from './ActionFields';
 
 function Reopening({
   context,
@@ -34,18 +34,24 @@ function Reopening({
       aria-label={text('scr09.reopening.title')}
       onSubmit={(e) => {
         e.preventDefault();
-        if (reasonIssueKey(reason, LONG_TEXT) !== null || !validAction(action)) {
+        if (
+          reasonIssueKey(reason, LONG_TEXT, { loopText: true }) !== null ||
+          !validAction(action)
+        ) {
           setInvalid(true);
           return;
         }
         void mutation
-          .run({ reason_text: reason, ...action })
+          .run({ reason_text: submittedText(reason), ...actionPayload(action) })
           .then(onWritten)
           .catch(() => undefined);
       }}
     >
       <p>{text('scr09.reopening.history_kept')}</p>
-      <Failure error={mutation.error} />
+      <Failure
+        error={mutation.error}
+        written={[reason, action.action_description, action.expected_outcome ?? ''].join('\n')}
+      />
       {invalid && <p role="alert">{text('scr09.closure.invalid')}</p>}
       <ReasonField
         name="reason_text"
@@ -53,6 +59,7 @@ function Reopening({
         value={reason}
         onChange={setReason}
         limits={LONG_TEXT}
+        loopText
         showErrors={invalid}
       />
       <ActionFields

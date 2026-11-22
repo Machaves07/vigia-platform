@@ -28,8 +28,18 @@ function rootObject(body: unknown): Readonly<Record<string, unknown>> | undefine
   return schema;
 }
 
+/** Un campo anulable (`anyOf: [{type: string, …}, {type: null}]`) aporta su rama de texto. */
+function stringBranch(
+  property: Readonly<Record<string, unknown>> | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+  const branches = property?.anyOf;
+  if (!Array.isArray(branches)) return property;
+  const strings = branches.map(record).filter((branch) => branch?.type === 'string');
+  return strings.length === 1 ? strings[0] : undefined;
+}
+
 export function reasonLimits(document: GeneratedBodySchema, field: string): FreeTextLimits {
-  const property = record(record(rootObject(document.body)?.properties)?.[field]);
+  const property = stringBranch(record(record(rootObject(document.body)?.properties)?.[field]));
   const minLength = property?.minLength;
   const maxLength = property?.maxLength;
   if (

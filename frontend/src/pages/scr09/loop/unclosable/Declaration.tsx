@@ -1,7 +1,7 @@
 /** Cinco campos y fecha civil de revisión; el servidor decide la transición y la política. */
 import { DateInput } from '@/components/DateFields/DateFields';
 import { useState } from 'react';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import { ReasonField, reasonIssueKey, submittedText } from '@/components/ReasonField/ReasonField';
 import { SignatureBlock, type SignerProfile } from '@/components/SignatureBlock/SignatureBlock';
 import { StepWizard } from '@/components/StepWizard/StepWizard';
 import {
@@ -67,13 +67,14 @@ export function Declaration({
   const textSteps = TEXTS.map((field) => ({
     id: field,
     title: text(`scr09.unclosable.${field}`),
-    complete: reasonIssueKey(draft[field], LONG_TEXT) === null,
+    complete: reasonIssueKey(draft[field], LONG_TEXT, { loopText: true }) === null,
     content: (
       <ReasonField
         name={field}
         label={text(`scr09.unclosable.${field}`)}
         value={draft[field]}
         limits={LONG_TEXT}
+        loopText
         onChange={(value) => {
           change(field, value);
         }}
@@ -93,7 +94,7 @@ export function Declaration({
         )}
         <Failure error={policy.error} />
       </section>
-      <Failure error={mutation.error} />
+      <Failure error={mutation.error} written={TEXTS.map((field) => draft[field]).join('\n')} />
       {notice?.field === 'signature' && (
         <p>{text('components_forms.signature.guide_license_missing')}</p>
       )}
@@ -169,7 +170,7 @@ export function Declaration({
                       display_name: context.principal.display_name,
                       professional_license: context.principal.professional_license ?? null,
                     }}
-                    textToSign={`${text('scr09.unclosable.sign_text')}\n${TEXTS.map((field) => draft[field]).join('\n')}\n${draft.decision_date}\n${draft.review_due_at}`}
+                    textToSign={`${text('scr09.unclosable.sign_text')}\n${TEXTS.map((field) => submittedText(draft[field])).join('\n')}\n${draft.decision_date}\n${draft.review_due_at}`}
                     onSign={setSigned}
                     notice={notice?.field === 'signature' ? notice : undefined}
                   />
@@ -192,7 +193,9 @@ export function Declaration({
           if (
             !validReviewDate(draft.review_due_at, closureClock(), timeZone) ||
             signed === null ||
-            TEXTS.some((field) => reasonIssueKey(draft[field], LONG_TEXT) !== null)
+            TEXTS.some(
+              (field) => reasonIssueKey(draft[field], LONG_TEXT, { loopText: true }) !== null,
+            )
           ) {
             setInvalid(true);
             throw new Error('Fecha o campos de declaración no válidos.');
@@ -200,6 +203,9 @@ export function Declaration({
           try {
             await mutation.run({
               ...draft,
+              evaluated_alternative: submittedText(draft.evaluated_alternative),
+              rejection_reason: submittedText(draft.rejection_reason),
+              compensatory_measure: submittedText(draft.compensatory_measure),
               review_due_at: reviewInstant(draft.review_due_at, closureClock(), timeZone),
               professional_license: signed.professional_license,
             });

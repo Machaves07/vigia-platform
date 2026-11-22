@@ -5,8 +5,10 @@
  *   la causa raíz con su categoría cerrada, el enunciado y la conclusión (se envían al firmar).
  *   «Guardar sin terminar» existe porque hay `server_progress_ref` (el `analysis_id`) y guarda
  *   los porqués con cambios.
- * - El orden de los porqués, los textos y la licencia los valida el servidor: sus rechazos se
- *   anclan al campo (`loop_analysis_step_out_of_order`, `loop_blocked_vocabulary_term`,
+ * - Cada texto es UI-13 con los límites de U-04 (`ROOT_CAUSE_TEXT_LIMITS`): contador, espejo de la
+ *   política base antes de enviar y recorte de los extremos (A-126). Con un error local no se
+ *   envía nada; el orden de los porqués, los validadores y la licencia los decide el servidor: sus
+ *   rechazos se anclan al campo (`loop_analysis_step_out_of_order`, `loop_blocked_vocabulary_term`,
  *   `loop_person_attribution_detected`, `loop_cause_category_not_allowed`,
  *   `loop_signer_license_missing`) y nada se deshabilita por una regla propia (BR-APP-43).
  * - UI-22 va al lado de la plantilla: su estado nunca la oculta ni la bloquea (PR-APP-14).
@@ -16,14 +18,17 @@
  */
 import { useId, useRef, useState } from 'react';
 
-import {
-  AssistantDraftPanel,
-  ValidatorRejection,
-} from '@/components/AssistantDraftPanel/AssistantDraftPanel';
-import { rejectionCode, rejectionOf } from '@/components/AssistantDraftPanel/state';
+import { AssistantDraftPanel } from '@/components/AssistantDraftPanel/AssistantDraftPanel';
 import { useAssistantDraft } from '@/components/AssistantDraftPanel/useAssistantDraft';
-import { FieldNotice, NoticeStack } from '@/components/NoticeStack/NoticeStack';
+import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import { noticeForField, type Notice } from '@/components/NoticeStack/notice';
+import {
+  ReasonField,
+  reasonIssueKey,
+  reasonVerdict,
+  submittedText,
+} from '@/components/ReasonField/ReasonField';
+import { TextNotice, textRejection } from '@/components/ReasonField/TextNotice';
 import { SignatureBlock, type SignerProfile } from '@/components/SignatureBlock/SignatureBlock';
 import { StepWizard } from '@/components/StepWizard/StepWizard';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
@@ -31,6 +36,7 @@ import {
   assistantFailure,
   noticeError,
   plantTimeZone,
+  ROOT_CAUSE_TEXT_LIMITS,
   rootCauseClock,
   rootCausePort,
   type Analysis,
@@ -63,6 +69,18 @@ interface RootDraft {
 }
 
 const EMPTY_ROOT: RootDraft = { category: '', statement: '', conclusion: '' };
+const LOOP_TEXT = { loopText: true } as const;
+
+/**
+ * Un porqué posterior al primero puede quedar en blanco mientras no esté guardado: entonces no se
+ * guarda. Uno ya guardado no se puede vaciar: en blanco es «obligatorio», anclado al campo.
+ */
+function whyOptions(analysis: Analysis, offset: number) {
+  return {
+    loopText: true,
+    optional: offset > 0 && analysis.why_steps.every((step) => step.step_index !== offset + 1),
+  };
+}
 
 function savedStep(analysis: Analysis, index: number) {
   return analysis.why_steps.find((step) => step.step_index === index);
@@ -75,10 +93,13 @@ function draftsFrom(analysis: Analysis): WhyDraft[] {
   });
 }
 
-/** El porqué en pantalla coincide con el guardado en el servidor. */
+/** El porqué en pantalla coincide con el guardado: lo que se enviaría, en NFC como el servidor. */
 function matches(saved: ReturnType<typeof savedStep>, draft: WhyDraft | undefined): boolean {
   if (saved === undefined || draft === undefined) return false;
-  return saved.statement === draft.statement && (saved.category ?? '') === draft.category;
+  return (
+    saved.statement.normalize('NFC') === submittedText(draft.statement).normalize('NFC') &&
+    (saved.category ?? '') === draft.category
+  );
 }
 
 function synced(analysis: Analysis, drafts: readonly WhyDraft[], offset: number): boolean {
@@ -93,16 +114,6 @@ function notice(field: string, error: unknown): Notice {
   return { id: field, field, error: noticeError(error) };
 }
 
-/** Rechazo de los validadores de U-04 que el aviso trae, con término y sugerencia si vienen. */
-function ValidatorDetail({ value }: { readonly value: Notice | undefined }) {
-  if (value === undefined || rejectionCode(value.error.detail_code) === null) return null;
-  return (
-    <ValidatorRejection
-      rejection={rejectionOf(value.error.body, value.error.detail_code ?? null)}
-    />
-  );
-}
-
 function WhyStep({
   analysis,
   offset,
@@ -110,6 +121,7 @@ function WhyStep({
   onChange,
   onSave,
   saving,
+  showErrors,
   fieldNotice,
 }: {
   readonly analysis: Analysis;
@@ -118,6 +130,7 @@ function WhyStep({
   readonly onChange: (draft: WhyDraft) => void;
   readonly onSave: () => void;
   readonly saving: boolean;
+  readonly showErrors: boolean;
   readonly fieldNotice: Notice | undefined;
 }) {
   const id = useId();
@@ -125,7 +138,6 @@ function WhyStep({
   const saved = savedStep(analysis, index);
   const question =
     saved?.question_es ?? (analysis.next_step_index === index ? analysis.next_question_es : null);
-  const noticeId = `${id}-notice`;
   const isSynced = matches(saved, draft);
   return (
     <div className={styles.step} data-part={`why-${String(index)}`}>
@@ -133,18 +145,16 @@ function WhyStep({
         <strong>{text('scr11.question')}:</strong> {question ?? text('scr11.question_pending')}
       </p>
       {offset > 0 ? <p className={styles.hint}>{text('scr11.optional_step')}</p> : null}
-      <label htmlFor={`${id}-statement`}>
-        {text('scr11.statement')} {String(index)}
-      </label>
-      <textarea
-        id={`${id}-statement`}
+      <ReasonField
+        label={`${text('scr11.statement')} ${String(index)}`}
         name={`why-${String(index)}`}
-        rows={4}
         value={draft.statement}
-        aria-invalid={fieldNotice === undefined ? undefined : true}
-        aria-describedby={fieldNotice === undefined ? undefined : noticeId}
-        onChange={(event) => {
-          onChange({ ...draft, statement: event.currentTarget.value });
+        limits={ROOT_CAUSE_TEXT_LIMITS.why_statement}
+        {...whyOptions(analysis, offset)}
+        showErrors={showErrors}
+        notice={fieldNotice}
+        onChange={(statement) => {
+          onChange({ ...draft, statement });
         }}
       />
       <label htmlFor={`${id}-category`}>{text('scr11.category')}</label>
@@ -178,12 +188,6 @@ function WhyStep({
             ? ''
             : text('scr11.step_unsaved')}
       </p>
-      {fieldNotice === undefined ? null : (
-        <>
-          <FieldNotice id={noticeId} notice={fieldNotice} />
-          <ValidatorDetail value={fieldNotice} />
-        </>
-      )}
     </div>
   );
 }
@@ -191,9 +195,11 @@ function WhyStep({
 function RootStep({
   root,
   onChange,
+  showErrors,
 }: {
   readonly root: RootDraft;
   readonly onChange: (root: RootDraft) => void;
+  readonly showErrors: boolean;
 }) {
   const id = useId();
   return (
@@ -214,26 +220,35 @@ function RootStep({
           </option>
         ))}
       </select>
-      <label htmlFor={`${id}-statement`}>{text('scr11.root_statement')}</label>
-      <textarea
-        id={`${id}-statement`}
-        rows={4}
+      <ReasonField
+        label={text('scr11.root_statement')}
+        name="root_cause_statement"
         value={root.statement}
-        onChange={(event) => {
-          onChange({ ...root, statement: event.currentTarget.value });
+        limits={ROOT_CAUSE_TEXT_LIMITS.root_cause_statement}
+        loopText
+        showErrors={showErrors}
+        onChange={(statement) => {
+          onChange({ ...root, statement });
         }}
       />
-      <label htmlFor={`${id}-conclusion`}>{text('scr11.conclusion')}</label>
-      <textarea
-        id={`${id}-conclusion`}
-        rows={4}
+      <ReasonField
+        label={text('scr11.conclusion')}
+        name="conclusion"
         value={root.conclusion}
-        onChange={(event) => {
-          onChange({ ...root, conclusion: event.currentTarget.value });
+        limits={ROOT_CAUSE_TEXT_LIMITS.conclusion}
+        loopText
+        showErrors={showErrors}
+        onChange={(conclusion) => {
+          onChange({ ...root, conclusion });
         }}
       />
     </div>
   );
+}
+
+/** Lo que se envía de un texto de la causa raíz: en blanco, `null` (el servidor dice qué falta). */
+function rootText(value: string): string | null {
+  return blank(value) ? null : submittedText(value);
 }
 
 /** Texto que se firma: los porqués guardados y la causa raíz que la persona escribió. */
@@ -245,8 +260,8 @@ function textToSign(analysis: Analysis, root: RootDraft): string {
   return [
     ...whys,
     `${text('scr11.root_category')}: ${category}`,
-    `${text('scr11.root_statement')}: ${root.statement}`,
-    `${text('scr11.conclusion')}: ${root.conclusion}`,
+    `${text('scr11.root_statement')}: ${rootText(root.statement) ?? ''}`,
+    `${text('scr11.conclusion')}: ${rootText(root.conclusion) ?? ''}`,
   ].join('\n');
 }
 
@@ -259,6 +274,19 @@ function missingAfter(analysis: Analysis, body: AnalysisSignatureBody): string[]
     conclusion: body.conclusion != null,
   };
   return analysis.pending_information.filter((item) => sent[item] !== true);
+}
+
+/** Un texto escrito de la causa raíz que no pasa el espejo: la firma no sale (A-126). */
+function rootInvalid(root: RootDraft): boolean {
+  return (['statement', 'conclusion'] as const).some(
+    (field) =>
+      !blank(root[field]) &&
+      reasonIssueKey(
+        root[field],
+        ROOT_CAUSE_TEXT_LIMITS[field === 'statement' ? 'root_cause_statement' : 'conclusion'],
+        LOOP_TEXT,
+      ) !== null,
+  );
 }
 
 export function Workspace({
@@ -281,6 +309,9 @@ export function Workspace({
   const [notices, setNotices] = useState<readonly Notice[]>([]);
   const [saving, setSaving] = useState<number | null>(null);
   const [missing, setMissing] = useState<readonly string[] | null>(null);
+  /** Porqués con un intento de guardar y causa raíz con un intento de firmar: muestran su error. */
+  const [whyErrors, setWhyErrors] = useState<readonly number[]>([]);
+  const [rootErrors, setRootErrors] = useState(false);
   const signing = useRef<Promise<void> | null>(null);
   const analysisId = initial.analysis_id;
 
@@ -327,13 +358,25 @@ export function Workspace({
     const index = offset + 1;
     const field = `why-${String(index)}`;
     const draft = whys[offset] ?? { statement: '', category: '' };
-    setSaving(offset);
+    const verdict = reasonVerdict(
+      draft.statement,
+      ROOT_CAUSE_TEXT_LIMITS.why_statement,
+      whyOptions(analysis, offset),
+    );
     setNotice(field, null);
+    // Con un error local no hay petición: el error queda en el campo (A-126). Un porqué opcional
+    // en blanco no tiene nada que guardar.
+    if (!verdict.ok) {
+      setWhyErrors((current) => (current.includes(offset) ? current : [...current, offset]));
+      throw new Error('El porqué no pasa la validación local.');
+    }
+    if (verdict.sent === null) return;
+    setSaving(offset);
     try {
       const updated = await putStep.run({
         index,
         body: {
-          statement: draft.statement,
+          statement: verdict.sent,
           evidence_refs: savedStep(analysis, index)?.evidence_refs ?? [],
           category: draft.category === '' ? null : draft.category,
         },
@@ -359,11 +402,15 @@ export function Workspace({
 
   const sign = (): Promise<void> => {
     if (signing.current !== null) return signing.current;
+    if (rootInvalid(root)) {
+      setRootErrors(true);
+      return Promise.reject(new Error('La causa raíz no pasa la validación local.'));
+    }
     const body: AnalysisSignatureBody = {
       professional_license: signer.professional_license,
       root_cause_category: root.category === '' ? null : root.category,
-      root_cause_statement: blank(root.statement) ? null : root.statement,
-      conclusion: blank(root.conclusion) ? null : root.conclusion,
+      root_cause_statement: rootText(root.statement),
+      conclusion: rootText(root.conclusion),
       cause_effect_branches: [],
     };
     setNotice('signature', null);
@@ -410,6 +457,9 @@ export function Workspace({
       !blank(root.conclusion) ||
       root.category !== '');
   const signatureNotice = noticeForField(notices, 'signature');
+  // Un rechazo de los textos de la causa raíz dice su motivo real junto a la firma (A-126).
+  const textNotice =
+    signatureNotice !== undefined && textRejection(signatureNotice) ? signatureNotice : undefined;
 
   const steps = [
     ...whys.map((draft, offset) => ({
@@ -422,6 +472,7 @@ export function Workspace({
           offset={offset}
           draft={draft}
           saving={saving === offset}
+          showErrors={whyErrors.includes(offset)}
           fieldNotice={noticeForField(notices, `why-${String(offset + 1)}`)}
           onChange={(next) => {
             setWhys((current) => current.map((entry, i) => (i === offset ? next : entry)));
@@ -436,23 +487,39 @@ export function Workspace({
       id: 'root',
       title: text('scr11.root_title'),
       complete: rootComplete,
-      content: <RootStep root={root} onChange={setRoot} />,
+      content: <RootStep root={root} onChange={setRoot} showErrors={rootErrors} />,
     },
   ];
 
   const summary = (
     <div className={styles.summary}>
       <SavedWhys analysis={analysis} />
+      {rootErrors && rootInvalid(root) ? (
+        <p
+          role="alert"
+          data-part="local_error"
+          data-text-key="components_forms.reason.fix_before_send"
+        >
+          {text('components_forms.reason.fix_before_send')}
+        </p>
+      ) : null}
       <SignatureBlock
         principal={signer}
         textToSign={textToSign(analysis, root)}
-        notice={signatureNotice}
+        notice={textNotice === undefined ? signatureNotice : undefined}
         pending={signMutation.status === 'pending'}
         onSign={() => {
           void sign().catch(() => undefined);
         }}
       />
-      <ValidatorDetail value={signatureNotice} />
+      {textNotice !== undefined ? (
+        <TextNotice
+          id="signature-text"
+          notice={textNotice}
+          written={[root.statement, root.conclusion].join('\n')}
+          loopText
+        />
+      ) : null}
     </div>
   );
 

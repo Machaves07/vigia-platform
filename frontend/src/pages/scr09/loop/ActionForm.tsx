@@ -9,8 +9,14 @@ import { useId, useState } from 'react';
 import assignBody from '../../../../openapi/bodies/assign_loop_findings__finding_state_id__actions_post.json';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
 import type { Notice } from '@/components/NoticeStack/notice';
-import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
+import {
+  optionalText,
+  ReasonField,
+  reasonIssueKey,
+  submittedText,
+} from '@/components/ReasonField/ReasonField';
 import { reasonLimits } from '@/components/ReasonField/limits';
+import { TextNotice, textFields } from '@/components/ReasonField/TextNotice';
 import {
   ACTION_TYPES,
   classifyPort,
@@ -24,14 +30,9 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import type { LoopContext } from '../classify/common';
 
-const EXPECTED_MAX = 1000;
-
 const ACTION_FIELDS: Readonly<Record<string, string>> = {
   loop_action_type_not_allowed: 'action_type',
   loop_action_on_person_forbidden: 'action_description',
-  loop_blocked_vocabulary_term: 'action_description',
-  loop_person_attribution_detected: 'action_description',
-  loop_reason_too_short: 'action_description',
   loop_deadline_out_of_range: 'deadline_days',
 };
 
@@ -52,6 +53,7 @@ export function ActionForm({
   // La construcción comparte el esquema con la entrada lazy de este grupo. Leerlo al
   // renderizar evita consumir su exportación antes de que termine el ciclo de módulos.
   const [descriptionLimits] = useState(() => reasonLimits(assignBody, 'action_description'));
+  const [expectedLimits] = useState(() => reasonLimits(assignBody, 'expected_outcome'));
   const id = useId();
   const canReadConfiguration = context.permissions.includes('hierarchy.read');
   const configuration = useScreenQuery({
@@ -80,7 +82,11 @@ export function ActionForm({
   const settings = configuration.data;
   const deadlineValue =
     deadline ?? (settings === undefined ? '' : String(settings.action_deadline_default_days));
-  const notice = writeNotice(mutation.error, ACTION_FIELDS);
+  // Un rechazo de texto va al único texto escrito; con los dos, al formulario (A-126).
+  const notice = writeNotice(mutation.error, {
+    ...textFields({ action_description: description, expected_outcome: expected }),
+    ...ACTION_FIELDS,
+  });
   const at = (field: string) => (notice?.field === field ? notice : undefined);
   const formNotice =
     notice !== null && (notice.field === 'form' || notice.field === null) ? notice : null;
@@ -102,14 +108,15 @@ export function ActionForm({
         if (
           type === '' ||
           assignee === '' ||
-          reasonIssueKey(description, descriptionLimits) !== null
+          reasonIssueKey(description, descriptionLimits, { loopText: true }) !== null ||
+          reasonIssueKey(expected, expectedLimits, { loopText: true, optional: true }) !== null
         )
           return;
         void mutation
           .run({
             action_type: type,
-            action_description: description,
-            expected_outcome: expected.trim() === '' ? null : expected,
+            action_description: submittedText(description),
+            expected_outcome: optionalText(expected),
             assignee_user_id: assignee,
             deadline_days: deadlineValue === '' ? null : Number(deadlineValue),
           })
@@ -122,7 +129,14 @@ export function ActionForm({
     >
       <h2>{text('scr09.loop.action_form')}</h2>
       <p id={`${id}-hint`}>{text('scr09.loop.action_hint')}</p>
-      {formNotice !== null && <FieldNotice id={`${id}-form`} notice={formNotice} />}
+      {formNotice !== null && (
+        <TextNotice
+          id={`${id}-form`}
+          notice={formNotice}
+          written={[description, expected].join('\n')}
+          loopText
+        />
+      )}
       {local === 'invalid_input' && <p role="alert">{text('scr09.loop.invalid')}</p>}
       {local === 'unavailable' && <p role="alert">{text('screen_state.unavailable')}</p>}
       <label>
@@ -150,21 +164,22 @@ export function ActionForm({
         name="action_description"
         value={description}
         limits={descriptionLimits}
+        loopText
         showErrors={showErrors}
         notice={at('action_description')}
         onChange={edit(setDescription)}
       />
-      <label>
-        {text('scr09.loop.expected_outcome')}
-        <textarea
-          name="expected_outcome"
-          value={expected}
-          maxLength={EXPECTED_MAX}
-          onChange={(event) => {
-            edit(setExpected)(event.currentTarget.value);
-          }}
-        />
-      </label>
+      <ReasonField
+        label={text('scr09.loop.expected_outcome')}
+        name="expected_outcome"
+        value={expected}
+        limits={expectedLimits}
+        optional
+        loopText
+        showErrors={showErrors}
+        notice={at('expected_outcome')}
+        onChange={edit(setExpected)}
+      />
       <label>
         {text('scr09.loop.assignee')}
         <select
