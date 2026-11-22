@@ -10,6 +10,7 @@ import {
   CLASSIFICATION_REASON_LIMITS,
   type ClassificationBody,
   type ClassificationItem,
+  type FindingDetail,
 } from '@/ports/scr09Classify';
 import { RESUMING_STATE as RESUMING } from '@/pages/shared/FindingActions';
 import { text } from '@/texts';
@@ -533,3 +534,203 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
     expect(reads.readUrl).toBe(0);
   });
 });
+
+describe(
+  'SCR-09 clasificar con las señales del episodio (TASK-587, O-2 paso a)',
+  { timeout: 40_000 },
+  () => {
+    /** Dos tramos (llegan en desorden) y tres señales: una no válida y otra sin `read_at`. */
+    function signalRecord(
+      segment: number | null,
+      signals: FindingDetail['records'][number]['signals'],
+    ): FindingDetail['records'][number] {
+      const tag = String(segment ?? 9);
+      return {
+        record_id: `0190a1b2-6666-7000-8000-00000000058${tag}`,
+        record_type: 'finding',
+        chain_sequence: 10 + (segment ?? 9),
+        content_hash: tag.repeat(64),
+        segment_index: segment,
+        received_at: INSTANT,
+        occurred_at: INSTANT,
+        signals,
+        clips: [],
+      };
+    }
+
+    function serveSignals(aggregated: boolean, records?: FindingDetail['records']) {
+      const reads = { detail: 0, history: 0 };
+      server.use(
+        http.get(`http://localhost/loop/findings/${FINDING}`, () => {
+          reads.detail++;
+          return HttpResponse.json(
+            detail({
+              lifecycle_state: 'received',
+              classifications: [],
+              classification_count: 0,
+              time_aggregated: aggregated,
+              records: records ?? [
+                signalRecord(1, [
+                  {
+                    signal_id: null,
+                    role: 'start_command',
+                    value: 'asserted',
+                    valid: true,
+                    read_at: null,
+                  },
+                ]),
+                signalRecord(0, [
+                  {
+                    signal_id: '0190a1b2-7777-7000-8000-000000000587',
+                    role: 'energy',
+                    value: 'asserted',
+                    valid: true,
+                    read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:07.000Z',
+                  },
+                  {
+                    signal_id: null,
+                    role: 'guard',
+                    value: 'deasserted',
+                    valid: false,
+                    read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:09.250Z',
+                  },
+                ]),
+              ],
+            }),
+          );
+        }),
+        http.get(`http://localhost/loop/findings/${FINDING}/classifications`, () => {
+          reads.history++;
+          return HttpResponse.json(history([]));
+        }),
+      );
+      return reads;
+    }
+
+    async function open(aggregated = false, records?: FindingDetail['records']) {
+      const reads = serveSignals(aggregated, records);
+      const rendered = await renderScreen('classify', {
+        permissions: ['findings.read', 'findings.classify', 'hierarchy.read'],
+      });
+      await load();
+      const section = await screen.findByRole(
+        'region',
+        { name: text('scr09.classify.signals') },
+        WAIT,
+      );
+      await waitFor(() => {
+        expect(reads.history).toBe(1);
+        expect(rendered.cache.client.isFetching()).toBe(0);
+      }, WAIT);
+      return { ...rendered, reads, section };
+    }
+
+    function rows(section: HTMLElement): HTMLElement[] {
+      return [...section.querySelectorAll<HTMLElement>('[data-part="signal"]')];
+    }
+
+    function part(row: Element, name: string): string | null {
+      return row.querySelector(`[data-part="${name}"]`)?.textContent ?? null;
+    }
+
+    it('las tres señales con rol y valor etiquetados, la marca de no válida y la hora o su ausencia, en orden de tramo', async () => {
+      const { section, container } = await open();
+      const record = text('scr08.detail.record');
+      expect([...section.querySelectorAll('h3')].map((node) => node.textContent)).toEqual([
+        `${record} 1`,
+        `${record} 2`,
+      ]);
+      const found = rows(section);
+      expect(found.map((row) => [part(row, 'signal_role'), part(row, 'signal_value')])).toEqual([
+        [label('signal_role', 'energy'), label('signal_value', 'asserted')],
+        [label('signal_role', 'guard'), label('signal_value', 'deasserted')],
+        [label('signal_role', 'start_command'), label('signal_value', 'asserted')],
+      ]);
+      expect(found.map((row) => part(row, 'signal_invalid'))).toEqual([
+        null,
+        text('scr09.classify.signal_invalid'),
+        null,
+      ]);
+      expect(found.map((row) => part(row, 'signal_read_at_unavailable'))).toEqual([
+        null,
+        null,
+        text('scr09.classify.signal_read_at_unavailable'),
+      ]);
+      // La hora de `read_at`, en la zona de la planta (America/Bogota), sin recalcular ni redondear.
+      expect(
+        found.map((row) => row.querySelector('time')?.getAttribute('dateTime') ?? null),
+      ).toEqual(['2026-01-01T12:00:07.000Z', '2026-01-01T12:00:09.250Z', null]);
+      expect(found.map((row) => row.querySelector('time')?.textContent ?? null)).toEqual([
+        '01/01/2026, 07:00:07',
+        '01/01/2026, 07:00:09',
+        null,
+      ]);
+      expect(found.map((row) => part(row, 'zone'))).toEqual([
+        '(America/Bogota, UTC-05:00)',
+        '(America/Bogota, UTC-05:00)',
+        null,
+      ]);
+      expect(found.map((row) => part(row, 'signal_aggregated'))).toEqual([null, null, null]);
+      // Junto al resumen y antes de las tres salidas.
+      const summary = screen.getByRole('region', { name: text('scr08.detail.summary') });
+      const form = screen.getByRole('form', { name: text('scr09.classify.form') });
+      expect(
+        summary.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(section.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it('sin lectura nueva: el detalle se pide una sola vez, como antes', async () => {
+      const { reads, section } = await open();
+      expect(rows(section)).toHaveLength(3);
+      // Una lectura de más llegaría después de pintar: se espera a que la red quede quieta.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
+      expect(reads).toEqual({ detail: 1, history: 1 });
+    });
+
+    it('en una zona unipersonal la hora es la agregada que da el servidor, marcada como tal', async () => {
+      const { section } = await open(true);
+      const found = rows(section);
+      expect(
+        found.map((row) => row.querySelector('time')?.getAttribute('dateTime') ?? null),
+      ).toEqual(['2026-01-01T12:00:00.000Z', '2026-01-01T12:00:00.000Z', null]);
+      expect(found.map((row) => part(row, 'signal_aggregated'))).toEqual([
+        text('scr09.classify.aggregated'),
+        text('scr09.classify.aggregated'),
+        null,
+      ]);
+    });
+
+    it('un hallazgo sin tramos lo dice, sin lista', async () => {
+      const { section } = await open(false, []);
+      expect(rows(section)).toHaveLength(0);
+      expect(part(section, 'no_records')).toBe(text('scr09.classify.signals_none'));
+    });
+
+    it('un registro sin tramo va después de los tramos, con su nombre, y sin señales lo dice', async () => {
+      const { section } = await open(false, [
+        signalRecord(null, []),
+        signalRecord(0, [
+          { signal_id: null, role: 'energy', value: 'asserted', valid: true, read_at: INSTANT },
+        ]),
+      ]);
+      const record = text('scr08.detail.record');
+      expect([...section.querySelectorAll('h3')].map((node) => node.textContent)).toEqual([
+        `${record} 1`,
+        record,
+      ]);
+      const groups = [...section.querySelectorAll('[data-part="signal_record"]')];
+      expect(groups.map((group) => group.querySelectorAll('[data-part="signal"]').length)).toEqual([
+        1, 0,
+      ]);
+      expect(groups.map((group) => part(group, 'no_signals'))).toEqual([
+        null,
+        text('scr09.classify.signals_record_none'),
+      ]);
+      expect(part(section, 'no_records')).toBeNull();
+    });
+  },
+);
