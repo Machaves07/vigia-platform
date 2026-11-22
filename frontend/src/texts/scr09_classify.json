@@ -71,9 +71,5 @@
   "scr09.classify.open_reclassification": "Reclasificar",
   "scr09.classify.close_reclassification": "Cancelar la reclasificación",
   "scr09.classify.signals": "Señales durante el episodio",
-  "scr09.classify.signals_none": "El hallazgo no trae tramos con lecturas de señales.",
-  "scr09.classify.signals_record_none": "El tramo no trae lecturas de señales.",
-  "scr09.classify.signal_invalid": "no válida",
-  "scr09.classify.signal_read_at": "Hora de lectura",
-  "scr09.classify.signal_read_at_unavailable": "Hora de lectura no disponible"
+  "scr09.classify.signals_none": "El hallazgo no trae tramos con lecturas de señales."
 }

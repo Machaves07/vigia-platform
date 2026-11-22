@@ -648,13 +648,13 @@ describe(
       ]);
       expect(found.map((row) => part(row, 'signal_invalid'))).toEqual([
         null,
-        text('scr09.classify.signal_invalid'),
+        text('signal_readings.invalid'),
         null,
       ]);
       expect(found.map((row) => part(row, 'signal_read_at_unavailable'))).toEqual([
         null,
         null,
-        text('scr09.classify.signal_read_at_unavailable'),
+        text('signal_readings.read_at_unavailable'),
       ]);
       // La hora de `read_at`, en la zona de la planta (America/Bogota), sin recalcular ni redondear.
       expect(
@@ -698,8 +698,8 @@ describe(
         found.map((row) => row.querySelector('time')?.getAttribute('dateTime') ?? null),
       ).toEqual(['2026-01-01T12:00:00.000Z', '2026-01-01T12:00:00.000Z', null]);
       expect(found.map((row) => part(row, 'signal_aggregated'))).toEqual([
-        text('scr09.classify.aggregated'),
-        text('scr09.classify.aggregated'),
+        text('signal_readings.aggregated'),
+        text('signal_readings.aggregated'),
         null,
       ]);
     });
@@ -728,7 +728,7 @@ describe(
       ]);
       expect(groups.map((group) => part(group, 'no_signals'))).toEqual([
         null,
-        text('scr09.classify.signals_record_none'),
+        text('signal_readings.none'),
       ]);
       expect(part(section, 'no_records')).toBeNull();
     });

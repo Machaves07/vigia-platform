@@ -65,7 +65,7 @@ describe('SignalReadings (TASK-587)', () => {
     expect(rows.map((row) => row.dataset.valid)).toEqual(['true', 'false', 'true']);
     expect(rows.map((row) => part(row, 'signal_invalid')?.textContent ?? null)).toEqual([
       null,
-      text('scr09.classify.signal_invalid'),
+      text('signal_readings.invalid'),
       null,
     ]);
     // La hora de `read_at` en la zona de la planta (UTC−5), sin redondear: el oráculo es literal.
@@ -82,7 +82,7 @@ describe('SignalReadings (TASK-587)', () => {
     expect(part(container, 'zone')?.textContent).toBe('(America/Bogota, UTC-05:00)');
     // Sin `read_at`, «hora de lectura no disponible», nunca otra hora.
     expect(rows.map((row) => part(row, 'signal_read_at_unavailable')?.textContent ?? null)).toEqual(
-      [null, null, text('scr09.classify.signal_read_at_unavailable')],
+      [null, null, text('signal_readings.read_at_unavailable')],
     );
     expect(part(container, 'signal_aggregated')).toBeNull();
     expect(await axe(container)).toHaveNoViolations();
@@ -101,7 +101,7 @@ describe('SignalReadings (TASK-587)', () => {
     if (row === undefined) throw new Error('Sin señal.');
     expect(row.querySelector('time')?.getAttribute('dateTime')).toBe('2026-01-01T12:00:00.000Z');
     expect(row.querySelector('time')?.textContent).toBe('01/01/2026, 07:00:00');
-    expect(part(row, 'signal_aggregated')?.textContent).toBe(text('scr09.classify.aggregated'));
+    expect(part(row, 'signal_aggregated')?.textContent).toBe(text('signal_readings.aggregated'));
   });
 
   it('un tramo sin señales lo dice, sin lista vacía', () => {
@@ -114,8 +114,6 @@ describe('SignalReadings (TASK-587)', () => {
       />,
     );
     expect(container.querySelector('ul')).toBeNull();
-    expect(part(container, 'no_signals')?.textContent).toBe(
-      text('scr09.classify.signals_record_none'),
-    );
+    expect(part(container, 'no_signals')?.textContent).toBe(text('signal_readings.none'));
   });
 });
