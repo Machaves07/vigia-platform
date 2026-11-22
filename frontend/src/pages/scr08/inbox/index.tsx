@@ -24,7 +24,7 @@ import {
   Result,
   useFindingsContext,
 } from '../shared';
-import { FAMILIES, TIERS, STATES, findingLabel } from './FindingsView';
+import { FAMILIES, TIERS, INBOX_STATES, findingLabel } from './FindingsView';
 import { GatedFindingsView } from './GatedFindingsView';
 import styles from './inbox.module.css';
 
@@ -55,7 +55,9 @@ export function InboxScreen({
     filters: base,
     pages: 1,
   });
-  const offered = states === undefined ? STATES : STATES.filter((state) => states.includes(state));
+  // O-11: el filtro solo ofrece lo que admite la bandeja (cerrado y descartado darían 400).
+  const offered =
+    states === undefined ? INBOX_STATES : INBOX_STATES.filter((state) => states.includes(state));
   const operation = 'GET /loop/findings';
   const query = useScreenQuery({
     key: screenKey({

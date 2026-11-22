@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
-import { closurePort, readHistory } from '@/ports/scr09Closure';
+import { closurePort, readHistory, type Detail } from '@/ports/scr09Closure';
 import { text } from '@/texts';
 import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
@@ -218,5 +218,78 @@ describe('SCR-09 cierre y navegación de adjuntos', { timeout: 40_000 }, () => {
     expect(within(overdue).getByText(`${text('scr09.overdue.count')}: 1`)).not.toBeNull();
     expect([...(requests[0]?.searchParams.keys() ?? [])].sort()).toEqual(['limit', 'plant_id']);
     expect(closurePort.operations.every((operation) => operation.status === 'fixed')).toBe(true);
+  });
+
+  /**
+   * O-4 (TASK-582): «Acciones vencidas» cuenta lo que el servidor declaró vencido
+   * (`state = overdue`, BR-LAZ-46) y que cuenta para los vencimientos (`counts_as_overdue`,
+   * BR-LAZ-24). El reloj inyectado (START, 25-10-2026) y el del navegador quedan después de los
+   * plazos pasados y antes de los de 2027: ninguno de los dos decide.
+   */
+  describe('O-4: acciones vencidas sin cifras que engañan', () => {
+    type Action = Detail['actions'][number];
+    function withAction(change: Partial<Action>): Detail {
+      const [action] = detail.actions;
+      if (action === undefined) throw new Error('Falta la acción sintética.');
+      return { ...detail, actions: [{ ...action, ...change }] };
+    }
+    async function overdueOf(change: Partial<Action>) {
+      await renderClosure('closure', { detail: withAction(change) });
+      await load();
+      const region = screen.getByRole('region', { name: text('scr09.overdue.title') });
+      return {
+        count: region.querySelector('[data-part="overdue_count"]')?.textContent,
+        overdue: [...region.querySelectorAll('[data-part="overdue_action"] time')].map((time) =>
+          time.getAttribute('datetime'),
+        ),
+        live: [...region.querySelectorAll('[data-part="live_action"]')].map((entry) => ({
+          label: entry.querySelector('[data-part="due_on"]')?.textContent,
+          date: entry.querySelector('time')?.textContent,
+        })),
+      };
+    }
+    const count = (value: number) => `${text('scr09.overdue.count')}: ${String(value)}`;
+
+    it('una acción vigente que vence en 2027 no es vencida: se muestra con su plazo', async () => {
+      expect(
+        await overdueOf({
+          state: 'assigned',
+          counts_as_overdue: true,
+          due_at: '2027-01-02T15:00:00.000Z',
+        }),
+      ).toEqual({
+        count: count(0),
+        overdue: [],
+        live: [{ label: text('scr09.overdue.due_on'), date: '02/01/2027' }],
+      });
+    });
+
+    it.each([
+      ['cuenta para los vencimientos', true, 1],
+      ['con el lazo suspendido por reclasificación (BR-LAZ-24)', false, 0],
+    ])('una acción overdue que %s da el contador del servidor', async (_, counts, expected) => {
+      const result = await overdueOf({
+        state: 'overdue',
+        counts_as_overdue: counts,
+        due_at: '2026-10-01T15:00:00.000Z',
+      });
+      expect(result.count).toBe(count(expected));
+      expect(result.overdue).toHaveLength(expected);
+      expect(result.live).toEqual([]);
+    });
+
+    it('un solo reloj: con el plazo pasado y la acción aún assigned, el contador es 0', async () => {
+      expect(
+        await overdueOf({
+          state: 'assigned',
+          counts_as_overdue: true,
+          due_at: '2026-01-02T15:00:00.000Z',
+        }),
+      ).toEqual({
+        count: count(0),
+        overdue: [],
+        live: [{ label: text('scr09.overdue.due_on'), date: '02/01/2026' }],
+      });
+    });
   });
 });
