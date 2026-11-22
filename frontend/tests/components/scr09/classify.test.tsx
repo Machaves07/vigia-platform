@@ -540,12 +540,16 @@ describe(
   { timeout: 40_000 },
   () => {
     /** Dos tramos (llegan en desorden) y tres señales: una no válida y otra sin `read_at`. */
-    function signalRecord(segment: number, signals: FindingDetail['records'][number]['signals']) {
+    function signalRecord(
+      segment: number | null,
+      signals: FindingDetail['records'][number]['signals'],
+    ): FindingDetail['records'][number] {
+      const tag = String(segment ?? 9);
       return {
-        record_id: `0190a1b2-6666-7000-8000-00000000058${String(segment)}`,
+        record_id: `0190a1b2-6666-7000-8000-00000000058${tag}`,
         record_type: 'finding',
-        chain_sequence: 10 + segment,
-        content_hash: String(segment).repeat(64),
+        chain_sequence: 10 + (segment ?? 9),
+        content_hash: tag.repeat(64),
         segment_index: segment,
         received_at: INSTANT,
         occurred_at: INSTANT,
@@ -554,7 +558,7 @@ describe(
       };
     }
 
-    function serveSignals(aggregated = false) {
+    function serveSignals(aggregated: boolean, records?: FindingDetail['records']) {
       const reads = { detail: 0, history: 0 };
       server.use(
         http.get(`http://localhost/loop/findings/${FINDING}`, () => {
@@ -565,7 +569,7 @@ describe(
               classifications: [],
               classification_count: 0,
               time_aggregated: aggregated,
-              records: [
+              records: records ?? [
                 signalRecord(1, [
                   {
                     signal_id: null,
@@ -603,8 +607,8 @@ describe(
       return reads;
     }
 
-    async function open(aggregated = false) {
-      const reads = serveSignals(aggregated);
+    async function open(aggregated = false, records?: FindingDetail['records']) {
+      const reads = serveSignals(aggregated, records);
       const rendered = await renderScreen('classify', {
         permissions: ['findings.read', 'findings.classify', 'hierarchy.read'],
       });
@@ -698,6 +702,35 @@ describe(
         text('scr09.classify.aggregated'),
         null,
       ]);
+    });
+
+    it('un hallazgo sin tramos lo dice, sin lista', async () => {
+      const { section } = await open(false, []);
+      expect(rows(section)).toHaveLength(0);
+      expect(part(section, 'no_records')).toBe(text('scr09.classify.signals_none'));
+    });
+
+    it('un registro sin tramo va después de los tramos, con su nombre, y sin señales lo dice', async () => {
+      const { section } = await open(false, [
+        signalRecord(null, []),
+        signalRecord(0, [
+          { signal_id: null, role: 'energy', value: 'asserted', valid: true, read_at: INSTANT },
+        ]),
+      ]);
+      const record = text('scr08.detail.record');
+      expect([...section.querySelectorAll('h3')].map((node) => node.textContent)).toEqual([
+        `${record} 1`,
+        record,
+      ]);
+      const groups = [...section.querySelectorAll('[data-part="signal_record"]')];
+      expect(groups.map((group) => group.querySelectorAll('[data-part="signal"]').length)).toEqual([
+        1, 0,
+      ]);
+      expect(groups.map((group) => part(group, 'no_signals'))).toEqual([
+        null,
+        text('scr09.classify.signals_record_none'),
+      ]);
+      expect(part(section, 'no_records')).toBeNull();
     });
   },
 );
