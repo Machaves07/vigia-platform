@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AssigneePicker } from '@/pages/scr09/loop/AssigneePicker';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import { createScreenQueryCache, ScreenQueryProvider } from '@/state/query';
+import { text } from '@/texts';
 import { server } from '../../msw/server';
 import { FakeClock } from '../../support/fakeClock';
 import {
@@ -35,6 +36,12 @@ async function rendered(permissions: string[], findingId = FINDING) {
   installTransport(createTransport({ clock, connection, origin: 'http://localhost' }));
   const listed = assigneesHandler([SESSION_ASSIGNEE, OTHER]);
   server.use(listed.handler);
+  // Toda petición, también la que ningún manejador atiende (p. ej. con la ruta sin hallazgo).
+  const seen: string[] = [];
+  const listener = ({ request }: { request: Request }) => {
+    seen.push(new URL(request.url).pathname);
+  };
+  server.events.on('request:start', listener);
   render(
     <ScreenQueryProvider cache={cache}>
       <AssigneePicker
@@ -51,11 +58,12 @@ async function rendered(permissions: string[], findingId = FINDING) {
       setTimeout(done, 50);
     });
   });
+  server.events.removeListener('request:start', listener);
   const values = () =>
     [...screen.getByRole<HTMLSelectElement>('combobox', { name: 'Responsable' }).options].map(
       (option) => option.value,
     );
-  return { requests: listed.requests, values, cache };
+  return { requests: listed.requests, seen, values, cache };
 }
 
 describe('AssigneePicker: quién pide la lista (TASK-583)', { timeout: 40_000 }, () => {
@@ -68,15 +76,19 @@ describe('AssigneePicker: quién pide la lista (TASK-583)', { timeout: 40_000 },
   });
 
   it('sin actions.manage no pide nada y solo ofrece a quien está en sesión', async () => {
-    const { requests, values, cache } = await rendered(['findings.read']);
+    const { requests, seen, values, cache } = await rendered(['findings.read']);
     expect(requests).toEqual([]);
+    expect(seen).toEqual([]);
     expect(values()).toEqual([USER]);
     cache.dispose();
   });
 
   it('sin hallazgo no pide nada', async () => {
-    const { requests, cache } = await rendered(['actions.manage'], '');
+    const { requests, seen, cache } = await rendered(['actions.manage'], '');
     expect(requests).toEqual([]);
+    expect(seen).toEqual([]);
+    // Ni una lectura fallida: sin hallazgo no hay nada que avisar.
+    expect(screen.queryByText(text('scr09.assignee.unavailable'))).toBeNull();
     cache.dispose();
   });
 });
