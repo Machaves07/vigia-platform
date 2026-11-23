@@ -842,9 +842,11 @@ def test_the_reader_brings_only_the_plant_configuration_before_the_reception(
     history = _history(stack, who, finding, preceding=("loop_configuration_changed",))
     assert history is not None and history.preceding_complete is True
     assert [r.record_id for r in history.preceding] == expected
-    # Sin tipos pedidos, nada de planta.
+    # Sin tipos pedidos, nada de planta; con otro tipo, solo ese (aquí ninguno).
     plain = _history(stack, who, finding)
     assert plain is not None and plain.preceding == ()
+    other = _history(stack, who, finding, preceding=("export_produced",))
+    assert other is not None and (other.preceding_complete, other.preceding) == (True, ())
 
 
 def test_the_reader_drops_the_configuration_when_it_exceeds_its_cap(

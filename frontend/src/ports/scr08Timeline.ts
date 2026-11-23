@@ -24,24 +24,6 @@ export const timelinePort = defineScreenPort('SCR-08', {
   },
 });
 
-/** Los catorce tipos de hito, en el orden de la lista cerrada del servidor. */
-export const MILESTONE_KINDS: readonly MilestoneKind[] = [
-  'finding_received',
-  'late_segment_attached',
-  'classification',
-  'review_resolution',
-  'action_assigned',
-  'action_evidence_added',
-  'action_overdue',
-  'closure',
-  'closure_attachment_unrecoverable',
-  'root_cause_analysis',
-  'reopening',
-  'unclosable_state_declared',
-  'unclosable_review',
-  'other',
-];
-
 /**
  * El error de la lectura como `Notice` de UI-19: la respuesta HTTP si la hubo; si no, el código
  * local con el mismo comportamiento del mapa cerrado (BR-APP-71).
