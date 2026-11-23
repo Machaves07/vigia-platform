@@ -16222,26 +16222,6 @@
     },
     "TimelineDetailsOut": {
       "properties": {
-        "segment_index": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "delay_ms": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "outcome": {
           "anyOf": [
             {
@@ -16266,16 +16246,6 @@
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "is_reclassification": {
-          "anyOf": [
-            {
-              "type": "boolean"
             },
             {
               "type": "null"
@@ -16326,16 +16296,6 @@
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "deadline_days": {
-          "anyOf": [
-            {
-              "type": "integer"
             },
             {
               "type": "null"
@@ -16393,16 +16353,6 @@
           ]
         },
         "professional_license": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "analysis_state": {
           "anyOf": [
             {
               "type": "string"
@@ -16481,48 +16431,32 @@
               "type": "null"
             }
           ]
-        },
-        "detected_at": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "segment_index",
-        "delay_ms",
         "outcome",
         "reason_category",
         "reason_text",
-        "is_reclassification",
         "action_type",
         "description",
         "expected_outcome",
         "assignee_display_name",
         "due_at",
-        "deadline_days",
         "performed_at",
         "performed_by_role",
         "verification_note",
         "days_overdue",
         "escalation_level",
         "professional_license",
-        "analysis_state",
         "root_cause_category",
         "root_cause_statement",
         "conclusion",
         "from_state",
         "compensatory_measure",
         "review_due_at",
-        "review_note",
-        "detected_at"
+        "review_note"
       ]
     },
     "TimelineMilestoneOut": {

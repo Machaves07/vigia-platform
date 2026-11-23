@@ -54,7 +54,11 @@ from vigia_platform.ledger.application import reader as reader_module
 from vigia_platform.ledger.application.audit_writer import ResourceRef
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import EvidenceService as LedgerEvidence
-from vigia_platform.ledger.application.reader import LectorExpediente, SubjectRef
+from vigia_platform.ledger.application.reader import (
+    LectorExpediente,
+    LedgerQueryInvalid,
+    SubjectRef,
+)
 from vigia_platform.ledger.application.writer import Receipt, RecordScope
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
@@ -560,7 +564,7 @@ def test_in_a_single_occupancy_zone_every_time_and_gap_is_aggregated(
         *[
             m["details"][key]
             for m in milestones
-            for key in ("due_at", "performed_at", "review_due_at", "detected_at")
+            for key in ("due_at", "performed_at", "review_due_at")
             if m["details"][key] is not None
         ],
         *[v for v in (body["summary"]["received_at"], body["summary"]["closed_at"]) if v],
@@ -855,8 +859,9 @@ def test_the_reader_brings_only_the_plant_configuration_before_the_reception(
     # Sin tipos pedidos, nada de planta; con otro tipo, solo ese (aquí ninguno).
     plain = _history(stack, who, finding)
     assert plain is not None and plain.preceding == ()
-    other = _history(stack, who, finding, preceding=("export_produced",))
-    assert other is not None and (other.preceding_complete, other.preceding) == (True, ())
+    # Un tipo fuera de la lista cerrada del lector no se lee (esta lectura salta el alcance).
+    with pytest.raises(LedgerQueryInvalid):
+        _history(stack, who, finding, preceding=("export_produced",))
 
 
 def test_the_reader_drops_the_configuration_when_it_exceeds_its_cap(
@@ -877,3 +882,127 @@ def test_the_reader_drops_the_configuration_when_it_exceeds_its_cap(
     (classification,) = [m for m in body["milestones"] if m["kind"] == "classification"]
     assert classification["deadline"] is None
     assert body["summary"]["classification_met"] is None
+
+
+def _write_plain(
+    stack: TimelineStack, subject: IngestedSubject, record_type: str, content: dict[str, Any]
+) -> uuid.UUID:
+    """Un registro del lazo por el escritor real, sin proyección (la ficha lee el expediente)."""
+    stack.actions.tick()
+    receipt, _ = stack.actions.world.write(subject.organization, record_type, content, apply=False)
+    assert isinstance(receipt, Receipt), receipt
+    return receipt.record_id
+
+
+def test_a_detection_and_its_queue_resolution_are_milestones(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    """``detection_id`` cita al sujeto en la detección y en su resolución de la cola."""
+    actions = stack.actions
+    detection = actions.in_review()
+    world = actions.world.stack
+    document = detection.document
+    resolution = _write_plain(
+        stack,
+        detection,
+        "review_resolution",
+        {
+            "resolution_id": str(world.uuid7()),
+            "detection_id": str(detection.subject_id),
+            "anchor_record_id": str(detection.record_id),
+            "outcome": "review_confirmed",
+            "reason_category": "real_coexistence",
+            "reason_text": "Coexistencia sintética confirmada al revisar la detección de la zona",
+            "max_confidence": 0.4,
+            "review_threshold": 0.3,
+            "publication_threshold": 0.6,
+            "review_reason": "low_confidence",
+            "family": document["family"],
+            "standard": document["standard"],
+            "zone_id": str(detection.organization.zone_id),
+            "resolved_by": {
+                "user_id": str(world.authz.operator_id),
+                "display_name": "Revisión sintética de la cola",
+                "role_in_use": "coordinator_sst",
+            },
+            "resolved_at": format_timestamp(world.now()),
+        },
+    )
+    finding_state_id = actions.finding_state_id(detection)
+    stack.occupancy(finding_state_id, False)
+    body = _ok(stack.get(coordinator, finding_state_id))
+    assert [(m["kind"], m["record_type"], m["record_id"]) for m in body["milestones"]] == [
+        ("other", "detection_for_review_received", str(detection.record_id)),
+        ("review_resolution", "review_resolution", str(resolution)),
+    ]
+    resolved = body["milestones"][1]
+    assert resolved["actor"] == {
+        "role_in_use": "coordinator_sst",
+        "display_name": "Revisión sintética de la cola",
+    }
+    assert (resolved["details"]["outcome"], resolved["deadline"]) == ("review_confirmed", None)
+    assert body["subject_kind"] == "detection"
+
+
+def test_a_late_segment_is_a_milestone_without_its_exact_delay(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    """``episode_id`` cita al episodio en el tramo tardío; en zona unipersonal, su hora agregada y
+    ni su índice ni su retraso (reconstruirían la hora exacta)."""
+    actions = stack.actions
+    finding = actions.received()
+    late = _write_plain(
+        stack,
+        finding,
+        "late_segment_attached",
+        {
+            "segment_record_id": str(uuid.uuid4()),
+            "episode_id": str(finding.subject_id),
+            "segment_index": 1,
+            "previous_segment_record_id": str(finding.record_id),
+            "received_at": format_timestamp(actions.now()),
+            "episode_state_at_arrival": "received",
+            "reopened_loop": False,
+            "delay_ms": 3_456_789,
+        },
+    )
+    finding_state_id = actions.finding_state_id(finding)
+    stack.occupancy(finding_state_id, True)
+    body = _ok(stack.get(coordinator, finding_state_id))
+    assert [(m["kind"], m["record_id"]) for m in body["milestones"]] == [
+        ("finding_received", str(finding.record_id)),
+        ("late_segment_attached", str(late)),
+    ]
+    segment = body["milestones"][1]
+    assert _on_grid(segment["at"]), segment["at"]
+    assert segment["elapsed_ms_since_previous"] % (_WINDOW * 60_000) == 0
+    assert {k: v for k, v in segment["details"].items() if v is not None} == {}
+    assert "delay_ms" not in segment["details"] and "segment_index" not in segment["details"]
+
+
+def test_the_reader_never_brings_a_zone_record_as_plant_configuration(
+    stack: TimelineStack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La lectura de planta se salta ``allowed_scopes``: solo registros **sin zona**. Con otro tipo
+    admitido a propósito, un registro de la zona hermana anterior al anclaje no llega."""
+    actions = stack.actions
+    organization = actions.world.organization()
+    placeholder = actions.received(organization)
+    stray = _write_in_zone(
+        stack, placeholder, organization.site.other_zone_id, str(actions.world.stack.uuid7())
+    )
+    _configure(stack, organization, organization.plant_id)  # de planta, de otro tipo
+    finding = actions.received(organization)
+    records = actions.world.ledger_records(organization)
+    (reception,) = [r for r in records if r.record_id == finding.record_id]
+    (written,) = [r for r in records if r.record_id == stray]
+    assert written.chain_sequence < reception.chain_sequence  # anterior al anclaje, de la planta
+    monkeypatch.setattr(
+        reader_module,
+        "PRECEDING_RECORD_TYPES",
+        frozenset({"loop_configuration_changed", "action_evidence_added"}),
+    )
+    who = actions.member(organization)
+    history = _history(stack, who, finding, preceding=("action_evidence_added",))
+    assert history is not None and history.preceding_complete is True
+    assert history.preceding == ()  # ni el de la zona hermana ni la configuración (otro tipo)

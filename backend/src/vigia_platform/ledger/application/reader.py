@@ -141,6 +141,11 @@ RECORD_RESOURCE_KIND: Final = "ledger_record"
 MAX_SUBJECT_RECORDS: Final = 1000
 """Tope del ``limit`` de ``subject_history`` ``[objetivo propio]``."""
 
+PRECEDING_RECORD_TYPES: frozenset[str] = frozenset({"loop_configuration_changed"})
+"""Los únicos tipos de planta que ``subject_history`` lee antes del anclaje: la configuración del
+lazo que fija el plazo de clasificación. Cualquier otro tipo es ``LedgerQueryInvalid``: esta
+lectura se salta ``allowed_scopes`` (ver «Historia de un sujeto») y no sirve para otra cosa."""
+
 MAX_PRECEDING_RECORDS: Final = 2000
 """Registros de planta anteriores al anclaje que ``subject_history`` lee como mucho
 ``[objetivo propio]``; con más, ``preceding_complete`` es falso y no se devuelve ninguno."""
@@ -955,6 +960,8 @@ class LectorExpediente:
         if type(limit) is not int or not 1 <= limit <= MAX_SUBJECT_RECORDS:
             raise LedgerQueryInvalid(f"limit debe ir de 1 a {MAX_SUBJECT_RECORDS}")
         types = _codes(preceding_types, "preceding_types")
+        if not set(types) <= PRECEDING_RECORD_TYPES:
+            raise LedgerQueryInvalid("preceding_types solo admite la configuración del lazo")
         scopes = _Scopes.of(context).parameters()
         place = {"organization_id": context.organization_id, "plant_id": plant_id}
         audited = _audited(

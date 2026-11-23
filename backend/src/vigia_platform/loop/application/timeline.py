@@ -128,19 +128,15 @@ class MilestoneDeadline:
 class MilestoneDetails:
     """Los campos elegidos del registro (BR-APP-40); los que no son de su tipo van vacíos."""
 
-    segment_index: int | None = None
-    delay_ms: int | None = None
     outcome: str | None = None
     reason_category: str | None = None
     reason_text: str | None = None
-    is_reclassification: bool | None = None
     action_type: str | None = None
     description: str | None = None
     expected_outcome: str | None = None
     assignee_display_name: str | None = None
     """La instantánea del responsable al asignar (un usuario de la plataforma, BR-LAZ-38)."""
     due_at: datetime | None = None
-    deadline_days: int | None = None
     performed_at: datetime | None = None
     performed_by_role: str | None = None
     """El cargo de quien ejecutó, nunca su nombre (§6.3)."""
@@ -148,7 +144,6 @@ class MilestoneDetails:
     days_overdue: int | None = None
     escalation_level: str | None = None
     professional_license: str | None = None
-    analysis_state: str | None = None
     root_cause_category: str | None = None
     root_cause_statement: str | None = None
     conclusion: str | None = None
@@ -156,7 +151,6 @@ class MilestoneDetails:
     compensatory_measure: str | None = None
     review_due_at: datetime | None = None
     review_note: str | None = None
-    detected_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -302,21 +296,14 @@ def _details(item: TimelineSource, shown: _Shown) -> MilestoneDetails:
     """Los campos elegidos del registro, tipo por tipo (BR-APP-40)."""
     doc = item.document
     match item.record_type:
-        case "finding_received":
-            episode = doc.get("episode")
-            index = episode.get("segment_index") if isinstance(episode, Mapping) else None
-            return MilestoneDetails(segment_index=_integer(index))
-        case "late_segment_attached":
-            return MilestoneDetails(
-                segment_index=_integer(doc.get("segment_index")),
-                delay_ms=_integer(doc.get("delay_ms")),
-            )
+        # La recepción, un tramo tardío y un adjunto no recuperable no llevan campos: su hito
+        # es su tipo y su hora. Un retraso o una hora de detección exactos reconstruirían la hora
+        # exacta en una zona unipersonal (BR-LAZ-06), y la consola no los pinta.
         case "classification":
             return MilestoneDetails(
                 outcome=_text(doc, "outcome"),
                 reason_category=_text(doc, "reason_category"),
                 reason_text=_text(doc, "reason_text"),
-                is_reclassification=bool(doc.get("is_reclassification", False)),
             )
         case "review_resolution":
             return MilestoneDetails(
@@ -331,7 +318,6 @@ def _details(item: TimelineSource, shown: _Shown) -> MilestoneDetails:
                 expected_outcome=_text(doc, "expected_outcome"),
                 assignee_display_name=_text(doc, "assignee_display_name"),
                 due_at=shown.optional(doc.get("due_at")),
-                deadline_days=_integer(doc.get("deadline_days")),
             )
         case "action_evidence_added":
             return MilestoneDetails(
@@ -356,11 +342,8 @@ def _details(item: TimelineSource, shown: _Shown) -> MilestoneDetails:
                     _text(signer, "professional_license") if isinstance(signer, Mapping) else None
                 ),
             )
-        case "closure_attachment_unrecoverable":
-            return MilestoneDetails(detected_at=shown.optional(doc.get("detected_at")))
         case "root_cause_analysis":
             return MilestoneDetails(
-                analysis_state=_text(doc, "state"),
                 root_cause_category=_text(doc, "root_cause_category"),
                 root_cause_statement=_text(doc, "root_cause_statement"),
                 conclusion=_text(doc, "conclusion"),
@@ -390,6 +373,8 @@ class _ActionFate:
     due_at: datetime
     overdue: bool = False
     closed_at: datetime | None = None
+    superseded: bool = False
+    """Otra asignación la sustituyó antes de cerrarse (BR-LAZ-51): su plazo ya no corre."""
 
     @property
     def met(self) -> bool | None:
@@ -408,6 +393,9 @@ def _action_fates(records: Sequence[TimelineSource]) -> dict[str, _ActionFate]:
             continue
         if item.record_type == "action_assigned" and item.document.get("due_at") is not None:
             fates.setdefault(action, _ActionFate(_instant(item.document["due_at"])))
+            replaced = fates.get(str(item.document.get("supersedes_action_id")))
+            if replaced is not None and replaced.closed_at is None:
+                replaced.superseded = True
         fate = fates.get(action)
         if fate is None or fate.closed_at is not None:
             continue
@@ -476,7 +464,9 @@ class _Walk:
             return MilestoneDeadline(due_at=self.shown(due), met=met)
         if item.record_type == "action_assigned":
             fate = self.fates.get(str(doc.get("action_id")))
-            if fate is None:
+            if fate is None or (fate.superseded and fate.met is None):
+                # Sin plazo congelado, o sustituida sin cierre ni vencimiento: no hay plazo que
+                # cumplir (ni «en curso» para siempre).
                 return None
             return MilestoneDeadline(due_at=self.shown(fate.due_at), met=fate.met)
         return None
