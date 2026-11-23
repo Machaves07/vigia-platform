@@ -5,7 +5,8 @@
  *   servidor con SUP-U05-17) y la causa raíz con su categoría cerrada, el enunciado y la
  *   conclusión (se envían al firmar). El siguiente porqué en blanco lleva a la causa raíz
  *   (TASK-581, `whySteps.ts`). «Siguiente» con un porqué sin guardar lo guarda (texto y categoría
- *   en pantalla) y avanza solo si el servidor lo acepta. «Guardar sin terminar» existe porque hay
+ *   en pantalla) y avanza solo si el servidor lo acepta; con «Guardar porqué» en vuelo, espera ese
+ *   mismo guardado en vez de enviar otro. «Guardar sin terminar» existe porque hay
  *   `server_progress_ref` (el `analysis_id`) y guarda los porqués con cambios.
  * - Cada texto es UI-13 con los límites de U-04 (`ROOT_CAUSE_TEXT_LIMITS`): contador, espejo de la
  *   política base antes de enviar y recorte de los extremos (A-126). Con un error local no se
@@ -299,6 +300,8 @@ export function Workspace({
   const [whyErrors, setWhyErrors] = useState<readonly number[]>([]);
   const [rootErrors, setRootErrors] = useState(false);
   const signing = useRef<Promise<void> | null>(null);
+  /** El guardado en vuelo de cada porqué, por `offset`. */
+  const inFlight = useRef(new Map<number, Promise<void>>());
   const analysisId = initial.analysis_id;
 
   const scope = principal?.organization.organization_id ?? 'none';
@@ -340,7 +343,7 @@ export function Workspace({
     ]);
   };
 
-  const saveStep = async (offset: number): Promise<void> => {
+  const writeStep = async (offset: number): Promise<void> => {
     const index = offset + 1;
     const field = `why-${String(index)}`;
     const draft = whys[offset] ?? { statement: '', category: '' };
@@ -374,6 +377,20 @@ export function Workspace({
     } finally {
       setSaving(null);
     }
+  };
+
+  /**
+   * Guarda el porqué `offset`. Si ya hay un guardado suyo en vuelo («Guardar porqué», «Siguiente»
+   * o «Guardar sin terminar»), devuelve esa misma promesa: nunca sale un segundo PUT del paso.
+   */
+  const saveStep = (offset: number): Promise<void> => {
+    const pending = inFlight.current.get(offset);
+    if (pending !== undefined) return pending;
+    const run = writeStep(offset).finally(() => {
+      inFlight.current.delete(offset);
+    });
+    inFlight.current.set(offset, run);
+    return run;
   };
 
   /** «Guardar sin terminar»: los porqués con cambios, en orden; el resto ya está en el servidor. */

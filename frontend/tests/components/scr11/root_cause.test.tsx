@@ -1101,6 +1101,46 @@ describe('SCR-11 TASK-581: causa raíz que se puede completar', { timeout: 60_00
     expect(title()).toBe(whyLabel(1));
   });
 
+  it('«Siguiente» con «Guardar porqué» en vuelo espera ese guardado: un solo PUT y avanza al resolver', async () => {
+    const { loop } = await setup();
+    await start();
+    let release: (value: null) => void = () => undefined;
+    loop.state.stepResponse = () =>
+      new Promise<null>((done) => {
+        release = done;
+      });
+    fireEvent.change(statement(1), { target: { value: 'Primer porqué sintético de la zona.' } });
+    fireEvent.click(screen.getByRole('button', { name: text('scr11.save_step') }));
+    await waitFor(() => {
+      expect(loop.calls.steps).toHaveLength(1);
+    }, WAIT);
+    // Con el guardado en vuelo, «Siguiente» no envía otro PUT del mismo paso.
+    next();
+    await settle();
+    expect(loop.calls.steps).toHaveLength(1);
+    expect(title()).toBe(whyLabel(1));
+    loop.state.stepResponse = null;
+    await act(async () => {
+      release(null);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(title()).toBe(whyLabel(2));
+    }, WAIT);
+    await settle();
+    expect(loop.calls.steps).toEqual([
+      {
+        index: 1,
+        body: {
+          statement: 'Primer porqué sintético de la zona.',
+          evidence_refs: [],
+          category: null,
+        },
+      },
+    ]);
+    expect(progress()).toEqual({ current: 2, total: 3 });
+  });
+
   it('«Siguiente» con un porqué guardado y vaciado dice que es obligatorio y no envía', async () => {
     const { loop } = await resumedWithTwo();
     next();
