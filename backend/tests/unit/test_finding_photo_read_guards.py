@@ -387,3 +387,26 @@ async def test_identifiers_that_are_not_uuids_are_not_found_before_anything() ->
     with pytest.raises(ResourceNotFound):
         await reader.image(make_context(), FINDING, "foto")  # type: ignore[arg-type]
     assert audit.entries == [] and photos.reads == []
+
+
+def _predicates(statement: Any) -> set[str]:
+    """Los predicados de primer nivel del ``WHERE`` principal (separados por `` AND ``)."""
+    sql = str(statement.text)
+    where = sql[sql.index(" WHERE ") + len(" WHERE ") :]
+    where = where.split(" ORDER BY ")[0].split(" AND EXISTS ")[0]
+    return {predicate.strip() for predicate in where.split(" AND ")}
+
+
+@pytest.mark.parametrize("name", ["_RECORD_PHOTOS", "_FINDING_IMAGE"])
+def test_both_statements_only_read_productive_photos_of_the_finding_place(name: str) -> None:
+    """``m_incluye_comisionamiento``: el ``CHECK episode_photo_record_by_mode`` ya impide que una
+    foto ``commissioning`` lleve ``record_id`` (la base no deja sembrar el caso), así que el filtro
+    explícito del modo es la defensa en profundidad que esta prueba sostiene, con la planta y la
+    zona del hallazgo."""
+    predicates = _predicates(getattr(episode_photo_queries, name))
+    assert {
+        "p.organization_id = :organization_id",
+        "p.plant_id = :plant_id",
+        "p.zone_mode = \x27productive\x27",
+    } <= predicates
+    assert "p.zone_id = :zone_id" in predicates
