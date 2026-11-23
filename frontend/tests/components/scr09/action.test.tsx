@@ -361,13 +361,21 @@ describe('SCR-09 responsable de la acción (TASK-583)', { timeout: 40_000 }, () 
 
   it('si la persona en sesión no está en la lista, propone a la primera de la lista', async () => {
     const others = PEOPLE.filter((person) => person.user_id !== USER);
-    await openWith(others);
+    const bodies: unknown[] = [];
+    const { user } = await openWith(others);
+    server.use(created(bodies));
     await waitFor(() => {
       expect(screen.getByRole<HTMLSelectElement>('combobox', { name: ASSIGNEE_NAME }).value).toBe(
         ALVARO,
       );
     }, WAIT);
     expect(options().map((option) => option.value)).not.toContain(USER);
+    // Lo enviado es lo que se ve: nunca la persona en sesión, que assign rechazaría.
+    await fill(user);
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    }, WAIT);
+    expect((bodies[0] as { assignee_user_id: string }).assignee_user_id).toBe(ALVARO);
   });
 
   it('sin la lista, ofrece a la persona en sesión y lo dice', async () => {
