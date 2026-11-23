@@ -34,6 +34,7 @@ from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.application.timeline import FindingTimelineService
 from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -57,6 +58,7 @@ __all__ = [
     "LoopHttp",
     "build_detail",
     "build_loop_http",
+    "build_timeline",
     "installed",
     "loop_http",
     "loop_http_state",
@@ -102,6 +104,8 @@ class LoopHttp:
     unclosable: UnclosableService | None = None
     """``POST /loop/findings/{finding_state_id}/unclosable`` y
     ``POST /loop/unclosable/{declaration_id}/reviews`` (LC-LAZ-09, VIG-228)."""
+    timeline: FindingTimelineService | None = None
+    """``GET /loop/findings/{finding_state_id}/timeline``: la ficha de vida (TASK-585)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -170,6 +174,21 @@ def build_detail(services: UnitServices) -> FindingDetailService:
     )
 
 
+def build_timeline(services: UnitServices, detail: FindingDetailService) -> FindingTimelineService:
+    """La ficha de vida: los pasos de alcance y compuerta del detalle, ``LectorExpediente`` de
+    U-02 (una lectura auditada) y la zona horaria de la planta."""
+    return FindingTimelineService(
+        subjects=detail,
+        reader=LectorExpediente(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        timezones=PostgresLoopConfigurationRepository(services.database),
+    )
+
+
 def build_loop_http(services: UnitServices) -> LoopHttp:
     """``LoopHttp`` sobre la infraestructura común de la raíz."""
     actions = ActionService(
@@ -178,6 +197,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
         authorizer=services.authorizer,
         clock=services.clock,
     )
+    detail = build_detail(services)
     return LoopHttp(
         configuration=LoopConfigurationService(
             repository=PostgresLoopConfigurationRepository(services.database),
@@ -241,7 +261,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),
-        detail=build_detail(services),
+        detail=detail,
         review_queue=ReviewQueueService(
             database=services.database,
             writer=services.writer,
@@ -270,6 +290,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             gates=catalog_query_ports(services.database).gates,
             actions=actions,
         ),
+        timeline=build_timeline(services, detail),
     )
 
 

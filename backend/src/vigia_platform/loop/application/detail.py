@@ -868,6 +868,19 @@ class FindingDetailService:
                 resolutions = (await transaction.execute(_REVIEW_RESOLUTIONS, place)).all()
         return classification_history(subject, _mappings(rows), _mappings(resolutions))
 
+    async def visible_subject(
+        self, context: ScopeContext, finding_state_id: uuid.UUID
+    ) -> tuple[ScopeContext, Mapping[str, Any]]:
+        """Los pasos 1 y 2 del detalle, para otra lectura del mismo hallazgo (la ficha de vida,
+        TASK-585): alcance con ``findings.read`` sobre su zona y compuerta de uso aprobada en el
+        instante del hecho (``ResourceNotFound`` o ``FindingGateUnavailable``, como el detalle).
+        Devuelve el contexto autorizado y la fila de ``loop.finding_state``."""
+        authorized, subject = await self._authorized(context, finding_state_id)
+        await self._gate(
+            authorized, _uuid(subject["zone_id"]), _instant(subject["occurred_at_exact"])
+        )
+        return authorized, subject
+
     # --- pasos -----------------------------------------------------------------------------------
 
     async def _authorized(

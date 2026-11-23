@@ -13,6 +13,9 @@ Operaciones del puerto (business-logic-model §4 "Lectura" y §10.1):
 - ``by_source(context, record_type, source_key)``: la idempotencia de U-03 (BR-NUC-48).
 - ``list_audit(context, filters, page)``: las entradas de la cadena de auditoría de la
   organización, con la misma paginación por clave (``occurred_at, entry_id``).
+- ``subject_history(context, subject, …)``: **todos** los registros de un sujeto del lazo (un
+  hallazgo o una detección, TASK-585), en orden de cadena y con tope, en **una** lectura auditada;
+  ver «Historia de un sujeto».
 
 **Alcance.** La seguridad a nivel de fila ya limita a la organización del contexto; el puerto
 filtra además por ``allowed_scopes`` (BR-NUC-04, 13 a 16): un alcance de organización (de la
@@ -31,6 +34,26 @@ vea quién leyó en ella (BR-NUC-63; seguimiento de VIG-59).
 
 ``get(…, record_types=…)`` trata un registro de otro tipo como fuera del alcance: la ruta de
 lectura (TASK-137) lo usa para la vista de integridad, que solo ve los tipos de la cadena.
+
+**Historia de un sujeto** (``subject_history``, la ficha de vida de TASK-585; BR-LAZ-09). Un sujeto
+del lazo es un identificador que sus registros citan en el contenido (como
+``loop.projection.fold.subject_id_of``): el episodio de cada tramo (``episode.episode_id``), la
+detección (``detection_id``), el episodio de un tramo tardío (``episode_id``) y el
+``subject_id`` de los registros de U-04. Lee, en una
+transacción y con **una sola** entrada ``ledger_detail_read`` (``resource`` = el sujeto que nombra
+el llamador, ``result_count`` = registros del sujeto devueltos, ``filters`` con el sujeto y el
+tope):
+
+- el **registro de anclaje** con el mismo filtro de alcance que ``get``: si no se ve, o no es de la
+  planta y la zona del sujeto, no hay nada que leer (``None``, ``not_found``);
+- los registros de la **zona** del sujeto que lo citan, desde el anclaje (``chain_sequence`` y
+  ``received_at`` nunca retroceden en la cadena), en orden de cadena y con tope (``limit``; el
+  siguiente solo dice ``truncated``);
+- y, solo si el llamador los nombra (``preceding_types``), los registros **de la planta** (sin
+  zona, como ``loop_configuration_changed``) de esos tipos **anteriores** al anclaje en la cadena,
+  hasta ``MAX_PRECEDING_RECORDS``. Son la configuración que regía la planta cuando llegó el
+  sujeto: el actor alcanza una zona de esa planta (el anclaje se ve), así que la regla que rige esa
+  zona le corresponde aunque su alcance sea solo de zona.
 
 ``by_source`` **no** escribe entrada ni filtra por alcance: es la comprobación de idempotencia del
 camino de escritura de U-03, que por definición es de toda la organización (la unicidad de
@@ -99,6 +122,8 @@ __all__ = [
     "RecordActor",
     "RecordCursor",
     "SourceMatch",
+    "SubjectHistory",
+    "SubjectRef",
 ]
 
 MAX_PAGE_SIZE: Final = 200
@@ -112,6 +137,13 @@ MAX_FILTER_VALUES: Final = 32
 
 RECORD_RESOURCE_KIND: Final = "ledger_record"
 """``resource_ref.kind`` de ``ledger_detail_read``."""
+
+MAX_SUBJECT_RECORDS: Final = 1000
+"""Tope del ``limit`` de ``subject_history`` ``[objetivo propio]``."""
+
+MAX_PRECEDING_RECORDS: Final = 2000
+"""Registros de planta anteriores al anclaje que ``subject_history`` lee como mucho
+``[objetivo propio]``; con más, ``preceding_complete`` es falso y no se devuelve ninguno."""
 
 _SNAKE: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
@@ -341,6 +373,31 @@ class LedgerRecordView:
 
 
 @dataclass(frozen=True, slots=True)
+class SubjectRef:
+    """El sujeto del lazo cuya historia se lee: su planta, su zona y su registro de anclaje.
+
+    ``resource`` es lo que cita la entrada de auditoría (el hallazgo que se pidió)."""
+
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    subject_id: uuid.UUID
+    anchor_record_id: uuid.UUID
+    resource: ResourceRef
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectHistory:
+    """Los registros del sujeto en orden de cadena y, aparte, los de planta anteriores."""
+
+    records: tuple[LedgerRecordView, ...]
+    truncated: bool
+    """Hay más registros del sujeto que el tope pedido."""
+    preceding: tuple[LedgerRecordView, ...]
+    preceding_complete: bool
+    """Falso si los de planta anteriores superan ``MAX_PRECEDING_RECORDS`` (no se devuelven)."""
+
+
+@dataclass(frozen=True, slots=True)
 class SourceMatch:
     """Lo que ``by_source`` devuelve: identidad y hash del registro con esa clave."""
 
@@ -464,6 +521,54 @@ _GET_RECORD: Final = text(
     " OR r.scope_zone_id = ANY(CAST(:scope_zones AS uuid[])))"
     " AND (CAST(:record_types AS text[]) IS NULL"
     " OR r.record_type = ANY(CAST(:record_types AS text[])))"
+)
+
+_SUBJECT_ANCHOR: Final = text(
+    "SELECT r.record_id, r.organization_id, r.plant_id, r.chain_sequence, r.record_type,"
+    " r.schema_version, r.actor_kind, r.actor_id, r.actor_display_name_snapshot,"
+    " r.actor_role_in_use, r.actor_concession_id, r.actor_unit, r.scope_plant_id,"
+    " r.scope_zone_id, r.scope_node_id, r.correlation_id, r.received_at, r.occurred_at,"
+    " r.source_key, r.content, r.content_hash, r.previous_hash, r.record_hash"
+    " FROM ledger.ledger_record AS r"
+    " WHERE r.organization_id = :organization_id AND r.record_id = :record_id"
+    " AND r.plant_id = :plant_id AND r.scope_zone_id = :zone_id"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR r.scope_plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR r.scope_zone_id = ANY(CAST(:scope_zones AS uuid[])))"
+)
+
+_SUBJECT_RECORDS: Final = text(
+    "SELECT r.record_id, r.organization_id, r.plant_id, r.chain_sequence, r.record_type,"
+    " r.schema_version, r.actor_kind, r.actor_id, r.actor_display_name_snapshot,"
+    " r.actor_role_in_use, r.actor_concession_id, r.actor_unit, r.scope_plant_id,"
+    " r.scope_zone_id, r.scope_node_id, r.correlation_id, r.received_at, r.occurred_at,"
+    " r.source_key, r.content, r.content_hash, r.previous_hash, r.record_hash"
+    " FROM ledger.ledger_record AS r"
+    " WHERE r.organization_id = :organization_id AND r.plant_id = :plant_id"
+    " AND r.scope_zone_id = :zone_id AND r.chain_sequence >= :anchor_sequence"
+    " AND r.received_at >= :anchor_received_at"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR r.scope_plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR r.scope_zone_id = ANY(CAST(:scope_zones AS uuid[])))"
+    " AND (r.content_json ->> 'subject_id' = :subject"
+    " OR r.content_json ->> 'detection_id' = :subject"
+    " OR r.content_json ->> 'episode_id' = :subject"
+    " OR r.content_json -> 'episode' ->> 'episode_id' = :subject)"
+    " ORDER BY r.chain_sequence LIMIT :limit"
+)
+
+_PRECEDING_RECORDS: Final = text(
+    "SELECT r.record_id, r.organization_id, r.plant_id, r.chain_sequence, r.record_type,"
+    " r.schema_version, r.actor_kind, r.actor_id, r.actor_display_name_snapshot,"
+    " r.actor_role_in_use, r.actor_concession_id, r.actor_unit, r.scope_plant_id,"
+    " r.scope_zone_id, r.scope_node_id, r.correlation_id, r.received_at, r.occurred_at,"
+    " r.source_key, r.content, r.content_hash, r.previous_hash, r.record_hash"
+    " FROM ledger.ledger_record AS r"
+    " WHERE r.organization_id = :organization_id AND r.plant_id = :plant_id"
+    " AND r.scope_zone_id IS NULL AND r.chain_sequence < :anchor_sequence"
+    " AND r.received_at <= :anchor_received_at"
+    " AND r.record_type = ANY(CAST(:record_types AS text[]))"
+    " ORDER BY r.chain_sequence LIMIT :limit"
 )
 
 _ZONE_PLANTS: Final = text(
@@ -826,6 +931,101 @@ class LectorExpediente:
         if row is None:
             return None
         return _record(row, evidences.get(requested, ()))
+
+    async def subject_history(
+        self,
+        context: ScopeContext,
+        subject: SubjectRef,
+        *,
+        limit: int,
+        preceding_types: tuple[str, ...] = (),
+    ) -> SubjectHistory | None:
+        """La historia del sujeto en **una** lectura auditada; ``None`` si su anclaje no se ve.
+
+        Escribe exactamente una entrada ``ledger_detail_read`` con ``resource`` =
+        ``subject.resource`` y ``result_count`` = registros del sujeto devueltos (0 si no se ve),
+        en la misma transacción que las consultas (ver «Historia de un sujeto»)."""
+        context = _require_context(context)
+        if not isinstance(subject, SubjectRef) or not isinstance(subject.resource, ResourceRef):
+            raise LedgerQueryInvalid("subject debe ser SubjectRef")
+        plant_id = _required_uuid(subject.plant_id, "subject.plant_id")
+        zone_id = _required_uuid(subject.zone_id, "subject.zone_id")
+        subject_id = _required_uuid(subject.subject_id, "subject.subject_id")
+        anchor_id = _required_uuid(subject.anchor_record_id, "subject.anchor_record_id")
+        if type(limit) is not int or not 1 <= limit <= MAX_SUBJECT_RECORDS:
+            raise LedgerQueryInvalid(f"limit debe ir de 1 a {MAX_SUBJECT_RECORDS}")
+        types = _codes(preceding_types, "preceding_types")
+        scopes = _Scopes.of(context).parameters()
+        place = {"organization_id": context.organization_id, "plant_id": plant_id}
+        audited = _audited(
+            {
+                "subject_id": str(subject_id),
+                "anchor_record_id": str(anchor_id),
+                "limit": limit,
+                **({"preceding_record_types": list(types)} if types else {}),
+            }
+        )
+        rows: list[Row[Any]] = []
+        preceding: list[Row[Any]] = []
+        async with self._database.transaction(context) as transaction:
+            anchor = (
+                await transaction.execute(
+                    _SUBJECT_ANCHOR,
+                    {**scopes, **place, "zone_id": zone_id, "record_id": anchor_id},
+                )
+            ).first()
+            if anchor is not None:
+                bounds = {
+                    "anchor_sequence": int(anchor.chain_sequence),
+                    "anchor_received_at": anchor.received_at,
+                }
+                found = await transaction.execute(
+                    _SUBJECT_RECORDS,
+                    {
+                        **scopes,
+                        **place,
+                        **bounds,
+                        "zone_id": zone_id,
+                        "subject": str(subject_id),
+                        "limit": limit + 1,
+                    },
+                )
+                rows = list(found.all())
+                if types:
+                    earlier = await transaction.execute(
+                        _PRECEDING_RECORDS,
+                        {
+                            **place,
+                            **bounds,
+                            "record_types": list(types),
+                            "limit": MAX_PRECEDING_RECORDS + 1,
+                        },
+                    )
+                    preceding = list(earlier.all())
+            truncated = len(rows) > limit
+            rows = rows[:limit]
+            evidences = await self._evidences(
+                transaction, context, [_id(row.record_id) for row in rows]
+            )
+            await self._audit.append(
+                context,
+                AuditOperation.LEDGER_DETAIL_READ,
+                plant_id=None if anchor is None else plant_id,
+                zone_id=None if anchor is None else zone_id,
+                resource=subject.resource,
+                filters=audited,
+                result_count=len(rows),
+                transaction=transaction,
+            )
+        if anchor is None:
+            return None
+        complete = len(preceding) <= MAX_PRECEDING_RECORDS
+        return SubjectHistory(
+            records=tuple(_record(row, evidences.get(_id(row.record_id), ())) for row in rows),
+            truncated=truncated,
+            preceding=tuple(_record(row, ()) for row in preceding) if complete else (),
+            preceding_complete=complete,
+        )
 
     async def by_source(
         self, context: ScopeContext, record_type: str, source_key: str

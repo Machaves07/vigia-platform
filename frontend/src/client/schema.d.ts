@@ -2169,6 +2169,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/loop/findings/{finding_state_id}/timeline': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Ficha de vida del hallazgo: su línea de tiempo en una lectura auditada */
+    get: operations['get_timeline_loop_findings__finding_state_id__timeline_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/accreditation/exports': {
     parameters: {
       query?: never;
@@ -5312,6 +5329,26 @@ export interface components {
       /** Cause */
       cause: string | null;
     };
+    /** FindingTimelineOut */
+    FindingTimelineOut: {
+      /**
+       * Finding State Id
+       * Format: uuid
+       */
+      finding_state_id: string;
+      /** Subject Kind */
+      subject_kind: string;
+      lifecycle_state: components['schemas']['FindingLifecycleState'];
+      /** Time Aggregated */
+      time_aggregated: boolean;
+      /** Aggregation Window Minutes */
+      aggregation_window_minutes: number | null;
+      /** Truncated */
+      truncated: boolean;
+      summary: components['schemas']['TimelineSummaryOut'];
+      /** Milestones */
+      milestones: components['schemas']['TimelineMilestoneOut'][];
+    };
     /** FindingsSummaryOut */
     FindingsSummaryOut: {
       /** Received */
@@ -6202,6 +6239,26 @@ export interface components {
       /** Zones */
       zones: components['schemas']['ProgramMetricSnapshot'][];
     };
+    /**
+     * MilestoneKind
+     * @description Los hitos de la ficha: un tipo de registro del sujeto cada uno, y ``other`` para el resto.
+     * @enum {string}
+     */
+    MilestoneKind:
+      | 'finding_received'
+      | 'late_segment_attached'
+      | 'classification'
+      | 'review_resolution'
+      | 'action_assigned'
+      | 'action_evidence_added'
+      | 'action_overdue'
+      | 'closure'
+      | 'closure_attachment_unrecoverable'
+      | 'root_cause_analysis'
+      | 'reopening'
+      | 'unclosable_state_declared'
+      | 'unclosable_review'
+      | 'other';
     /**
      * MinimumCoverage
      * @description Cobertura mínima (RF-CTR-03, RF-BOR-07; entradas A-03 y A-06 de la adenda): la zona la conserva cuando **todas** las cámaras de `required_camera_ids` están observables **y** al menos `required_count` cámaras de la zona están observables en total; una cámara `degraded` o `not_observable` cuenta como no observable. Restricciones que verifica el modelo: `len(required_camera_ids) ≤ required_count ≤ len(cameras)` y toda cámara requerida está en `cameras` (pendiente nº 34).
@@ -8267,6 +8324,116 @@ export interface components {
       reason_es: string;
     };
     TimeSource: string;
+    /**
+     * TimelineActorOut
+     * @description Quién hizo el paso: el usuario de la plataforma (P8), nunca una persona observada.
+     */
+    TimelineActorOut: {
+      /** Role In Use */
+      role_in_use: string | null;
+      /** Display Name */
+      display_name: string;
+    };
+    /** TimelineDeadlineOut */
+    TimelineDeadlineOut: {
+      /** Due At */
+      due_at: string;
+      /** Met */
+      met: boolean | null;
+    };
+    /**
+     * TimelineDetailsOut
+     * @description Los campos elegidos del registro por tipo; los que no son de su tipo van en ``null``.
+     */
+    TimelineDetailsOut: {
+      /** Segment Index */
+      segment_index: number | null;
+      /** Delay Ms */
+      delay_ms: number | null;
+      /** Outcome */
+      outcome: string | null;
+      /** Reason Category */
+      reason_category: string | null;
+      /** Reason Text */
+      reason_text: string | null;
+      /** Is Reclassification */
+      is_reclassification: boolean | null;
+      /** Action Type */
+      action_type: string | null;
+      /** Description */
+      description: string | null;
+      /** Expected Outcome */
+      expected_outcome: string | null;
+      /** Assignee Display Name */
+      assignee_display_name: string | null;
+      /** Due At */
+      due_at: string | null;
+      /** Deadline Days */
+      deadline_days: number | null;
+      /** Performed At */
+      performed_at: string | null;
+      /** Performed By Role */
+      performed_by_role: string | null;
+      /** Verification Note */
+      verification_note: string | null;
+      /** Days Overdue */
+      days_overdue: number | null;
+      /** Escalation Level */
+      escalation_level: string | null;
+      /** Professional License */
+      professional_license: string | null;
+      /** Analysis State */
+      analysis_state: string | null;
+      /** Root Cause Category */
+      root_cause_category: string | null;
+      /** Root Cause Statement */
+      root_cause_statement: string | null;
+      /** Conclusion */
+      conclusion: string | null;
+      /** From State */
+      from_state: string | null;
+      /** Compensatory Measure */
+      compensatory_measure: string | null;
+      /** Review Due At */
+      review_due_at: string | null;
+      /** Review Note */
+      review_note: string | null;
+      /** Detected At */
+      detected_at: string | null;
+    };
+    /** TimelineMilestoneOut */
+    TimelineMilestoneOut: {
+      kind: components['schemas']['MilestoneKind'];
+      /** Record Type */
+      record_type: string;
+      /**
+       * Record Id
+       * Format: uuid
+       */
+      record_id: string;
+      /** Chain Sequence */
+      chain_sequence: number;
+      /** At */
+      at: string;
+      /** Elapsed Ms Since Previous */
+      elapsed_ms_since_previous: number | null;
+      actor: components['schemas']['TimelineActorOut'] | null;
+      details: components['schemas']['TimelineDetailsOut'];
+      deadline: components['schemas']['TimelineDeadlineOut'] | null;
+    };
+    /** TimelineSummaryOut */
+    TimelineSummaryOut: {
+      /** Received At */
+      received_at: string | null;
+      /** Closed At */
+      closed_at: string | null;
+      /** Business Days To Close */
+      business_days_to_close: number | null;
+      /** Classification Met */
+      classification_met: boolean | null;
+      /** Action Met */
+      action_met: boolean | null;
+    };
     /** Timestamp */
     Timestamp: string;
     /** TrancheOut */
@@ -14253,6 +14420,37 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['UnclosableReviewOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  get_timeline_loop_findings__finding_state_id__timeline_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        finding_state_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FindingTimelineOut'];
         };
       };
       /** @description Error genérico (ApiError) */

@@ -5020,6 +5020,33 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/timeline":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Ficha de vida del hallazgo: su línea de tiempo en una lectura auditada"
+      "operationId": "get_timeline_loop_findings__finding_state_id__timeline_get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/FindingTimelineOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -10628,6 +10655,47 @@
         - "since"
         - "cause"
       "title": "FindingNoticeOut"
+    "FindingTimelineOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "aggregation_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Aggregation Window Minutes"
+        "truncated":
+          "type": "boolean"
+          "title": "Truncated"
+        "summary":
+          "$ref": "#/components/schemas/TimelineSummaryOut"
+        "milestones":
+          "items":
+            "$ref": "#/components/schemas/TimelineMilestoneOut"
+          "type": "array"
+          "title": "Milestones"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "subject_kind"
+        - "lifecycle_state"
+        - "time_aggregated"
+        - "aggregation_window_minutes"
+        - "truncated"
+        - "summary"
+        - "milestones"
+      "title": "FindingTimelineOut"
     "FindingsSummaryOut":
       "properties":
         "received":
@@ -12221,6 +12289,25 @@
         - "period"
         - "zones"
       "title": "MetricsOut"
+    "MilestoneKind":
+      "type": "string"
+      "enum":
+        - "finding_received"
+        - "late_segment_attached"
+        - "classification"
+        - "review_resolution"
+        - "action_assigned"
+        - "action_evidence_added"
+        - "action_overdue"
+        - "closure"
+        - "closure_attachment_unrecoverable"
+        - "root_cause_analysis"
+        - "reopening"
+        - "unclosable_state_declared"
+        - "unclosable_review"
+        - "other"
+      "title": "MilestoneKind"
+      "description": "Los hitos de la ficha: un tipo de registro del sujeto cada uno, y ``other`` para el resto."
     "MinimumCoverage":
       "properties":
         "required_count":
@@ -15996,6 +16083,289 @@
       "maxLength": 128
       "minLength": 1
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    "TimelineActorOut":
+      "properties":
+        "role_in_use":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Role In Use"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "role_in_use"
+        - "display_name"
+      "title": "TimelineActorOut"
+      "description": "Quién hizo el paso: el usuario de la plataforma (P8), nunca una persona observada."
+    "TimelineDeadlineOut":
+      "properties":
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "met":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Met"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "due_at"
+        - "met"
+      "title": "TimelineDeadlineOut"
+    "TimelineDetailsOut":
+      "properties":
+        "segment_index":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Segment Index"
+        "delay_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Delay Ms"
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "reason_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Category"
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+        "is_reclassification":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Is Reclassification"
+        "action_type":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Action Type"
+        "description":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Expected Outcome"
+        "assignee_display_name":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Assignee Display Name"
+        "due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Due At"
+        "deadline_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Deadline Days"
+        "performed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Performed At"
+        "performed_by_role":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Performed By Role"
+        "verification_note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Verification Note"
+        "days_overdue":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Days Overdue"
+        "escalation_level":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Escalation Level"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Professional License"
+        "analysis_state":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Analysis State"
+        "root_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Category"
+        "root_cause_statement":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Statement"
+        "conclusion":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Conclusion"
+        "from_state":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "From State"
+        "compensatory_measure":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Compensatory Measure"
+        "review_due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Review Due At"
+        "review_note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Review Note"
+        "detected_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Detected At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "segment_index"
+        - "delay_ms"
+        - "outcome"
+        - "reason_category"
+        - "reason_text"
+        - "is_reclassification"
+        - "action_type"
+        - "description"
+        - "expected_outcome"
+        - "assignee_display_name"
+        - "due_at"
+        - "deadline_days"
+        - "performed_at"
+        - "performed_by_role"
+        - "verification_note"
+        - "days_overdue"
+        - "escalation_level"
+        - "professional_license"
+        - "analysis_state"
+        - "root_cause_category"
+        - "root_cause_statement"
+        - "conclusion"
+        - "from_state"
+        - "compensatory_measure"
+        - "review_due_at"
+        - "review_note"
+        - "detected_at"
+      "title": "TimelineDetailsOut"
+      "description": "Los campos elegidos del registro por tipo; los que no son de su tipo van en ``null``."
+    "TimelineMilestoneOut":
+      "properties":
+        "kind":
+          "$ref": "#/components/schemas/MilestoneKind"
+        "record_type":
+          "type": "string"
+          "title": "Record Type"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "chain_sequence":
+          "type": "integer"
+          "title": "Chain Sequence"
+        "at":
+          "type": "string"
+          "title": "At"
+        "elapsed_ms_since_previous":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Elapsed Ms Since Previous"
+        "actor":
+          "anyOf":
+            - "$ref": "#/components/schemas/TimelineActorOut"
+            - "type": "null"
+        "details":
+          "$ref": "#/components/schemas/TimelineDetailsOut"
+        "deadline":
+          "anyOf":
+            - "$ref": "#/components/schemas/TimelineDeadlineOut"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "record_type"
+        - "record_id"
+        - "chain_sequence"
+        - "at"
+        - "elapsed_ms_since_previous"
+        - "actor"
+        - "details"
+        - "deadline"
+      "title": "TimelineMilestoneOut"
+    "TimelineSummaryOut":
+      "properties":
+        "received_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Received At"
+        "closed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed At"
+        "business_days_to_close":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Business Days To Close"
+        "classification_met":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Classification Met"
+        "action_met":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Action Met"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "received_at"
+        - "closed_at"
+        - "business_days_to_close"
+        - "classification_met"
+        - "action_met"
+      "title": "TimelineSummaryOut"
     "Timestamp":
       "type": "string"
       "maxLength": 24

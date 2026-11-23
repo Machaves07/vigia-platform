@@ -75,6 +75,7 @@ from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
+from vigia_platform.loop.adapters.http.timeline_routes import timeline_router
 from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.adapters.http.vocabulary_routes import vocabulary_router
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
@@ -304,6 +305,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     overdue_router,  # SUP-U05-15 (TASK-313)
     vocabulary_router,  # SUP-U05-36 y 37 (TASK-350)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
+    timeline_router,  # la ficha de vida del hallazgo (TASK-585)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
 
