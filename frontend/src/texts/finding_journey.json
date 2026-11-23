@@ -18,5 +18,7 @@
   "finding_journey.queue_target": "Detección señalada desde el hallazgo",
   "finding_journey.queue_target_missing": "La detección señalada no está pendiente en las páginas cargadas de la cola: puede estar ya resuelta.",
   "finding_journey.panel_evidence": "Clip y señales junto a la detección",
-  "finding_journey.panel_resolve": "Resolución junto a la detección"
+  "finding_journey.panel_resolve": "Resolución junto a la detección",
+  "finding_journey.assignee": "Responsable",
+  "finding_journey.assignee_unavailable": "Responsable no disponible"
 }

@@ -7,6 +7,7 @@ import { text } from '@/texts';
 import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import {
+  ASSIGNEE,
   ATTACHMENT,
   DESCRIPTION,
   FINDING,
@@ -218,6 +219,89 @@ describe('SCR-09 cierre y navegación de adjuntos', { timeout: 40_000 }, () => {
     expect(within(overdue).getByText(`${text('scr09.overdue.count')}: 1`)).not.toBeNull();
     expect([...(requests[0]?.searchParams.keys() ?? [])].sort()).toEqual(['limit', 'plant_id']);
     expect(closurePort.operations.every((operation) => operation.status === 'fixed')).toBe(true);
+  });
+
+  /**
+   * O-16 (recorrido de cierre M10): cada fila de «Acciones vencidas» nombra al responsable de la
+   * acción por su nombre visible, nunca por su identificador; sin nombre, «Responsable no
+   * disponible». Mutaciones con nombre: `m_sin_responsable_vencidas` y
+   * `m_responsable_id_en_vez_de_nombre`.
+   */
+  describe('O-16: el responsable de cada vencida', () => {
+    const OTHER_USER = '0190a1b2-4444-7000-8000-000000000002';
+    function item(index: number, name: string | null) {
+      return {
+        finding_state_id: FINDING,
+        plant_id: detail.plant_id,
+        zone_id: detail.zone_id,
+        subject_kind: 'finding',
+        family: 'coexistence',
+        tier: 'tier_1',
+        lifecycle_state: 'overdue',
+        declared: true,
+        action_id: `0190a1b2-7777-7000-8000-00000000010${String(index)}`,
+        action_type: 'engineering',
+        assignee_user_id: OTHER_USER,
+        assignee_inactive: false,
+        assignee_display_name: name,
+        due_at: '2026-10-01T15:00:00.000Z',
+        overdue_since: '2026-10-01T15:00:00.000Z',
+        overdue_days: 23 + index,
+        highlighted: false,
+      };
+    }
+    const named = (name: string) => `${text('finding_journey.assignee')}: ${name}`;
+
+    it('el panel del gerente y la vencida del lazo nombran a su responsable', async () => {
+      await renderClosure('closure', { permissions: [...PERMISSIONS, 'executive_summary.read'] });
+      server.use(
+        http.get('http://localhost/loop/overdue', () =>
+          HttpResponse.json({
+            plant_id: detail.plant_id,
+            highlight_threshold_days: 30,
+            items: [item(1, 'Persona de prueba (plant_manager)'), item(2, null)],
+            zones: [{ zone_id: detail.zone_id, overdue_count: 2, highlighted_count: 0 }],
+            partition_notice: null,
+            next_cursor: null,
+          }),
+        ),
+      );
+      await load();
+      const region = screen.getByRole('region', { name: text('scr09.overdue.title') });
+      await waitFor(() => {
+        expect(region.querySelectorAll('li > [data-part="overdue_assignee"]')).toHaveLength(2);
+      }, WAIT);
+      expect(
+        [...region.querySelectorAll('li > [data-part="overdue_assignee"]')].map(
+          (node) => node.textContent,
+        ),
+      ).toEqual([
+        named('Persona de prueba (plant_manager)'),
+        text('finding_journey.assignee_unavailable'),
+      ]);
+      expect(
+        [
+          ...region.querySelectorAll('[data-part="overdue_action"] [data-part="overdue_assignee"]'),
+        ].map((node) => node.textContent),
+      ).toEqual([named(ASSIGNEE)]);
+    });
+
+    it('la acción vigente con su plazo nombra también a su responsable', async () => {
+      const [action] = detail.actions;
+      if (action === undefined) throw new Error('Falta la acción sintética.');
+      await renderClosure('closure', {
+        detail: {
+          ...detail,
+          lifecycle_state: 'action_assigned',
+          actions: [{ ...action, state: 'assigned', due_at: '2027-01-02T15:00:00.000Z' }],
+        },
+      });
+      await load();
+      const region = screen.getByRole('region', { name: text('scr09.overdue.title') });
+      expect(
+        [...region.querySelectorAll('[data-part="live_assignee"]')].map((node) => node.textContent),
+      ).toEqual([named(ASSIGNEE)]);
+    });
   });
 
   /**

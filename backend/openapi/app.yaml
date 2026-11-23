@@ -5868,6 +5868,11 @@
               "format": "uuid"
             - "type": "null"
           "title": "Root Cause Analysis Id"
+        "assignee_display_name":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Assignee Display Name"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -5881,6 +5886,7 @@
         - "due_at"
         - "counts_as_overdue"
         - "root_cause_analysis_id"
+        - "assignee_display_name"
       "title": "ActionOut"
     "ActivationEnrollment":
       "properties":
@@ -13687,6 +13693,11 @@
         "assignee_inactive":
           "type": "boolean"
           "title": "Assignee Inactive"
+        "assignee_display_name":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Assignee Display Name"
         "due_at":
           "type": "string"
           "title": "Due At"
@@ -13714,6 +13725,7 @@
         - "action_type"
         - "assignee_user_id"
         - "assignee_inactive"
+        - "assignee_display_name"
         - "due_at"
         - "overdue_since"
         - "overdue_days"

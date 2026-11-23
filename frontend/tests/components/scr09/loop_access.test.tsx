@@ -188,6 +188,7 @@ describe('estado de la acción tras el cierre firmado (VIG-363, diagnóstico en 
       due_at: DUE,
       counts_as_overdue: true,
       root_cause_analysis_id: null,
+      assignee_display_name: 'Persona de prueba (line_manager)',
     };
   }
 

@@ -137,6 +137,8 @@ export default {
       'due_at',
       'overdue_days',
       'highlighted',
+      // O-16: el nombre visible del responsable de cada vencida.
+      'assignee_display_name',
     ],
   },
 } satisfies Record<string, ViewRegistration>;

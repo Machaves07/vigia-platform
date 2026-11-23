@@ -8,6 +8,8 @@
  *   (`onAction`). Desde el detalle lleva al lazo con el formulario ya abierto.
  * - Reclasificar conserva su aviso: en lazo abierto, que lo suspende (BR-LAZ-24).
  * - En un incerrable, la revisión lleva su fecha comprometida y su medida compensatoria.
+ * - Con acción o vencida, junto al plazo, el responsable de la acción vigente por su nombre
+ *   visible (O-16).
  */
 import { useId } from 'react';
 import { Link } from 'react-router';
@@ -17,9 +19,15 @@ import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampW
 import { descriptor as scr09 } from '@/pages/scr09/descriptor';
 import { descriptor as scr10 } from '@/pages/scr10/descriptor';
 import { text } from '@/texts';
+import { assigneeLine } from './actionState';
 import { SUSPENDING_STATES } from './FindingActions';
 import { isKnownState, nextStep, type StepAccess } from './nextStep';
 import styles from './NextStepPanel.module.css';
+
+/** El responsable de la acción vigente: su nombre visible, `null` si no está disponible. */
+export interface CurrentAssignee {
+  readonly name: string | null;
+}
 
 /** La revisión comprometida de un incerrable: fecha vigente y medida compensatoria declarada. */
 export interface ReviewCommitment {
@@ -115,24 +123,28 @@ function offeredSteps(
 function Why({
   state,
   dueAt,
+  assignee,
   commitment,
   timeZone,
 }: {
   readonly state: string;
   readonly dueAt: string | null;
+  readonly assignee: CurrentAssignee | null;
   readonly commitment: ReviewCommitment | null;
   readonly timeZone: string;
 }) {
+  const withAction = state === 'action_assigned' || state === 'overdue';
   return (
     <>
       <p data-part="why">
         {text(isKnownState(state) ? `next_step.why.${state}` : 'next_step.why.unknown')}
       </p>
-      {(state === 'action_assigned' || state === 'overdue') && dueAt !== null && (
+      {withAction && dueAt !== null && (
         <p data-part="due">
           {text('next_step.due_at')}: <TimestampWithOffset instant={dueAt} timeZone={timeZone} />
         </p>
       )}
+      {withAction && assignee !== null && <p data-part="assignee">{assigneeLine(assignee.name)}</p>}
       {state === 'unclosable' &&
         (commitment === null ? (
           <p data-part="commitment_unknown">{text('role_navigation.loop.commitment_unknown')}</p>
@@ -199,6 +211,7 @@ export function NextStepPanel({
   state,
   permissions,
   dueAt = null,
+  assignee = null,
   detectionId = null,
   commitment = null,
   timeZone,
@@ -210,6 +223,8 @@ export function NextStepPanel({
   readonly permissions: ReadonlySet<string>;
   /** Plazo de la acción vigente (`due_at` del hallazgo). */
   readonly dueAt?: string | null;
+  /** Responsable de la acción vigente; `null` si no hay acción vigente (no se muestra). */
+  readonly assignee?: CurrentAssignee | null;
   /** La detección que la cola debe señalar (`subject_id` de una detección). */
   readonly detectionId?: string | null;
   /** La revisión comprometida del incerrable; `null` si no se conoce. */
@@ -229,7 +244,13 @@ export function NextStepPanel({
       <h2 id={`${id}-title`} className={styles.title}>
         {text('next_step.title')}
       </h2>
-      <Why state={state} dueAt={dueAt} commitment={commitment} timeZone={timeZone} />
+      <Why
+        state={state}
+        dueAt={dueAt}
+        assignee={assignee}
+        commitment={commitment}
+        timeZone={timeZone}
+      />
       {primary === null ? (
         isKnownState(state) && (
           <p data-part="nothing_pending">{text('next_step.nothing_pending')}</p>

@@ -6,7 +6,7 @@
  */
 import type { ReactNode } from 'react';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
-import { ACTION_STATES, shownActionState } from '@/pages/shared/actionState';
+import { ACTION_STATES, assigneeLine, shownActionState } from '@/pages/shared/actionState';
 import type { ActionItem, FindingDetail } from '@/ports/scr09Classify';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
@@ -44,6 +44,8 @@ function ActionEntry({
         {!action.counts_as_overdue && <> · {text('scr09.loop.overdue_count_suspended')}</>}
       </p>
       <p>{action.action_description}</p>
+      {/* O-16: a quién se asignó, por su nombre visible (nunca su identificador). */}
+      <p data-part="action_assignee">{assigneeLine(action.assignee_display_name)}</p>
       {/* VIG-366, S3-25: el resultado esperado con su etiqueta y el plazo solo con la fecha. */}
       <p data-part="expected_outcome">
         {text('scr09.loop.expected_label')}:{' '}

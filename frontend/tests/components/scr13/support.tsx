@@ -145,6 +145,7 @@ export function overdueData(): Overdue {
       action_type: 'engineering',
       assignee_user_id: OTHER,
       assignee_inactive: false,
+      assignee_display_name: 'Persona de prueba (plant_manager)',
       due_at: FROM,
       overdue_since: FROM,
       overdue_days: days,

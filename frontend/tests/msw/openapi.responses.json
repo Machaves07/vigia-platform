@@ -3134,6 +3134,16 @@
               "type": "null"
             }
           ]
+        },
+        "assignee_display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -3148,7 +3158,8 @@
         "assigned_at",
         "due_at",
         "counts_as_overdue",
-        "root_cause_analysis_id"
+        "root_cause_analysis_id",
+        "assignee_display_name"
       ]
     },
     "ActivationEnrollment": {
@@ -12835,6 +12846,16 @@
         "assignee_inactive": {
           "type": "boolean"
         },
+        "assignee_display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "due_at": {
           "type": "string"
         },
@@ -12863,6 +12884,7 @@
         "action_type",
         "assignee_user_id",
         "assignee_inactive",
+        "assignee_display_name",
         "due_at",
         "overdue_since",
         "overdue_days",
