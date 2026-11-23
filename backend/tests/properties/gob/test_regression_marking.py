@@ -10,7 +10,8 @@
   SQL). Invariantes: el cierre de una reejecución que cubre las filas afectadas deja ``current``
   (un ``walk_test_regression_cleared`` por cierre así); una marca nueva durante la reejecución
   deja ``pending``; la reejecución abre exactamente las filas pendientes (o la matriz completa);
-  la zona sigue ``productive`` en todo momento.
+  la zona sigue ``productive`` en todo momento. Cada ejemplo empieza, al azar, con una
+  reejecución entera ya cerrada con cada desenlace (o sin ella), para que toda corrida vea los dos.
 
 - **Máquina de estados sobre la base** (``RegressionMarking``, perfil ``ci`` con su semilla fija y
   la de la sesión, ``_seeds_for_profile``): una zona ``productive`` con su versión 1 de
@@ -376,6 +377,13 @@ RERUN_TYPES: Final = tuple(
 RERUN_STEPS: Final = 16
 """Más pasos que la marca: abrir, registrar y cerrar caben con marcas antes y entre medias."""
 MIN_REPETITIONS: Final = 100
+CURRENT: Final = "current"
+STILL_PENDING: Final = "still_pending"
+OPENINGS: Final = (CURRENT, STILL_PENDING, None)
+"""Cómo empieza cada ejemplo de ``RegressionRerun``: una reejecución completa ya cerrada con cada
+desenlace, o nada. Sin este comienzo, encadenar marcar, abrir, registrar y cerrar dependía del azar
+(Hypothesis apaga reglas al azar en cada ejemplo y cerrar antes de registrar gasta pasos): con el
+perfil ``pr`` (100 ejemplos) la corrida veía 2 o 3 cierres y a veces ninguno «current»."""
 
 
 @dataclass
@@ -530,6 +538,48 @@ class RegressionRerun(RegressionMarking):
         self.marks_at_open = 0
         self.clears = 0
 
+    @initialize(
+        scenario=catalog_versions(max_changes=0),
+        opening=st.sampled_from(OPENINGS),
+        passes=st.integers(3, 4),
+    )
+    def first_version(
+        self, scenario: CatalogScenario, opening: str | None = None, passes: int = 3
+    ) -> None:
+        """La versión 1 y, según ``opening``, una reejecución entera con ese desenlace.
+
+        Con los servicios reales y las mismas reglas e invariantes que la exploración (que sigue
+        después desde ese estado): marca por ``model_version``, abre, registra los pases y cierra;
+        con ``still_pending``, otra marca llega antes del cierre. Así cada corrida ve los dos
+        desenlaces sin depender de que las reglas sueltas los encadenen.
+        """
+        super().first_version(scenario)
+        if opening is None:
+            return
+        self.report_a_model_version(MODELS[1])  # de MODELS[0]: marca la matriz completa
+        self._invariants()
+        self.open_a_rerun(passes)
+        self._invariants()
+        self.record_the_passes()
+        self._invariants()
+        if opening == STILL_PENDING:
+            self.report_a_model_version(MODELS[2])  # otra marca con la reejecución abierta
+            self._invariants()
+        self.close_the_rerun()
+        self._invariants()
+        assert self.session is None
+        if opening == CURRENT:
+            assert self.model.keys is None and self.clears == 1
+        else:
+            assert self.model.keys == ALL_ROWS and self.clears == 0
+
+    def _invariants(self) -> None:
+        """Las invariantes tras cada paso del comienzo (Hypothesis las corre al acabarlo)."""
+        self.the_row_is_the_model()
+        self.the_zone_keeps_operating()
+        self.versions_stay_consecutive()
+        self.one_clearance_per_covering_close()
+
     def _all_keys(self) -> frozenset[Key]:
         assert self.state is not None
         return frozenset(
@@ -663,7 +713,7 @@ class RegressionRerun(RegressionMarking):
         covering = self.model.marks == self.marks_at_open
         # La reejecución cubre sus filas: vuelve a current salvo que otra marca llegara después.
         assert record.regression_cleared == covering
-        RegressionRerun.seen["current" if covering else "still_pending"] += 1
+        RegressionRerun.seen[CURRENT if covering else STILL_PENDING] += 1
         if covering:
             # La fila vuelve a current sin causa ni versiones: la próxima marca abre otro periodo.
             self.model.keys = None
@@ -691,13 +741,14 @@ def test_pr_gob_14_a_covering_rerun_returns_current_and_a_later_mark_keeps_pendi
 ) -> None:
     RegressionRerun.world = rerun_world
     RegressionRerun.services = rerun_services(rerun_world)
+    RegressionRerun.seen.clear()  # los desenlaces de esta corrida, no de una anterior del proceso
     for value in _seeds_for_profile():
         seeded = hypothesis_seed(value)(RegressionRerun)
         run_state_machine_as_test(seeded, settings=settings(stateful_step_count=RERUN_STEPS))
     assert RegressionRerun.services.store.gets == 0
     # La corrida vio los dos desenlaces del cierre: no es una propiedad vacía.
     seen = RegressionRerun.seen
-    assert seen["current"] > 0 and seen["still_pending"] > 0, seen
+    assert seen[CURRENT] > 0 and seen[STILL_PENDING] > 0, seen
 
 
 # --- Propiedades puras sobre la matriz -----------------------------------------------------------
