@@ -12,7 +12,7 @@ import { text } from '@/texts';
 import { closureSignature, loopAccess } from '../loopAccess';
 import styles from './Closure.module.css';
 
-export type EndedState = 'closed' | 'discarded' | 'unclosable';
+type EndedState = 'closed' | 'discarded' | 'unclosable';
 
 export interface LoopEnding {
   readonly state: EndedState;
