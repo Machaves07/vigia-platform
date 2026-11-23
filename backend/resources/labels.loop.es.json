@@ -165,6 +165,22 @@
     "evidence_url_unavailable": "la evidencia no está disponible ahora; se muestra la referencia del clip",
     "segment_records_limited": "el detalle muestra los primeros tramos del episodio; los demás siguen en el expediente"
   },
+  "milestone_kind": {
+    "finding_received": "hallazgo recibido",
+    "late_segment_attached": "tramo tardío adjuntado",
+    "classification": "clasificación",
+    "review_resolution": "resolución en la cola de revisión",
+    "action_assigned": "acción comprometida",
+    "action_evidence_added": "evidencia de la acción",
+    "action_overdue": "plazo de la acción vencido",
+    "closure": "cierre firmado",
+    "closure_attachment_unrecoverable": "adjunto del cierre no recuperable",
+    "root_cause_analysis": "causa raíz",
+    "reopening": "reapertura",
+    "unclosable_state_declared": "declaración SIN ALTERNATIVA SEGURA DISPONIBLE",
+    "unclosable_review": "revisión de la declaración",
+    "other": "otro registro del expediente"
+  },
   "export_state": {
     "requested": "solicitada",
     "in_progress": "en curso",

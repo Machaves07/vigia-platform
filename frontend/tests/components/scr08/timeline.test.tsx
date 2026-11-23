@@ -345,7 +345,7 @@ describe('SCR-08 ficha de vida del hallazgo (TASK-585)', { timeout: 60_000 }, ()
     const shown = items();
     expect(shown.map((li) => li.getAttribute('data-kind'))).toEqual(expected.map((m) => m.kind));
     expect(shown.map((li) => part(li, 'milestone_title')?.textContent)).toEqual(
-      expected.map((m) => text(`scr08.timeline.kind.${m.kind}`)),
+      expected.map((m) => label('milestone_kind', m.kind)),
     );
     expect(shown.map((li) => part(li, 'record_id')?.textContent)).toEqual(
       expected.map((m) => m.record_id),

@@ -6253,7 +6253,9 @@ export interface components {
     };
     /**
      * MilestoneKind
-     * @description Los hitos de la ficha: un tipo de registro del sujeto cada uno, y ``other`` para el resto.
+     * @description ``milestone_kind``: los hitos de la ficha de vida del hallazgo (TASK-585), un tipo de
+     *     registro del sujeto cada uno, y ``other`` para un tipo que no está en la lista (nunca se
+     *     oculta).
      * @enum {string}
      */
     MilestoneKind:

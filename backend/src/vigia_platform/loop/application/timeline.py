@@ -38,7 +38,6 @@ verificado en TASK-585); la ficha aplica la regla de la métrica sobre el histor
 
 from __future__ import annotations
 
-import enum
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -59,7 +58,7 @@ from vigia_platform.loop.config.classification_deadline import (
     ClassificationDeadlineRule,
     classified_in_time,
 )
-from vigia_platform.loop.domain.enums import FindingLifecycleState, SubjectKind
+from vigia_platform.loop.domain.enums import FindingLifecycleState, MilestoneKind, SubjectKind
 from vigia_platform.loop.domain.time_aggregation import presented
 from vigia_platform.shared.context import ScopeContext, repository
 
@@ -85,25 +84,6 @@ MAX_TIMELINE_MILESTONES: Final = 500
 
 CONFIGURATION_RECORD_TYPE: Final = "loop_configuration_changed"
 """Los registros de planta que fijan el plazo de clasificación (BR-LAZ-112)."""
-
-
-class MilestoneKind(enum.StrEnum):
-    """Los hitos de la ficha: un tipo de registro del sujeto cada uno, y ``other`` para el resto."""
-
-    FINDING_RECEIVED = "finding_received"
-    LATE_SEGMENT_ATTACHED = "late_segment_attached"
-    CLASSIFICATION = "classification"
-    REVIEW_RESOLUTION = "review_resolution"
-    ACTION_ASSIGNED = "action_assigned"
-    ACTION_EVIDENCE_ADDED = "action_evidence_added"
-    ACTION_OVERDUE = "action_overdue"
-    CLOSURE = "closure"
-    CLOSURE_ATTACHMENT_UNRECOVERABLE = "closure_attachment_unrecoverable"
-    ROOT_CAUSE_ANALYSIS = "root_cause_analysis"
-    REOPENING = "reopening"
-    UNCLOSABLE_STATE_DECLARED = "unclosable_state_declared"
-    UNCLOSABLE_REVIEW = "unclosable_review"
-    OTHER = "other"
 
 
 _KINDS: Final[Mapping[str, MilestoneKind]] = {

@@ -71,6 +71,7 @@ export const DECLARED_ROUTES: readonly string[] = [
   '/findings/:finding_state_id/loop/reopening',
   '/findings/:finding_state_id/loop/unclosable',
   '/findings/:finding_state_id/root-cause',
+  '/findings/:finding_state_id/timeline',
   '/findings/labels',
   '/findings/loops',
   '/fleet',

@@ -221,7 +221,7 @@ function Milestone({
   readonly timeZone: string;
 }) {
   const { deadline, actor } = milestone;
-  const title = text(`scr08.timeline.kind.${milestone.kind}`);
+  const title = label('milestone_kind', milestone.kind);
   const elapsed =
     milestone.elapsed_ms_since_previous === null
       ? null
