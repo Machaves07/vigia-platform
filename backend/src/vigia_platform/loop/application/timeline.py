@@ -241,8 +241,9 @@ class TimelineInputs:
     """Los registros del sujeto, en orden de cadena."""
     truncated: bool
     configuration: Sequence[TimelineSource] | None
-    """Los ``loop_configuration_changed`` de la planta anteriores a la recepción, en orden de
-    cadena; ``None`` si no se pudieron leer completos (los plazos de clasificación no se saben)."""
+    """Los ``loop_configuration_changed`` de la planta en orden de cadena (solo cuentan los
+    anteriores a la recepción); ``None`` si no se pudieron leer completos (el plazo de
+    clasificación no se sabe)."""
     timezone: str | None
     """La zona horaria de la planta; ``None`` si no se sabe (tampoco el plazo de clasificación)."""
 
@@ -449,16 +450,19 @@ class _Rule:
 
 
 def _rule(inputs: TimelineInputs) -> _Rule:
-    received = next(
-        (r.received_at for r in inputs.records if r.record_type == "finding_received"), None
-    )
-    if inputs.configuration is None:
-        return _Rule(None, received, inputs.timezone)
+    """La regla vigente en la **recepción**: la de fábrica plegada con los cambios de la planta
+    anteriores en la cadena a la primera recepción del sujeto (BR-LAZ-112, como la métrica)."""
+    reception = next((r for r in inputs.records if r.record_type == "finding_received"), None)
+    if inputs.configuration is None or reception is None:
+        return _Rule(None, None, inputs.timezone)
     rule = ClassificationDeadlineRule.defaults()
     for change in inputs.configuration:
-        if change.record_type == CONFIGURATION_RECORD_TYPE:
+        if (
+            change.record_type == CONFIGURATION_RECORD_TYPE
+            and change.chain_sequence < reception.chain_sequence
+        ):
             rule = rule.after_change(change.document["new_values"])
-    return _Rule(rule, received, inputs.timezone)
+    return _Rule(rule, reception.received_at, inputs.timezone)
 
 
 def _business_days(start: date, end: date, rule: ClassificationDeadlineRule) -> int:
