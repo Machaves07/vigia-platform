@@ -27,14 +27,29 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from tests.writer_support import unit_context
 from vigia_platform.accreditation.metrics.compute import compute_metrics
 from vigia_platform.accreditation.metrics.model import MetricValue
+from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.ledger.application.audit_writer import ResourceRef
+from vigia_platform.ledger.application.reader import (
+    LectorExpediente,
+    LedgerQueryInvalid,
+    LedgerRecordView,
+    RecordActor,
+    SubjectHistory,
+    SubjectRef,
+)
 from vigia_platform.loop.adapters.http.timeline_routes import timeline_view
 from vigia_platform.loop.application.timeline import (
+    CONFIGURATION_RECORD_TYPE,
+    MAX_TIMELINE_MILESTONES,
     FindingTimeline,
+    FindingTimelineService,
     MilestoneKind,
     TimelineInputs,
     TimelineSource,
@@ -47,6 +62,7 @@ from vigia_platform.loop.config.classification_deadline import (
 )
 from vigia_platform.loop.domain.enums import MetricKey, MetricStatus, MetricUnit
 from vigia_platform.loop.projection.fold import ProjectionInput
+from vigia_platform.shared.context import ActorUnit, ScopeContext
 
 ORG: Final = uuid.UUID(int=1)
 PLANT: Final = uuid.UUID(int=2)
@@ -785,3 +801,168 @@ def _keys(value: Any) -> Iterator[str]:
     elif isinstance(value, list | tuple):
         for item in value:
             yield from _keys(item)
+
+
+# --- el servicio: alcance, una sola lectura y lo que no se sabe -------------------------------
+
+
+def _view(item: TimelineSource) -> LedgerRecordView:
+    return LedgerRecordView(
+        record_id=item.record_id,
+        organization_id=ORG,
+        plant_id=PLANT,
+        chain_sequence=item.chain_sequence,
+        record_type=item.record_type,
+        schema_version=1,
+        actor=RecordActor(
+            kind="user",
+            id=SIGNER,
+            display_name_snapshot="Coordinación SST sintética",
+            role_in_use="coordinator_sst",
+            concession_id=None,
+            unit="U-04",
+        ),
+        scope_plant_id=PLANT,
+        scope_zone_id=ZONE,
+        scope_node_id=None,
+        correlation_id=uuid.UUID(int=77),
+        received_at=item.received_at,
+        occurred_at=None,
+        source_key=None,
+        content=json_bytes(item.document),
+        content_hash="a" * 64,
+        previous_hash="b" * 64,
+        record_hash="c" * 64,
+        evidences=(),
+    )
+
+
+def json_bytes(document: Mapping[str, Any]) -> bytes:
+    import json
+
+    return json.dumps(document).encode("utf-8")
+
+
+class _Subjects:
+    def __init__(self, row: Mapping[str, Any]) -> None:
+        self.row = row
+        self.calls = 0
+
+    async def visible_subject(
+        self, context: ScopeContext, finding_state_id: uuid.UUID
+    ) -> tuple[ScopeContext, Mapping[str, Any]]:
+        self.calls += 1
+        return context, self.row
+
+
+class _Reader:
+    def __init__(self, history: SubjectHistory | None) -> None:
+        self.history = history
+        self.calls: list[tuple[SubjectRef, int, tuple[str, ...]]] = []
+
+    async def subject_history(
+        self,
+        context: ScopeContext,
+        subject: SubjectRef,
+        *,
+        limit: int,
+        preceding_types: tuple[str, ...] = (),
+    ) -> SubjectHistory | None:
+        self.calls.append((subject, limit, preceding_types))
+        return self.history
+
+
+class _Timezones:
+    async def plant_timezone(self, context: ScopeContext, plant_id: uuid.UUID) -> str | None:
+        return "UTC"
+
+
+def _service_row() -> dict[str, Any]:
+    return {
+        **subject_row(),
+        "subject_id": str(SUBJECT),
+        "anchor_record_id": str(uuid.UUID(int=3000)),
+    }
+
+
+def _run_service(history: SubjectHistory | None) -> tuple[FindingTimeline, _Reader]:
+    import asyncio
+
+    reader = _Reader(history)
+    service = FindingTimelineService(
+        subjects=_Subjects(_service_row()),  # type: ignore[arg-type]
+        reader=reader,
+        timezones=_Timezones(),
+    )
+    context = unit_context(ORG, ActorUnit.U04)
+    result = asyncio.run(service.timeline(context, uuid.UUID(int=1000)))
+    return result, reader
+
+
+def test_the_service_reads_the_ledger_once_with_the_finding_as_resource() -> None:
+    records = closed_cycle(close_offset=timedelta(days=1))[:2]
+    history = SubjectHistory(
+        records=tuple(_view(r) for r in records),
+        truncated=False,
+        preceding=(),
+        preceding_complete=True,
+    )
+    timeline, reader = _run_service(history)
+    ((subject, limit, preceding),) = reader.calls
+    assert (subject.plant_id, subject.zone_id, subject.subject_id) == (PLANT, ZONE, SUBJECT)
+    assert subject.anchor_record_id == uuid.UUID(int=3000)
+    assert subject.resource == ResourceRef("finding", uuid.UUID(int=1000))
+    assert (limit, preceding) == (MAX_TIMELINE_MILESTONES, (CONFIGURATION_RECORD_TYPE,))
+    assert MAX_TIMELINE_MILESTONES == 500
+    assert [m.record_id for m in timeline.milestones] == [r.record_id for r in records]
+    (classification,) = [m for m in timeline.milestones if m.kind is MilestoneKind.CLASSIFICATION]
+    assert classification.deadline is not None and classification.deadline.met is True
+
+
+def test_the_service_never_invents_a_deadline_from_an_incomplete_configuration() -> None:
+    records = closed_cycle(close_offset=timedelta(days=1))[:2]
+    history = SubjectHistory(
+        records=tuple(_view(r) for r in records),
+        truncated=True,
+        preceding=(),
+        preceding_complete=False,
+    )
+    timeline, _ = _run_service(history)
+    (classification,) = [m for m in timeline.milestones if m.kind is MilestoneKind.CLASSIFICATION]
+    assert classification.deadline is None
+    assert timeline.truncated is True
+
+
+def test_a_subject_whose_anchor_the_ledger_does_not_show_is_not_found() -> None:
+    with pytest.raises(ResourceNotFound):
+        _run_service(None)
+
+
+class _Untouchable:
+    """Ni base ni auditoría: una entrada inválida se rechaza antes de tocarlas."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"no debía usarse: {name}")
+
+
+@pytest.mark.parametrize("limit", [0, 1001, True, 1.5])
+def test_the_reader_rejects_a_limit_out_of_range_before_reading(limit: Any) -> None:
+    import asyncio
+
+    reader = LectorExpediente(database=_Untouchable(), audit=_Untouchable())  # type: ignore[arg-type]
+    subject = SubjectRef(PLANT, ZONE, SUBJECT, uuid.UUID(int=3000), ResourceRef("finding", SUBJECT))
+    with pytest.raises(LedgerQueryInvalid):
+        asyncio.run(reader.subject_history(unit_context(ORG, ActorUnit.U04), subject, limit=limit))
+
+
+def test_the_reader_rejects_a_malformed_subject_before_reading() -> None:
+    import asyncio
+
+    reader = LectorExpediente(database=_Untouchable(), audit=_Untouchable())  # type: ignore[arg-type]
+    context = unit_context(ORG, ActorUnit.U04)
+    good = SubjectRef(PLANT, ZONE, SUBJECT, uuid.UUID(int=3000), ResourceRef("finding", SUBJECT))
+    for subject in ("no", replace(good, resource="finding"), replace(good, zone_id=str(ZONE))):
+        with pytest.raises(LedgerQueryInvalid):
+            asyncio.run(reader.subject_history(context, subject, limit=10))  # type: ignore[arg-type]
+    with pytest.raises(LedgerQueryInvalid):
+        asyncio.run(reader.subject_history(context, good, limit=10, preceding_types=("Mal",)))

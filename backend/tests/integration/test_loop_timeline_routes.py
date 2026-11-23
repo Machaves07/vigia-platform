@@ -50,10 +50,12 @@ from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_p
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
+from vigia_platform.ledger.application import reader as reader_module
+from vigia_platform.ledger.application.audit_writer import ResourceRef
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import EvidenceService as LedgerEvidence
-from vigia_platform.ledger.application.reader import LectorExpediente
-from vigia_platform.ledger.application.writer import Receipt
+from vigia_platform.ledger.application.reader import LectorExpediente, SubjectRef
+from vigia_platform.ledger.application.writer import Receipt, RecordScope
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.adapters.http.timeline_routes import TIMELINE_PATH
@@ -266,6 +268,8 @@ def _full_cycle(stack: TimelineStack, coordinator: Who) -> tuple[IngestedSubject
     actions = stack.actions
     assignee = actions.user(actions.world.a)
     finding, action_id = actions.with_evidence(coordinator, assignee)
+    # Otro hallazgo de la misma zona, con su clasificación, entre los registros del primero.
+    actions.opened()
     second = actions.add_evidence(coordinator, action_id, actions.evidence_body())
     assert second.status_code == 201, second.text
     (row,) = actions.action_rows(finding)
@@ -672,3 +676,192 @@ def test_a_configuration_before_the_reception_sets_the_deadline(stack: TimelineS
     assert due - reception > timedelta(days=30)
     assert due.tzinfo is not None and due.utcoffset() == timedelta(0)
     assert reception.astimezone(UTC) == reception
+
+
+# --- la lectura del expediente, sin la ruta: cada filtro de subject_history ----------------------
+
+
+def _reader(stack: TimelineStack) -> LectorExpediente:
+    authz = stack.actions.world.stack.authz
+    return LectorExpediente(
+        database=stack.actions.database, audit=authz.sessions.audit, clock=authz.sessions.clock
+    )
+
+
+def _subject(stack: TimelineStack, finding: IngestedSubject) -> SubjectRef:
+    site = finding.organization.site
+    return SubjectRef(
+        plant_id=site.plant_id,
+        zone_id=site.zone_id,
+        subject_id=finding.subject_id,
+        anchor_record_id=finding.record_id,
+        resource=ResourceRef("finding", stack.actions.finding_state_id(finding)),
+    )
+
+
+def _history(
+    stack: TimelineStack,
+    who: Who,
+    finding: IngestedSubject,
+    *,
+    limit: int = 500,
+    preceding: tuple[str, ...] = (),
+) -> Any:
+    return stack.actions.run(
+        _reader(stack).subject_history(
+            stack.actions.context(who),
+            _subject(stack, finding),
+            limit=limit,
+            preceding_types=preceding,
+        )
+    )
+
+
+def _write_in_zone(
+    stack: TimelineStack, finding: IngestedSubject, zone_id: uuid.UUID, action_id: str
+) -> uuid.UUID:
+    """Una entrada de evidencia que cita al sujeto pero escrita en **otra** zona de su planta."""
+    world = stack.actions.world
+    organization = finding.organization
+    context = world.context(organization)
+    database = world.stack.primary.database
+    writer = world.stack.primary.writer
+    world.stack.tick()
+    content = {
+        "evidence_entry_id": str(world.stack.uuid7()),
+        "action_id": action_id,
+        "subject_id": str(finding.subject_id),
+        "description": "Resguardo fijo revisado y anclado en el acceso de la zona",
+        "performed_at": format_timestamp(world.stack.now() - timedelta(hours=1)),
+        "performed_by_role": "Técnico de mantenimiento",
+        "attachments": [],
+        "added_by": {
+            "user_id": str(world.stack.authz.operator_id),
+            "display_name": "Coordinación SST sintética",
+            "role_in_use": "coordinator_sst",
+        },
+        "added_at": format_timestamp(world.stack.now()),
+    }
+
+    async def run() -> Any:
+        async with database.transaction(context) as transaction:
+            return await writer.write(
+                context,
+                "action_evidence_added",
+                content,
+                scope=RecordScope(plant_id=organization.plant_id, zone_id=zone_id),
+                transaction=transaction,
+            )
+
+    receipt = world.stack.run(run())
+    assert isinstance(receipt, Receipt), receipt
+    return receipt.record_id
+
+
+def test_the_reader_returns_only_the_subject_records_of_its_zone(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    actions = stack.actions
+    finding, action_id = actions.assigned(coordinator, actions.user(actions.world.a))
+    actions.opened()  # otro hallazgo de la zona, con su clasificación
+    stray = _write_in_zone(stack, finding, finding.organization.site.other_zone_id, str(action_id))
+    history = _history(stack, coordinator, finding)
+    assert history is not None
+    ids = [str(r.record_id) for r in history.records]
+    assert ids == [record_id for record_id, _ in _oracle(stack, finding) if record_id != str(stray)]
+    assert str(stray) not in ids
+    assert len(ids) == 3  # recibido, clasificación y acción
+    assert history.truncated is False
+
+
+def test_the_reader_does_not_see_a_subject_outside_the_scope_and_audits_it_empty(
+    stack: TimelineStack,
+) -> None:
+    actions = stack.actions
+    finding = actions.received()
+    site = finding.organization.site
+    who = _member(stack, Role.COORDINATOR_SST, ScopeLevel.ZONE, site.other_zone_id)
+    before = len(stack.audit_entries(finding.organization))
+    assert _history(stack, who, finding) is None
+    (entry,) = stack.audit_entries(finding.organization)[before:]
+    assert (entry["operation"], entry["result_count"]) == ("ledger_detail_read", 0)
+    assert (entry["scope_plant_id"], entry["scope_zone_id"]) == (None, None)
+    assert entry["resource_id"] == actions.finding_state_id(finding)
+    # Con el alcance de la zona del hallazgo, sí.
+    own = _member(stack, Role.COORDINATOR_SST, ScopeLevel.ZONE, site.zone_id)
+    seen = _history(stack, own, finding)
+    assert seen is not None and [r.record_id for r in seen.records] == [finding.record_id]
+
+
+def test_the_reader_caps_the_subject_records_and_says_truncated(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    actions = stack.actions
+    finding, _ = actions.assigned(coordinator, actions.user(actions.world.a))
+    capped = _history(stack, coordinator, finding, limit=2)
+    assert capped is not None
+    assert [r.record_type for r in capped.records] == ["finding_received", "classification"]
+    assert capped.truncated is True
+    exact = _history(stack, coordinator, finding, limit=3)
+    assert exact is not None and (len(exact.records), exact.truncated) == (3, False)
+
+
+def _configure(stack: TimelineStack, organization: LoopOrganization, plant_id: uuid.UUID) -> None:
+    actions = stack.actions
+    actions.tick()
+    actions.run(
+        actions.configuration.change(
+            actions.context(actions.member(organization, Role.PLANT_MANAGER)),
+            plant_id,
+            integers={"classification_deadline_business_days": 7},
+            business_calendar=None,
+            reason=_CONFIGURATION_REASON,
+        )
+    )
+
+
+def test_the_reader_brings_only_the_plant_configuration_before_the_reception(
+    stack: TimelineStack,
+) -> None:
+    actions = stack.actions
+    organization = actions.world.organization()
+    _configure(stack, organization, organization.plant_id)  # antes: cuenta
+    _configure(stack, organization, actions.world.add_plant(organization))  # otra planta
+    finding = actions.received(organization)
+    _configure(stack, organization, organization.plant_id)  # después: no cuenta
+    records = actions.world.ledger_records(organization)
+    (reception,) = [r for r in records if r.record_id == finding.record_id]
+    expected = [
+        r.record_id
+        for r in records
+        if r.record_type == "loop_configuration_changed"
+        and r.chain_sequence < reception.chain_sequence
+    ]
+    assert len(expected) == 2  # la versión 1 de fábrica y el cambio
+    who = actions.member(organization)
+    history = _history(stack, who, finding, preceding=("loop_configuration_changed",))
+    assert history is not None and history.preceding_complete is True
+    assert [r.record_id for r in history.preceding] == expected
+    # Sin tipos pedidos, nada de planta.
+    plain = _history(stack, who, finding)
+    assert plain is not None and plain.preceding == ()
+
+
+def test_the_reader_drops_the_configuration_when_it_exceeds_its_cap(
+    stack: TimelineStack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    actions = stack.actions
+    organization = actions.world.organization()
+    _configure(stack, organization, organization.plant_id)
+    finding = actions.received(organization)
+    monkeypatch.setattr(reader_module, "MAX_PRECEDING_RECORDS", 1)
+    who = actions.member(organization)
+    history = _history(stack, who, finding, preceding=("loop_configuration_changed",))
+    assert history is not None
+    assert (history.preceding_complete, history.preceding) == (False, ())
+    # La ficha no inventa la regla: sin la configuración completa, el plazo no se sabe.
+    actions.classify(finding)
+    body = _ok(stack.get(who, actions.finding_state_id(finding)))
+    (classification,) = [m for m in body["milestones"] if m["kind"] == "classification"]
+    assert classification["deadline"] is None
+    assert body["summary"]["classification_met"] is None
