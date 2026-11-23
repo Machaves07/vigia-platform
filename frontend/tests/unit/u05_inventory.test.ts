@@ -60,6 +60,8 @@ const NOT_CONSUMED: Readonly<Record<string, string>> = {
   'POST /platform/keys/{purpose}/rotate': PLATFORM,
   'GET /audit/entries':
     'fuera del piloto: sin pantalla (nota (4) de `logical-components.md` §8, `src/app/screens.ts`)',
+  'GET /loop/findings/{finding_state_id}/photos/{photo_id}/image':
+    'imagen de la foto del hallazgo (TASK-589, A-128): la consume SCR-08/09 en TASK-590',
   'POST /api/nodes/clip-uploads': NODES,
   'POST /api/nodes/clip-uploads/{clip_id}/confirmation': NODES,
   'POST /api/nodes/credential-rotations': NODES,

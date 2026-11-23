@@ -2745,6 +2745,24 @@
       }
     },
     {
+      "operationId": "finding_photo_image_loop_findings__finding_state_id__photos__photo_id__image_get",
+      "method": "get",
+      "path": "/loop/findings/{finding_state_id}/photos/{photo_id}/image",
+      "responses": {
+        "200": {
+          "image/jpeg": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "request_export_accreditation_exports_post",
       "method": "post",
       "path": "/accreditation/exports",
@@ -9380,6 +9398,147 @@
         "cause"
       ]
     },
+    "FindingPhotoOut": {
+      "properties": {
+        "photo_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "photo_index": {
+          "type": "integer"
+        },
+        "photo_role": {
+          "type": "string"
+        },
+        "classified_as": {
+          "type": "string"
+        },
+        "camera_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "family": {
+          "type": "string"
+        },
+        "standard": {
+          "$ref": "#/components/schemas/FindingPhotoStandardOut"
+        },
+        "max_confidence": {
+          "type": "number"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "ended_at": {
+          "type": "string"
+        },
+        "episode_duration_ms": {
+          "type": "integer"
+        },
+        "received_at": {
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_image": {
+          "type": "boolean"
+        },
+        "image_absent_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "photo_id",
+        "photo_index",
+        "photo_role",
+        "classified_as",
+        "camera_id",
+        "frame_at",
+        "family",
+        "standard",
+        "max_confidence",
+        "started_at",
+        "ended_at",
+        "episode_duration_ms",
+        "received_at",
+        "expires_at",
+        "has_image",
+        "image_absent_reason",
+        "width",
+        "height"
+      ]
+    },
+    "FindingPhotoStandardOut": {
+      "properties": {
+        "standard_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "standard_id",
+        "version"
+      ]
+    },
     "FindingTimelineOut": {
       "properties": {
         "finding_state_id": {
@@ -13908,6 +14067,12 @@
             "$ref": "#/components/schemas/ClipOut"
           },
           "type": "array"
+        },
+        "photos": {
+          "items": {
+            "$ref": "#/components/schemas/FindingPhotoOut"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -13921,7 +14086,8 @@
         "received_at",
         "occurred_at",
         "signals",
-        "clips"
+        "clips",
+        "photos"
       ]
     },
     "RecurrenceEntryOut": {
@@ -16603,6 +16769,12 @@
               "type": "null"
             }
           ]
+        },
+        "photos": {
+          "items": {
+            "$ref": "#/components/schemas/FindingPhotoOut"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -16616,7 +16788,8 @@
         "elapsed_ms_since_previous",
         "actor",
         "details",
-        "deadline"
+        "deadline",
+        "photos"
       ]
     },
     "TimelineSummaryOut": {
