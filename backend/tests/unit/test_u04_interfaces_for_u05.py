@@ -384,6 +384,28 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             ),
         ),
     ),
+    ("GET", "/loop/findings/{finding_state_id}/timeline"): (
+        "SUP-U05-02",
+        Difference(
+            design="SUP-U05-02 solo con GET /loop/findings/{finding_state_id}",
+            code=(
+                "GET …/{finding_state_id} y GET …/timeline, misma clave y alcance (zona del "
+                "hallazgo)"
+            ),
+            reason=(
+                "TASK-585 (O-11 y O-12 del recorrido SST, A-126): el detalle no reunía el ciclo de "
+                "vida completo del hallazgo; PR-LAZ-62 la cuenta como segundo verbo de SUP-U05-02 "
+                "(41 operaciones, 44 rutas)"
+            ),
+            note=(
+                "**Ficha de vida** (SCR-08): además de `SUP-U05-02`, U-04 sirve "
+                "`GET /loop/findings/{finding_state_id}/timeline` (`findings.read`, zona), que "
+                "devuelve los hitos del hallazgo en orden (recepción, clasificaciones, acciones, "
+                "evidencias, cierre, causa raíz y reaperturas) con rol y nombre visible de quien "
+                "actuó, nunca su `user_id`, y una sola entrada de auditoría por consulta."
+            ),
+        ),
+    ),
 }
 
 SCOPES: Final = frozenset({"zona", "planta", "organización", "propias", "zona o planta"})
