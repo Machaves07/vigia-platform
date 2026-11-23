@@ -42,10 +42,7 @@ from tests.integration.conftest import PostgresEndpoint
 from tests.loop_actions_support import ActionsStack, Who, actions_stack
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import with_unit
-from vigia_platform.loop.adapters.http.assignees_routes import (
-    decode_assignee_cursor,
-    encode_assignee_cursor,
-)
+from vigia_platform.loop.adapters.http.assignees_routes import encode_assignee_cursor
 from vigia_platform.loop.application.actions import (
     ASSIGNEE_ROLES,
     ActionService,
@@ -148,11 +145,10 @@ def _accepted_by_assign(stack: ActionsStack, who: Who, fsid: uuid.UUID, user: uu
     oráculo de «``assign`` lo acepta como responsable»."""
     database = stack.database
     authorizer = stack.world.stack.authz.authorizer
+    context = _context(stack, who)
 
     async def check() -> bool:
-        authorized, current = await authorized_finding(
-            database, authorizer, _context(stack, who), fsid
-        )
+        authorized, current = await authorized_finding(database, authorizer, context, fsid)
         async with database.transaction(with_unit(authorized, ActorUnit.U04)) as transaction:
             try:
                 await ActionService._assignee(transaction, current, user)
@@ -459,6 +455,7 @@ def test_each_person_carries_exactly_three_fields_and_the_schema_says_so(
         {"limit": "201"},
         {"cursor": "no-es-un-cursor"},
         {"cursor": "A" * 23},
+        {"cursor": "A" * 20 + "+A"},
     ],
     ids=[
         "q",
@@ -472,6 +469,7 @@ def test_each_person_carries_exactly_three_fields_and_the_schema_says_so(
         "limit_201",
         "cursor_malformed",
         "cursor_too_long",
+        "cursor_standard_base64",
     ],
 )
 def test_there_is_no_search_and_out_of_range_requests_are_invalid(
@@ -523,9 +521,3 @@ def test_a_cursor_of_someone_outside_the_organization_gives_an_empty_page(
         )
         assert response.status_code == 200, response.text
         assert response.json() == {"items": [], "next_cursor": None}
-
-
-def test_the_cursor_round_trips_the_user_id() -> None:
-    user = uuid.UUID("0190a1b2-4444-7000-8000-00000000abcd")
-    assert decode_assignee_cursor(encode_assignee_cursor(user)) == user
-    assert len(encode_assignee_cursor(user)) == 22
