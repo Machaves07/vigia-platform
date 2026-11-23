@@ -17,6 +17,9 @@ import type {
   Label,
   Plant,
 } from '@/ports/scr08Detail';
+
+type DetailAction = FindingDetail['actions'][number];
+type DetailAnalysis = FindingDetail['analyses'][number];
 import { createScreenQueryCache, ScreenQueryProvider } from '@/state/query';
 import { createSessionStore, SessionProvider } from '@/state/session';
 import { finding as contractFinding } from '../../generators';
@@ -167,6 +170,38 @@ export function detail(): FindingDetail {
     actions: [],
     analyses: [],
     notices: [],
+  };
+}
+
+/** Una acción comprometida sintética (`ActionOut`), con su número en los identificadores. */
+export function action(index: number, overrides: Partial<DetailAction> = {}): DetailAction {
+  return {
+    action_id: `0190a1b2-dddd-7000-8000-${String(index).padStart(12, '0')}`,
+    record_id: `0190a1b2-dddd-7000-8000-${String(100 + index).padStart(12, '0')}`,
+    action_type: 'engineering',
+    action_description: `Descripción sintética de la acción ${String(index)} sobre la guarda.`,
+    expected_outcome: `Resultado sintético esperado de la acción ${String(index)}.`,
+    state: 'assigned',
+    assigned_at: '2026-01-02T13:30:00.000Z',
+    due_at: '2026-01-09T13:30:00.000Z',
+    counts_as_overdue: true,
+    root_cause_analysis_id: null,
+    ...overrides,
+  };
+}
+
+/** Un análisis de causa raíz sintético firmado (`AnalysisOut` del detalle). */
+export function signedAnalysis(overrides: Partial<DetailAnalysis> = {}): DetailAnalysis {
+  return {
+    analysis_id: '0190a1b2-eeee-7000-8000-000000000001',
+    record_id: '0190a1b2-eeee-7000-8000-000000000002',
+    state: 'signed',
+    root_cause_category: 'engineering',
+    root_cause_statement: 'Enunciado sintético de la causa raíz de la guarda.',
+    conclusion: 'Conclusión sintética del análisis de la zona.',
+    signed_at: '2026-01-03T15:45:00.000Z',
+    created_at: '2026-01-03T14:00:00.000Z',
+    ...overrides,
   };
 }
 

@@ -3,26 +3,36 @@
  * ningún componente serializa el objeto recibido. Cada sección se degrada por separado: el texto
  * del estándar, el estado «ahora», el registro del contrato o un clip pueden faltar sin ocultar el
  * resto del hallazgo.
+ *
+ * Lo que ya llega y se muestra (O-10 y O-12, TASK-584): las acciones comprometidas y los análisis
+ * de causa raíz del propio detalle (LC-LAZ-06), el porqué de la observabilidad del instante con las
+ * causas de su cobertura (BR-LAZ-04) y las señales de cada tramo con el componente compartido.
+ * Todas las fechas se muestran tal como las da el servidor, agregadas en una zona unipersonal
+ * (BR-LAZ-06): la consola no recalcula ninguna hora. Ninguna sección nueva tiene botones de editar
+ * ni de borrar (BR-APP-24).
  */
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 import platform from '../../../../../backend/resources/labels.platform.es.json';
 import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
+import { causeLabel } from '@/components/ObservabilityBadge/encoding';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { ACTION_STATES, shownActionState } from '@/pages/shared/actionState';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
+import { SignalReadings } from '@/pages/shared/SignalReadings';
 import type { ReviewResolutionItem } from '@/ports/shared';
 import {
   reasonList,
   type ClassificationItem,
   type CoverageNow,
   type DetailClip,
-  type DetailRecord,
   type FindingDetail,
   type FindingRecord,
 } from '@/ports/scr08Detail';
 import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
-import { capitalizedTable, hasLabel, label } from '@/texts/labels';
+import { capitalized, capitalizedTable, hasLabel, label } from '@/texts/labels';
 import { formatDuration } from '@/texts/duration';
 
 const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
@@ -82,13 +92,46 @@ function Instant({
   );
 }
 
+/** Etiqueta neutral de una causa de cobertura (U-01 o U-02), nunca su valor crudo. */
+function coverageCause(cause: string): string {
+  const caption = causeLabel(cause);
+  return caption === undefined
+    ? text('components_status.observability.cause_unknown')
+    : capitalized(caption);
+}
+
+/**
+ * El porqué de la marca del instante (O-12): la plataforma la calcula con la cobertura de la zona
+ * en ese instante (BR-LAZ-04), con sus causas etiquetadas. Si la cobertura no respondió, no hay
+ * explicación: el aviso `coverage_unavailable` del detalle lo dice.
+ */
+function AtEventCoverage({ coverage }: { readonly coverage: FindingDetail['coverage_at_event'] }) {
+  if (coverage === null) return null;
+  return (
+    <>
+      <p data-part="at_event_explained">{text('scr08.detail.at_event_explained')}</p>
+      {coverage.causes.length > 0 && (
+        <ul aria-label={text('scr08.detail.at_event_causes')} data-part="at_event_causes">
+          {coverage.causes.map((cause, index) => (
+            <li key={`${cause}:${String(index)}`} data-part="at_event_cause" data-cause={cause}>
+              {coverageCause(cause)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** Los dos semáforos de BR-APP-36, cada uno con su etiqueta. */
 function Observability({
   atEvent,
+  coverageAtEvent,
   now,
   timeZone,
 }: {
   readonly atEvent: string;
+  readonly coverageAtEvent: FindingDetail['coverage_at_event'];
   readonly now: NowState;
   readonly timeZone: string;
 }) {
@@ -98,6 +141,7 @@ function Observability({
       <div role="group" aria-label={text('scr08.detail.at_event')} data-part="at_event">
         <h3>{text('scr08.detail.at_event')}</h3>
         <ObservabilityBadge state={atEvent} />
+        <AtEventCoverage coverage={coverageAtEvent} />
       </div>
       {now.kind !== 'hidden' && (
         <div role="group" aria-label={text('scr08.detail.now')} data-part="now">
@@ -261,18 +305,154 @@ function Summary({
   );
 }
 
-/** Señales del tramo, etiquetadas por rol y valor (SignalReading). */
-function Signals({ record }: { readonly record: DetailRecord }) {
-  if (record.signals.length === 0) return <p>{text('scr08.detail.no_signals')}</p>;
+function actionStateText(state: string): string {
+  return ACTION_STATES.includes(state)
+    ? text(`scr08.detail.action_state.${state}`)
+    : text('common.unknown');
+}
+
+/**
+ * Acciones comprometidas (O-12; LC-LAZ-06), en el orden del servidor, que es el de asignación.
+ * Tipo y estado etiquetados; la acción vigente de un hallazgo cerrado se presenta cerrada con él.
+ * El responsable no va aquí (`ActionOut` no lo trae): lo muestra la ficha de vida (TASK-585).
+ */
+function Actions({
+  detail,
+  timeZone,
+}: {
+  readonly detail: FindingDetail;
+  readonly timeZone: string;
+}) {
+  if (detail.actions.length === 0) return null;
+  const aggregated = detail.time_aggregated;
   return (
-    <ul aria-label={text('scr08.detail.signals')}>
-      {record.signals.map((signal, index) => (
-        <li key={`${signal.role}:${String(index)}`} data-part="signal">
-          {label('signal_role', signal.role)}: {label('signal_value', signal.value)}
-          {!signal.valid && <> ({text('scr08.detail.signal_invalid')})</>}
-        </li>
-      ))}
-    </ul>
+    <section aria-label={text('scr08.detail.actions')} data-part="actions">
+      <h2>{text('scr08.detail.actions')}</h2>
+      <ol>
+        {detail.actions.map((action) => {
+          const shown = shownActionState(action.state, detail.lifecycle_state);
+          return (
+            <li key={action.action_id} data-part="action">
+              <h3 data-part="action_type" data-value={action.action_type}>
+                {label('action_type', action.action_type)}
+              </h3>
+              <dl>
+                <Field name={text('scr08.detail.action_description')}>
+                  <span data-part="action_description">{action.action_description}</span>
+                </Field>
+                <Field name={text('scr08.detail.action_expected')}>
+                  <span data-part="action_expected">
+                    {action.expected_outcome ?? text('scr08.detail.action_expected_none')}
+                  </span>
+                </Field>
+                <Field name={text('scr08.detail.action_state')}>
+                  <span data-part="action_state" data-value={shown}>
+                    {actionStateText(shown)}
+                  </span>
+                  {shown !== action.state && (
+                    <>
+                      {' · '}
+                      <span data-part="action_closed_with_finding">
+                        {text('scr08.detail.action_closed_with_finding')}
+                      </span>
+                    </>
+                  )}
+                </Field>
+                <Field name={text('scr08.detail.action_assigned_at')}>
+                  <span data-part="action_assigned_at">
+                    <Instant
+                      instant={action.assigned_at}
+                      timeZone={timeZone}
+                      aggregated={aggregated}
+                    />
+                  </span>
+                </Field>
+                <Field name={text('scr08.detail.action_due_at')}>
+                  <span data-part="action_due_at">
+                    <TimestampWithOffset instant={action.due_at} timeZone={timeZone} dateOnly />
+                    {aggregated && <> ({text('scr08.detail.aggregated')})</>}
+                  </span>
+                </Field>
+              </dl>
+              {!action.counts_as_overdue && (
+                <p data-part="action_not_overdue">{text('scr08.detail.action_not_overdue')}</p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+/**
+ * Causa raíz (O-12; LC-LAZ-06): cada análisis del hallazgo con su estado, su categoría etiquetada,
+ * el enunciado, la conclusión y la fecha de firma. El enlace a SCR-11 solo si la sesión puede abrir
+ * esa ruta (`rootCauseHref`; `canEnterGroup` en la página).
+ */
+function RootCause({
+  detail,
+  timeZone,
+  rootCauseHref,
+}: {
+  readonly detail: FindingDetail;
+  readonly timeZone: string;
+  readonly rootCauseHref: string | null;
+}) {
+  if (detail.analyses.length === 0) return null;
+  const missing = text('scr08.detail.analysis_missing');
+  return (
+    <section aria-label={text('scr08.detail.root_cause')} data-part="root_cause">
+      <h2>{text('scr08.detail.root_cause')}</h2>
+      <ol>
+        {detail.analyses.map((analysis) => (
+          <li key={analysis.analysis_id} data-part="analysis">
+            <dl>
+              <Field name={text('scr08.detail.analysis_state')}>
+                <span data-part="analysis_state" data-value={analysis.state}>
+                  {label('root_cause_analysis_state', analysis.state)}
+                </span>
+              </Field>
+              <Field name={text('scr08.detail.analysis_category')}>
+                <span data-part="analysis_category">
+                  {analysis.root_cause_category === null
+                    ? missing
+                    : label('cause_category', analysis.root_cause_category)}
+                </span>
+              </Field>
+              <Field name={text('scr08.detail.analysis_statement')}>
+                <span data-part="analysis_statement">
+                  {analysis.root_cause_statement ?? missing}
+                </span>
+              </Field>
+              <Field name={text('scr08.detail.analysis_conclusion')}>
+                <span data-part="analysis_conclusion">{analysis.conclusion ?? missing}</span>
+              </Field>
+              <Field name={text('scr08.detail.analysis_signed_at')}>
+                <span data-part="analysis_signed_at">
+                  {analysis.signed_at === null ? (
+                    text('scr08.detail.analysis_not_signed')
+                  ) : (
+                    <Instant
+                      instant={analysis.signed_at}
+                      timeZone={timeZone}
+                      aggregated={detail.time_aggregated}
+                    />
+                  )}
+                </span>
+              </Field>
+            </dl>
+          </li>
+        ))}
+      </ol>
+      {rootCauseHref !== null && (
+        <p>
+          <Link to={rootCauseHref} data-part="root_cause_link">
+            {text('scr08.detail.root_cause_link')}
+          </Link>
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -404,19 +584,18 @@ function Records({
             const index = cameras.findIndex((camera) => camera.camera_id === cameraId);
             return index < 0 ? null : index;
           };
+          // «Tramo 2 · Hallazgo»; sin número ni tipo conocidos, solo «Tramo» (S3-17).
+          const title = [
+            record.segment_index === null
+              ? text('scr08.detail.record')
+              : `${text('scr08.detail.record')} ${String(record.segment_index + 1)}`,
+            ...(hasLabel('record_kind', record.record_type)
+              ? [label('record_kind', record.record_type)]
+              : []),
+          ].join(' · ');
           return (
             <li key={record.record_id} data-part="record">
-              {/* «Tramo 2 · Hallazgo»; sin número ni tipo conocidos, solo «Tramo» (S3-17). */}
-              <h3>
-                {[
-                  record.segment_index === null
-                    ? text('scr08.detail.record')
-                    : `${text('scr08.detail.record')} ${String(record.segment_index + 1)}`,
-                  ...(hasLabel('record_kind', record.record_type)
-                    ? [label('record_kind', record.record_type)]
-                    : []),
-                ].join(' · ')}
-              </h3>
+              <h3>{title}</h3>
               {contract === undefined && (
                 <p>
                   {text('scr08.detail.received_at')}:{' '}
@@ -434,7 +613,12 @@ function Records({
                 aggregated={detail.time_aggregated}
               />
               <h4>{text('scr08.detail.signals')}</h4>
-              <Signals record={record} />
+              <SignalReadings
+                signals={record.signals}
+                name={`${title} · ${text('scr08.detail.signals')}`}
+                timeZone={timeZone}
+                aggregated={detail.time_aggregated}
+              />
               {canViewClips && clock !== null && (
                 <>
                   <h4>{text('scr08.detail.clips')}</h4>
@@ -529,6 +713,7 @@ export function DetailView({
   records,
   clock,
   canViewClips,
+  rootCauseHref,
 }: {
   readonly detail: FindingDetail;
   readonly zone: string | null;
@@ -537,13 +722,22 @@ export function DetailView({
   readonly records: RecordsState;
   readonly clock: Clock | null;
   readonly canViewClips: boolean;
+  /** La ruta de SCR-11 del hallazgo si la sesión puede abrirla; `null` si no. */
+  readonly rootCauseHref: string | null;
 }) {
   return (
     <>
       <Notices detail={detail} timeZone={timeZone} />
       <Summary detail={detail} timeZone={timeZone} zone={zone} />
-      <Observability atEvent={detail.observability_state_at_event} now={now} timeZone={timeZone} />
+      <Observability
+        atEvent={detail.observability_state_at_event}
+        coverageAtEvent={detail.coverage_at_event}
+        now={now}
+        timeZone={timeZone}
+      />
       <Standard detail={detail} timeZone={timeZone} />
+      <Actions detail={detail} timeZone={timeZone} />
+      <RootCause detail={detail} timeZone={timeZone} rootCauseHref={rootCauseHref} />
       <Records
         detail={detail}
         records={records}

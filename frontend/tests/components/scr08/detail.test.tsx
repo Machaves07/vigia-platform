@@ -12,11 +12,13 @@ import { formatDuration } from '@/texts/duration';
 import { label } from '@/texts/labels';
 import { settle } from '../../support/queryCache';
 import {
+  action,
   apiError,
   classification,
   detail,
   fixture,
   history,
+  signedAnalysis,
   STANDARD_TEXT,
   validFinding,
   WAIT,
@@ -117,10 +119,17 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     ).toHaveLength(1);
     expect(screen.getByRole('region', { name: text('scr08.detail.summary') })).toBeDefined();
     expect(screen.getByText(ZONE_NAME)).toBeDefined();
-    const signal = document.querySelector('[data-part="signal"]');
-    expect(signal?.textContent).toBe(
-      `${label('signal_role', 'energy')}: ${label('signal_value', 'asserted')}`,
-    );
+    // TASK-584: las señales del tramo con el componente compartido de TASK-587.
+    const signal = document.querySelector('[data-part="record"] [data-part="signal"]');
+    expect([
+      signal?.querySelector('[data-part="signal_role"]')?.textContent,
+      signal?.querySelector('[data-part="signal_value"]')?.textContent,
+      signal?.querySelector('[data-part="signal_read_at"] time')?.getAttribute('dateTime'),
+    ]).toEqual([
+      label('signal_role', 'energy'),
+      label('signal_value', 'asserted'),
+      '2026-01-01T12:00:00.000Z',
+    ]);
     // Un solo clip: la galería muestra su reproductor y ninguna miniatura (VIG-366, S3-16).
     const galleries = document.querySelectorAll('[data-part="clip_gallery"]');
     expect(galleries).toHaveLength(1);
@@ -473,5 +482,354 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     // Distinguida de las clasificaciones: ninguna resolución cuenta como clasificación.
     expect(historyRegion.querySelectorAll('[data-part="classification"]')).toHaveLength(0);
     expect(within(historyRegion).getByText(text('scr08.detail.history_empty'))).toBeDefined();
+  });
+});
+
+// --- TASK-584 (O-10, O-12): el detalle muestra lo que ya trae `FindingDetailOut` ---------------
+
+describe('SCR-08 detalle: lo que ya existe (TASK-584)', { timeout: 60_000 }, () => {
+  /** El coordinador SST: abre la causa raíz (`root_cause.analyze`). */
+  const COORDINATOR = ['findings.read', 'evidence.read', 'coverage.read', 'root_cause.analyze'];
+  /** El gerente de planta: lee el hallazgo, pero no abre SCR-11. */
+  const PLANT_MANAGER = ['findings.read', 'evidence.read', 'coverage.read'];
+
+  function part(root: Element, name: string): Element | null {
+    return root.querySelector(`[data-part="${name}"]`);
+  }
+
+  /** El único elemento `data-part="name"` de `root`; falla si no está o si hay más de uno. */
+  function only(root: ParentNode, name: string): Element {
+    const found = root.querySelectorAll(`[data-part="${name}"]`);
+    const [first] = found;
+    if (found.length !== 1 || first === undefined) throw new Error(`Se esperaba un solo ${name}.`);
+    return first;
+  }
+
+  /** Lo que sigue a la fecha dentro de `node`: la marca de agregada, o nada. */
+  function afterDate(node: Element | null | undefined): string | null {
+    const date = node?.querySelector('[data-part="timestamp"]')?.textContent;
+    const whole = node?.textContent;
+    return date === undefined || whole === undefined ? null : whole.slice(date.length);
+  }
+
+  function parts(root: Element, item: string, name: string): (string | null)[] {
+    return [...root.querySelectorAll(`[data-part="${item}"]`)].map(
+      (node) => part(node, name)?.textContent ?? null,
+    );
+  }
+
+  async function openWith(
+    change: (value: ReturnType<typeof detail>) => void,
+    permissions = COORDINATOR,
+  ) {
+    const env = await fixture({ permissions });
+    const value = detail();
+    change(value);
+    env.responses.detail = () => HttpResponse.json(value);
+    const view = await opened(env);
+    return { env, value, view };
+  }
+
+  function twoActions(value: ReturnType<typeof detail>) {
+    value.lifecycle_state = 'closed';
+    value.actions = [
+      action(1, { action_type: 'process', state: 'superseded', expected_outcome: null }),
+      action(2, {
+        state: 'closed',
+        assigned_at: '2026-01-04T14:15:00.000Z',
+        due_at: '2026-01-11T14:15:00.000Z',
+        counts_as_overdue: false,
+      }),
+    ];
+  }
+
+  it('acciones comprometidas: las dos en el orden del servidor, con tipo y estado etiquetados y sus fechas en la zona de la planta', async () => {
+    await openWith(twoActions);
+    const section = screen.getByRole('region', { name: text('scr08.detail.actions') });
+    expect(within(section).getByRole('heading', { level: 2 }).textContent).toBe(
+      text('scr08.detail.actions'),
+    );
+    const items = [...section.querySelectorAll('[data-part="action"]')];
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => part(item, 'action_type')?.getAttribute('data-value'))).toEqual([
+      'process',
+      'engineering',
+    ]);
+    expect(parts(section, 'action', 'action_type')).toEqual([
+      label('action_type', 'process'),
+      label('action_type', 'engineering'),
+    ]);
+    expect(items.map((item) => part(item, 'action_state')?.getAttribute('data-value'))).toEqual([
+      'superseded',
+      'closed',
+    ]);
+    expect(parts(section, 'action', 'action_state')).toEqual([
+      text('scr08.detail.action_state.superseded'),
+      text('scr08.detail.action_state.closed'),
+    ]);
+    expect(parts(section, 'action', 'action_description')).toEqual([
+      action(1).action_description,
+      action(2).action_description,
+    ]);
+    expect(parts(section, 'action', 'action_expected')).toEqual([
+      text('scr08.detail.action_expected_none'),
+      action(2).expected_outcome,
+    ]);
+    // La fecha es la del servidor, sin recalcular, y se muestra en la zona de la planta (UI-25).
+    expect(
+      items.map((item) => [
+        part(item, 'action_assigned_at')?.querySelector('time')?.getAttribute('dateTime'),
+        part(item, 'action_due_at')?.querySelector('time')?.getAttribute('dateTime'),
+        part(item, 'action_assigned_at')?.querySelector('[data-part="zone"]')?.textContent,
+      ]),
+    ).toEqual([
+      ['2026-01-02T13:30:00.000Z', '2026-01-09T13:30:00.000Z', '(America/Bogota, UTC-05:00)'],
+      ['2026-01-04T14:15:00.000Z', '2026-01-11T14:15:00.000Z', '(America/Bogota, UTC-05:00)'],
+    ]);
+    expect(
+      items.map((item) => part(item, 'action_assigned_at')?.querySelector('time')?.textContent),
+    ).toEqual(['02/01/2026, 08:30:00', '04/01/2026, 09:15:00']);
+    expect(
+      items.map((item) => part(item, 'action_due_at')?.querySelector('time')?.textContent),
+    ).toEqual(['09/01/2026', '11/01/2026']);
+    // Solo la que no cuenta para vencimientos lo dice.
+    expect(items.map((item) => part(item, 'action_not_overdue')?.textContent ?? null)).toEqual([
+      null,
+      text('scr08.detail.action_not_overdue'),
+    ]);
+    // Sin botones de editar ni de borrar (BR-APP-24).
+    expect(within(section).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('la acción vigente de un hallazgo cerrado se presenta cerrada con el hallazgo (VIG-363)', async () => {
+    await openWith((value) => {
+      value.lifecycle_state = 'closed';
+      value.actions = [action(1, { state: 'assigned' })];
+    });
+    const item = only(document, 'action');
+    expect([
+      part(item, 'action_state')?.getAttribute('data-value'),
+      part(item, 'action_state')?.textContent,
+      part(item, 'action_closed_with_finding')?.textContent,
+    ]).toEqual([
+      'closed',
+      text('scr08.detail.action_state.closed'),
+      text('scr08.detail.action_closed_with_finding'),
+    ]);
+  });
+
+  it('con el lazo abierto la acción asignada sigue asignada', async () => {
+    await openWith((value) => {
+      value.lifecycle_state = 'action_assigned';
+      value.actions = [action(1, { state: 'assigned' })];
+    });
+    const item = only(document, 'action');
+    expect([
+      part(item, 'action_state')?.getAttribute('data-value'),
+      part(item, 'action_closed_with_finding'),
+    ]).toEqual(['assigned', null]);
+  });
+
+  it('sin acciones ni análisis no hay secciones vacías', async () => {
+    await openWith(() => undefined);
+    expect(screen.queryByRole('region', { name: text('scr08.detail.actions') })).toBeNull();
+    expect(screen.queryByRole('region', { name: text('scr08.detail.root_cause') })).toBeNull();
+  });
+
+  it('causa raíz firmada: estado, categoría etiquetada, enunciado, conclusión y fecha; enlace a SCR-11 con root_cause.analyze', async () => {
+    const { value } = await openWith((detailValue) => {
+      detailValue.lifecycle_state = 'closed';
+      detailValue.analyses = [signedAnalysis()];
+    });
+    const section = screen.getByRole('region', { name: text('scr08.detail.root_cause') });
+    const item = only(section, 'analysis');
+    expect([
+      part(item, 'analysis_state')?.textContent,
+      part(item, 'analysis_category')?.textContent,
+      part(item, 'analysis_statement')?.textContent,
+      part(item, 'analysis_conclusion')?.textContent,
+      part(item, 'analysis_signed_at')?.querySelector('time')?.getAttribute('dateTime'),
+    ]).toEqual([
+      label('root_cause_analysis_state', 'signed'),
+      label('cause_category', 'engineering'),
+      signedAnalysis().root_cause_statement,
+      signedAnalysis().conclusion,
+      '2026-01-03T15:45:00.000Z',
+    ]);
+    const link = within(section).getByRole('link', { name: text('scr08.detail.root_cause_link') });
+    expect(link.getAttribute('href')).toBe(`/findings/${value.finding_state_id}/root-cause`);
+    expect(within(section).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('sin root_cause.analyze (gerente de planta) la causa raíz se lee, pero sin enlace a SCR-11', async () => {
+    await openWith((value) => {
+      value.analyses = [signedAnalysis()];
+    }, PLANT_MANAGER);
+    const section = screen.getByRole('region', { name: text('scr08.detail.root_cause') });
+    expect(part(section, 'analysis_category')?.textContent).toBe(
+      label('cause_category', 'engineering'),
+    );
+    expect(part(section, 'root_cause_link')).toBeNull();
+    expect(within(section).queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('un análisis sin firmar dice que aún no está firmado ni completo', async () => {
+    await openWith((value) => {
+      value.analyses = [
+        signedAnalysis({
+          state: 'draft',
+          root_cause_category: null,
+          root_cause_statement: null,
+          conclusion: null,
+          signed_at: null,
+        }),
+      ];
+    });
+    const item = only(document, 'analysis');
+    expect([
+      part(item, 'analysis_state')?.textContent,
+      part(item, 'analysis_category')?.textContent,
+      part(item, 'analysis_statement')?.textContent,
+      part(item, 'analysis_conclusion')?.textContent,
+      part(item, 'analysis_signed_at')?.textContent,
+    ]).toEqual([
+      label('root_cause_analysis_state', 'draft'),
+      text('scr08.detail.analysis_missing'),
+      text('scr08.detail.analysis_missing'),
+      text('scr08.detail.analysis_missing'),
+      text('scr08.detail.analysis_not_signed'),
+    ]);
+  });
+
+  it('la sección de tramos se titula con la clave scr08.detail.records', async () => {
+    await openWith(() => undefined);
+    const section = screen.getByRole('region', { name: text('scr08.detail.records') });
+    expect(within(section).getByRole('heading', { level: 2 }).textContent).toBe(
+      text('scr08.detail.records'),
+    );
+    // Las señales del tramo van con el componente compartido, nombradas por su tramo.
+    const readings = section.querySelector('[data-part="signal_readings"]');
+    expect(readings?.getAttribute('aria-label')).toBe(
+      `${text('scr08.detail.record')} 1 · ${label('record_kind', 'finding')} · ${text('scr08.detail.signals')}`,
+    );
+    expect(readings?.querySelectorAll('[data-part="signal"]')).toHaveLength(1);
+  });
+
+  it('«No observable» en el instante: la explicación y las causas etiquetadas junto a la marca', async () => {
+    await openWith((value) => {
+      value.observability_state_at_event = 'not_observable';
+      value.coverage_at_event = {
+        state: 'not_observable',
+        causes: ['never_reported', 'no_communication', 'causa_sintetica_sin_etiqueta'],
+        layer: 'platform_communication',
+      };
+    });
+    const atEvent = screen.getByRole('group', { name: text('scr08.detail.at_event') });
+    expect(atEvent.querySelector('[data-state]')?.getAttribute('data-state')).toBe(
+      'not_observable',
+    );
+    expect(part(atEvent, 'at_event_explained')?.textContent).toBe(
+      text('scr08.detail.at_event_explained'),
+    );
+    const causes = within(atEvent).getByRole('list', {
+      name: text('scr08.detail.at_event_causes'),
+    });
+    const items = [...causes.querySelectorAll('[data-part="at_event_cause"]')];
+    expect(items.map((item) => item.getAttribute('data-cause'))).toEqual([
+      'never_reported',
+      'no_communication',
+      'causa_sintetica_sin_etiqueta',
+    ]);
+    expect(items.map((item) => item.textContent)).toEqual([
+      label('platform_cause', 'never_reported'),
+      label('platform_cause', 'no_communication'),
+      text('components_status.observability.cause_unknown'),
+    ]);
+  });
+
+  it('sin cobertura del instante, el aviso de siempre y ninguna explicación inventada', async () => {
+    await openWith((value) => {
+      value.observability_state_at_event = 'not_observable';
+      value.coverage_at_event = null;
+      value.notices = [{ code: 'coverage_unavailable', since: null, cause: null }];
+    });
+    const atEvent = screen.getByRole('group', { name: text('scr08.detail.at_event') });
+    expect(part(atEvent, 'at_event_explained')).toBeNull();
+    expect(part(atEvent, 'at_event_causes')).toBeNull();
+    expect(document.querySelector('[data-notice="coverage_unavailable"]')?.textContent).toBe(
+      label('finding_detail_notice', 'coverage_unavailable'),
+    );
+  });
+
+  it('con cobertura sin causas, la explicación sin lista de causas', async () => {
+    await openWith((value) => {
+      value.coverage_at_event = { state: 'degraded', causes: [], layer: 'node_report' };
+    });
+    const atEvent = screen.getByRole('group', { name: text('scr08.detail.at_event') });
+    expect(part(atEvent, 'at_event_explained')?.textContent).toBe(
+      text('scr08.detail.at_event_explained'),
+    );
+    expect(part(atEvent, 'at_event_causes')).toBeNull();
+  });
+
+  it('zona unipersonal: las fechas de las acciones y del análisis son las agregadas del servidor, marcadas como tales', async () => {
+    await openWith((value) => {
+      twoActions(value);
+      value.time_aggregated = true;
+      value.aggregation_window_minutes = 60;
+      // El servidor ya da las marcas agregadas al inicio de la ventana (BR-LAZ-06).
+      value.actions = value.actions.map((item) => ({
+        ...item,
+        assigned_at: '2026-01-02T13:00:00.000Z',
+        due_at: '2026-01-09T13:00:00.000Z',
+      }));
+      value.analyses = [signedAnalysis({ signed_at: '2026-01-03T15:00:00.000Z' })];
+    });
+    const marker = ` (${text('scr08.detail.aggregated')})`;
+    const items = [...document.querySelectorAll('[data-part="action"]')];
+    expect(
+      items.map((item) => [
+        part(item, 'action_assigned_at')?.querySelector('time')?.getAttribute('dateTime'),
+        afterDate(part(item, 'action_assigned_at')),
+        part(item, 'action_due_at')?.querySelector('time')?.getAttribute('dateTime'),
+        afterDate(part(item, 'action_due_at')),
+      ]),
+    ).toEqual([
+      ['2026-01-02T13:00:00.000Z', marker, '2026-01-09T13:00:00.000Z', marker],
+      ['2026-01-02T13:00:00.000Z', marker, '2026-01-09T13:00:00.000Z', marker],
+    ]);
+    const signed = document.querySelector('[data-part="analysis_signed_at"]');
+    expect([signed?.querySelector('time')?.getAttribute('dateTime'), afterDate(signed)]).toEqual([
+      '2026-01-03T15:00:00.000Z',
+      marker,
+    ]);
+  });
+
+  it('fuera de una zona unipersonal las fechas no llevan la marca de agregadas', async () => {
+    await openWith((value) => {
+      twoActions(value);
+      value.analyses = [signedAnalysis()];
+    });
+    const dates = [
+      ...document.querySelectorAll(
+        '[data-part="action_assigned_at"], [data-part="action_due_at"], [data-part="analysis_signed_at"]',
+      ),
+    ];
+    expect(dates).toHaveLength(5);
+    expect(dates.map((node) => afterDate(node))).toEqual(dates.map(() => ''));
+  });
+
+  it('axe sin violaciones con acciones, causa raíz y las causas del instante', async () => {
+    const { view } = await openWith((value) => {
+      twoActions(value);
+      value.analyses = [signedAnalysis()];
+      value.observability_state_at_event = 'not_observable';
+      value.coverage_at_event = {
+        state: 'not_observable',
+        causes: ['never_reported'],
+        layer: 'platform_communication',
+      };
+    });
+    expect(await axe(view.container)).toHaveNoViolations();
   });
 });

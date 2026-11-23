@@ -21,6 +21,7 @@ import type { RouteGroup } from '@/app/descriptor';
 import { canEnterGroup } from '@/app/navigation';
 import { StatusChip } from '@/components/StatusChip/StatusChip';
 import { descriptor as scr09 } from '@/pages/scr09/descriptor';
+import { descriptor as scr11 } from '@/pages/scr11/descriptor';
 import { findingAccess } from '@/pages/shared/FindingActions';
 import styles from '@/pages/shared/findingLayout.module.css';
 import { findingTitle } from '@/pages/shared/findingTitle';
@@ -43,6 +44,11 @@ import { DetailView, History, type NowState, type RecordsState } from './DetailV
 
 /** El grupo del lazo de SCR-09: el enlace aparece solo si la sesión lo puede abrir. */
 const LOOP_GROUP: RouteGroup | undefined = scr09.route_groups.find((group) => group.id === 'loop');
+
+/** El grupo de SCR-11: el enlace a la causa raíz aparece solo si la sesión lo puede abrir. */
+const ROOT_CAUSE_GROUP: RouteGroup | undefined = scr11.route_groups.find(
+  (group) => group.id === 'root_cause',
+);
 
 const DETAIL = 'GET /loop/findings/{finding_state_id}';
 const HISTORY = 'GET /loop/findings/{finding_state_id}/classifications';
@@ -184,6 +190,11 @@ function Finding({
       records={recordState}
       clock={clock}
       canViewClips={context.permissions.has('evidence.read')}
+      rootCauseHref={
+        ROOT_CAUSE_GROUP !== undefined && canEnterGroup(ROOT_CAUSE_GROUP, context.permissions)
+          ? `/findings/${context.findingId}/root-cause`
+          : null
+      }
     />
   );
 }

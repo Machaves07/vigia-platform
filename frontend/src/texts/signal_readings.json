@@ -1,0 +1,7 @@
+{
+  "signal_readings.none": "El tramo no trae lecturas de señales.",
+  "signal_readings.invalid": "no válida",
+  "signal_readings.read_at": "Hora de lectura",
+  "signal_readings.read_at_unavailable": "Hora de lectura no disponible",
+  "signal_readings.aggregated": "Hora agregada a la ventana de la zona"
+}
