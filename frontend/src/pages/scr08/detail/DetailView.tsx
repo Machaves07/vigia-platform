@@ -18,7 +18,7 @@ import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
 import { causeLabel } from '@/components/ObservabilityBadge/encoding';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
-import { ACTION_STATES, shownActionState } from '@/pages/shared/actionState';
+import { ACTION_STATES, assigneeName, shownActionState } from '@/pages/shared/actionState';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
 import { SignalReadings } from '@/pages/shared/SignalReadings';
 import type { ReviewResolutionItem } from '@/ports/shared';
@@ -314,7 +314,8 @@ function actionStateText(state: string): string {
 /**
  * Acciones comprometidas (O-12; LC-LAZ-06), en el orden del servidor, que es el de asignación.
  * Tipo y estado etiquetados; la acción vigente de un hallazgo cerrado se presenta cerrada con él.
- * El responsable no va aquí (`ActionOut` no lo trae): lo muestra la ficha de vida (TASK-585).
+ * O-16: cada acción nombra a su responsable por su nombre visible (`assignee_display_name`), nunca
+ * por su identificador; sin nombre, «Responsable no disponible».
  */
 function Actions({
   detail,
@@ -357,6 +358,11 @@ function Actions({
                       </span>
                     </>
                   )}
+                </Field>
+                <Field name={text('finding_journey.assignee')}>
+                  <span data-part="action_assignee">
+                    {assigneeName(action.assignee_display_name)}
+                  </span>
                 </Field>
                 <Field name={text('scr08.detail.action_assigned_at')}>
                   <span data-part="action_assigned_at">

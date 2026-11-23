@@ -271,6 +271,7 @@ def _action(draw: st.DrawFn) -> dict[str, Any]:
         "due_at": _iso(draw(instants())),
         "counts_as_overdue": draw(st.booleans()),
         "root_cause_analysis_id": None,
+        "assignee_display_name": draw(st.none() | _TEXT),
     }
 
 

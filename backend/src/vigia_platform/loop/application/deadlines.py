@@ -591,6 +591,8 @@ class OverdueItem:
     action_type: str | None
     assignee_user_id: uuid.UUID | None
     assignee_inactive: bool
+    assignee_display_name: str | None
+    """El nombre visible del responsable (O-16); ``None`` si su cuenta no es visible."""
     due_at: datetime
     """El plazo de la acción **vigente** (otro, posterior, si se reasignó tras vencer)."""
     overdue_since: datetime
@@ -632,7 +634,12 @@ _ZONES: Final = text(
 _ITEMS: Final = text(
     "SELECT f.finding_state_id, f.plant_id, f.zone_id, f.subject_kind, f.family, f.tier,"
     " f.lifecycle_state, f.current_action_id, f.current_action_type, f.assignee_user_id,"
-    " f.assignee_inactive, f.due_at, f.overdue_since FROM loop.finding_state AS f"
+    " f.assignee_inactive, f.due_at, f.overdue_since,"
+    # O-16: el nombre visible del responsable en la misma lectura, como el detalle (sin filtro de
+    # estado: desactivado conserva su nombre; ``NULL`` solo si la cuenta no es visible).
+    " u.display_name AS assignee_display_name FROM loop.finding_state AS f"
+    " LEFT JOIN identity.user_account AS u"
+    " ON u.organization_id = f.organization_id AND u.user_id = f.assignee_user_id"
     " WHERE f.organization_id = :organization_id AND f.plant_id = :plant_id"
     " AND f.lifecycle_state IN ('action_assigned', 'overdue')"
     " AND f.current_action_id IS NOT NULL AND f.due_at IS NOT NULL"
@@ -831,6 +838,7 @@ def _item(row: Mapping[str, Any], now: datetime, threshold: int) -> OverdueItem:
     state = S(row["lifecycle_state"])
     finding_state_id = _uuid(row["finding_state_id"])
     assignee = row["assignee_user_id"]
+    name = row["assignee_display_name"]
     return OverdueItem(
         finding_state_id=finding_state_id,
         plant_id=_uuid(row["plant_id"]),
@@ -844,6 +852,7 @@ def _item(row: Mapping[str, Any], now: datetime, threshold: int) -> OverdueItem:
         action_type=row["current_action_type"],
         assignee_user_id=None if assignee is None else _uuid(assignee),
         assignee_inactive=bool(row["assignee_inactive"]),
+        assignee_display_name=None if name is None else str(name),
         due_at=due_at,
         overdue_since=since,
         overdue_days=days,

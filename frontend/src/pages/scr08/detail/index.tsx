@@ -22,6 +22,7 @@ import { canEnterGroup } from '@/app/navigation';
 import { StatusChip } from '@/components/StatusChip/StatusChip';
 import { descriptor as scr09 } from '@/pages/scr09/descriptor';
 import { descriptor as scr11 } from '@/pages/scr11/descriptor';
+import { currentAssignee } from '@/pages/shared/actionState';
 import { findingAccess } from '@/pages/shared/FindingActions';
 import styles from '@/pages/shared/findingLayout.module.css';
 import { findingTitle } from '@/pages/shared/findingTitle';
@@ -302,6 +303,7 @@ export default function Page() {
               state={data.lifecycle_state}
               permissions={context.permissions}
               dueAt={data.due_at}
+              assignee={currentAssignee(data.actions)}
               detectionId={data.subject_kind === 'detection' ? data.subject_id : null}
               timeZone={timeZone}
             />

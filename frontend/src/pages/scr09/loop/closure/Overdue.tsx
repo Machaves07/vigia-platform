@@ -1,8 +1,11 @@
-/** Resumen de planta con su permiso; sin él, los vencidos y escalamientos del propio lazo. */
+/**
+ * Resumen de planta con su permiso; sin él, los vencidos y escalamientos del propio lazo. Cada
+ * fila nombra al responsable de la acción por su nombre visible (O-16), nunca por su identificador.
+ */
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
-import { shownActionState } from '@/pages/shared/actionState';
+import { assigneeLine, shownActionState } from '@/pages/shared/actionState';
 import {
   closurePort,
   recordContent,
@@ -45,6 +48,8 @@ export function OverdueView({
             {label('finding_lifecycle_state', item.lifecycle_state)}
             {' · '}
             <TimestampWithOffset instant={item.due_at} timeZone={timeZone} />
+            {' · '}
+            <span data-part="overdue_assignee">{assigneeLine(item.assignee_display_name)}</span>
             {' · '}
             {text('scr09.overdue.days')}: {item.overdue_days}
             {item.highlighted && <strong> · {text('scr09.overdue.highlighted')}</strong>}
@@ -145,14 +150,16 @@ export function Overdue({
         {local.map((action) => (
           <p key={action.action_id} data-part="overdue_action">
             {action.action_description} ·{' '}
-            <TimestampWithOffset instant={action.due_at} timeZone={timeZone} />
+            <TimestampWithOffset instant={action.due_at} timeZone={timeZone} /> ·{' '}
+            <span data-part="overdue_assignee">{assigneeLine(action.assignee_display_name)}</span>
           </p>
         ))}
         {live.map((action) => (
           <p key={action.action_id} data-part="live_action">
             {action.action_description} ·{' '}
             <span data-part="due_on">{text('scr09.overdue.due_on')}</span>{' '}
-            <TimestampWithOffset instant={action.due_at} timeZone={timeZone} dateOnly />
+            <TimestampWithOffset instant={action.due_at} timeZone={timeZone} dateOnly /> ·{' '}
+            <span data-part="live_assignee">{assigneeLine(action.assignee_display_name)}</span>
           </p>
         ))}
         <ul>

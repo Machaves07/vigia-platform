@@ -2564,6 +2564,8 @@ export interface components {
       counts_as_overdue: boolean;
       /** Root Cause Analysis Id */
       root_cause_analysis_id: string | null;
+      /** Assignee Display Name */
+      assignee_display_name: string | null;
     };
     /** ActivationEnrollment */
     ActivationEnrollment: {
@@ -6933,6 +6935,8 @@ export interface components {
       assignee_user_id: string | null;
       /** Assignee Inactive */
       assignee_inactive: boolean;
+      /** Assignee Display Name */
+      assignee_display_name: string | null;
       /** Due At */
       due_at: string;
       /** Overdue Since */

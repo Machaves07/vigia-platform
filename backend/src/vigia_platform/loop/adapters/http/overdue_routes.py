@@ -89,6 +89,9 @@ class OverdueItemOut(_Strict):
     assignee_user_id: uuid.UUID | None
     """El responsable de la acción: un usuario de la plataforma, nunca una persona observada."""
     assignee_inactive: bool
+    assignee_display_name: str | None
+    """Su nombre visible (O-16), lo único de su cuenta que se añade al identificador que ya
+    estaba; ``null`` si la cuenta no es visible."""
     due_at: str
     """El plazo de la acción vigente, congelado al asignarla (fin exclusivo de su último día
     hábil)."""
@@ -155,6 +158,7 @@ def item_view(item: OverdueItem) -> OverdueItemOut:
         action_type=item.action_type,
         assignee_user_id=item.assignee_user_id,
         assignee_inactive=item.assignee_inactive,
+        assignee_display_name=item.assignee_display_name,
         due_at=_stamp(item.due_at),
         overdue_since=_stamp(item.overdue_since),
         overdue_days=item.overdue_days,

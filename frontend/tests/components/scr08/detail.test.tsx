@@ -630,6 +630,48 @@ describe('SCR-08 detalle: lo que ya existe (TASK-584)', { timeout: 60_000 }, () 
     ]).toEqual(['assigned', null]);
   });
 
+  /**
+   * O-16 (recorrido de cierre M10): cada acción comprometida nombra a su responsable con el
+   * nombre visible del servidor, en el orden de las acciones; sin nombre, «Responsable no
+   * disponible». Mutación con nombre: `m_sin_responsable_detalle`.
+   */
+  it('O-16: cada acción nombra a su responsable y, sin nombre, lo dice', async () => {
+    await openWith((value) => {
+      value.lifecycle_state = 'action_assigned';
+      value.actions = [
+        action(1, {
+          state: 'superseded',
+          assignee_display_name: 'Persona de prueba (line_manager)',
+        }),
+        action(2, { state: 'assigned', assignee_display_name: null }),
+      ];
+    });
+    const section = screen.getByRole('region', { name: text('scr08.detail.actions') });
+    expect(parts(section, 'action', 'action_assignee')).toEqual([
+      'Persona de prueba (line_manager)',
+      text('finding_journey.assignee_unavailable'),
+    ]);
+  });
+
+  it('O-16: la tarjeta «Siguiente paso» nombra al responsable de la acción vigente', async () => {
+    await openWith(
+      (value) => {
+        value.lifecycle_state = 'action_assigned';
+        value.due_at = '2026-01-11T14:15:00.000Z';
+        value.actions = [
+          action(1, { state: 'superseded', assignee_display_name: 'Persona de prueba (A)' }),
+          action(2, { state: 'assigned', assignee_display_name: 'Persona de prueba (B)' }),
+        ];
+      },
+      // Las claves que abren los pasos del lazo (el panel solo aparece si hay alguno).
+      [...COORDINATOR, 'actions.manage', 'findings.close_and_sign', 'closure_attachments.read'],
+    );
+    const panel = screen.getByRole('region', { name: text('next_step.title') });
+    expect(panel.querySelector('[data-part="assignee"]')?.textContent).toBe(
+      `${text('finding_journey.assignee')}: Persona de prueba (B)`,
+    );
+  });
+
   it('sin acciones ni análisis no hay secciones vacías', async () => {
     await openWith(() => undefined);
     expect(screen.queryByRole('region', { name: text('scr08.detail.actions') })).toBeNull();

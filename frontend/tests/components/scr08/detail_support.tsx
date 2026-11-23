@@ -186,6 +186,7 @@ export function action(index: number, overrides: Partial<DetailAction> = {}): De
     due_at: '2026-01-09T13:30:00.000Z',
     counts_as_overdue: true,
     root_cause_analysis_id: null,
+    assignee_display_name: `Persona de prueba ${String(index)}`,
     ...overrides,
   };
 }

@@ -61,6 +61,7 @@ from vigia_platform.ledger.application.reader import (
 )
 from vigia_platform.ledger.application.writer import Receipt, RecordScope
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
+from vigia_platform.loop.adapters.http.findings_routes import DETAIL_PATH
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.adapters.http.timeline_routes import TIMELINE_PATH
 from vigia_platform.loop.application.detail import FindingDetailService
@@ -334,6 +335,101 @@ def test_the_full_cycle_has_one_milestone_per_record_in_ledger_order(
     assert by_kind["reopening"]["details"]["from_state"] == "closed"
     assert body["summary"]["closed_at"] is None  # reabierto
     assert str(action_id) not in {a["record_id"] for a in actions}
+
+
+# --- O-16: el responsable de cada acción en el detalle y el lazo ----------------------------------
+
+_ACTION_FIELDS: Final = frozenset(
+    {
+        "action_id",
+        "record_id",
+        "action_type",
+        "action_description",
+        "expected_outcome",
+        "state",
+        "assigned_at",
+        "due_at",
+        "counts_as_overdue",
+        "root_cause_analysis_id",
+        "assignee_display_name",
+    }
+)
+"""Los campos de ``ActionOut``: del responsable, solo su nombre visible (nunca su ``user_id``)."""
+_FIRST_NAME: Final = "Persona de prueba (line_manager)"
+_SECOND_NAME: Final = "Persona de prueba (plant_manager)"
+
+
+def _named(stack: TimelineStack, role: Role, display_name: str) -> uuid.UUID:
+    """Un responsable posible con un nombre visible sintético y literal."""
+    user = stack.actions.user(stack.actions.world.a, role)
+    stack.actions.execute(
+        "UPDATE identity.user_account SET display_name = $2 WHERE user_id = $1",
+        user,
+        display_name,
+    )
+    return user
+
+
+def _detail_actions(
+    stack: TimelineStack, who: Who, finding_state_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    response = stack.actions.get(who, DETAIL_PATH.format(finding_state_id=finding_state_id))
+    actions: list[dict[str, Any]] = _ok(response)["actions"]
+    return actions
+
+
+def _reassigned(stack: TimelineStack, coordinator: Who) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Un hallazgo con una acción de ``first`` sustituida por otra de ``second``."""
+    first = _named(stack, Role.LINE_MANAGER, _FIRST_NAME)
+    second = _named(stack, Role.PLANT_MANAGER, _SECOND_NAME)
+    finding, old = stack.actions.assigned(coordinator, first)
+    response = stack.actions.assign(
+        coordinator,
+        finding,
+        stack.actions.action_body(second, supersedes_action_id=str(old)),
+    )
+    assert response.status_code == 201, response.text
+    return stack.actions.finding_state_id(finding), first, second
+
+
+def test_each_action_of_the_detail_names_its_assignee_and_never_its_id(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    finding_state_id, first, second = _reassigned(stack, coordinator)
+    stack.occupancy(finding_state_id, False)
+    actions = _detail_actions(stack, coordinator, finding_state_id)
+    assert [(a["state"], a["assignee_display_name"]) for a in actions] == [
+        ("superseded", _FIRST_NAME),
+        ("assigned", _SECOND_NAME),
+    ]
+    for action in actions:
+        assert set(action) == _ACTION_FIELDS
+        assert {str(first), str(second)}.isdisjoint(action.values())
+    # El mismo nombre que la ficha de vida guarda como instantánea al asignar (TASK-585).
+    milestones = _ok(stack.get(coordinator, finding_state_id))["milestones"]
+    assert [
+        m["details"]["assignee_display_name"] for m in milestones if m["kind"] == "action_assigned"
+    ] == [_FIRST_NAME, _SECOND_NAME]
+
+
+def test_a_deactivated_assignee_keeps_its_name_in_the_detail(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    finding_state_id, first, _ = _reassigned(stack, coordinator)
+    stack.actions.deactivate(first)
+    actions = _detail_actions(stack, coordinator, finding_state_id)
+    assert [a["assignee_display_name"] for a in actions] == [_FIRST_NAME, _SECOND_NAME]
+
+
+def test_in_a_single_occupancy_zone_the_assignee_is_named_and_the_times_stay_aggregated(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    finding_state_id, _, _ = _reassigned(stack, coordinator)
+    stack.occupancy(finding_state_id, True)
+    actions = _detail_actions(stack, coordinator, finding_state_id)
+    assert [a["assignee_display_name"] for a in actions] == [_FIRST_NAME, _SECOND_NAME]
+    marks = [a[key] for a in actions for key in ("assigned_at", "due_at")]
+    assert all(_on_grid(mark) for mark in marks), marks
 
 
 # --- una sola auditoría por petición -------------------------------------------------------------
