@@ -91,5 +91,6 @@
   "scr09.closure.ended.by": "por",
   "scr09.closure.ended.root_cause": "Causa raíz",
   "scr09.closure.ended.timeline": "Ficha de vida",
-  "scr09.closure.ended.reopen": "Reabrir"
+  "scr09.closure.ended.reopen": "Reabrir",
+  "scr09.closure.repeat_notice_untimed": "Ya registró una evidencia igual."
 }

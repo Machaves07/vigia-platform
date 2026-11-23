@@ -10,14 +10,14 @@
  *
  * Datos sintéticos; el reloj del transporte es el inyectado (START, 25-10-2026 02:00 UTC).
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { plantTime } from '@/components/TimestampWithOffset/format';
 import type { Detail } from '@/ports/scr09Closure';
 import { text } from '@/texts';
-import { exampleFor } from '../../msw/handlers';
+import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { changeDateTime } from '../../support/dateFields';
 import {
@@ -41,6 +41,26 @@ const PERFORMED = '2026-10-24T15:00:00.000Z';
 /** Una clasificación anterior a la última. */
 const START_ISO = '2026-10-20T15:00:00.000Z';
 const ROLE = 'Mantenimiento';
+
+/** Una evidencia de ACTION en el expediente, en la posición `sequence` de la cadena. */
+function evidenceRecord(sequence: number, change: Record<string, unknown> = {}) {
+  const record = ledgerRecord('action_evidence_added', {
+    action_id: ACTION,
+    description: DESCRIPTION,
+    performed_at: PERFORMED,
+    performed_by_role: ROLE,
+    added_at: INSTANT,
+    ...change,
+  });
+  return {
+    ...record,
+    record_id: `0190a1b2-6666-7000-8000-00000000000${String(sequence)}`,
+    chain_sequence: sequence,
+  };
+}
+/** Igual a lo que escribe `fill`; y la misma con otro cargo. */
+const EQUAL = {};
+const OTHER_ROLE = { performed_by_role: 'Producción' };
 
 async function fill(user: User, role = ROLE) {
   await user.type(
@@ -214,6 +234,89 @@ describe(
       }, WAIT);
       expect(repeatText()).toBeNull();
     });
+
+    it.each([
+      ['otra hora de ejecución', { performed_at: '2026-10-24T16:00:00.000Z' }],
+      ['otra nota de verificación', { verification_note: 'Nota sintética anterior' }],
+    ])('con %s no es la misma evidencia: se envía sin confirmación', async (_, change) => {
+      await renderClosure('closure', { records: [evidenceRecord(1, change)] });
+      const user = await load();
+      const bodies = serveEvidence();
+      await fill(user);
+      await submitEvidence(user);
+      await waitFor(() => {
+        expect(bodies).toHaveLength(1);
+      }, WAIT);
+      expect(repeatText()).toBeNull();
+    });
+
+    it.each([
+      ['la más reciente es distinta: se envía', [EQUAL, OTHER_ROLE], 1, null],
+      ['la más reciente es igual: pide confirmación', [OTHER_ROLE, EQUAL], 0, REPEAT],
+    ] as const)('manda la última evidencia del expediente: %s', async (_, order, sent, notice) => {
+      await renderClosure('closure', {
+        records: order.map((change, index) => evidenceRecord(index + 1, change)),
+      });
+      const user = await load();
+      const bodies = serveEvidence();
+      await fill(user);
+      await submitEvidence(user);
+      await waitFor(() => {
+        expect({ sent: bodies.length, notice: repeatText() }).toEqual({ sent, notice });
+      }, WAIT);
+    });
+
+    it('la evidencia igual de otra acción no cuenta', async () => {
+      await renderClosure('closure', {
+        records: [evidenceRecord(1, { action_id: '0190a1b2-7777-7000-8000-000000000002' })],
+      });
+      const user = await load();
+      const bodies = serveEvidence();
+      await fill(user);
+      await submitEvidence(user);
+      await waitFor(() => {
+        expect(bodies).toHaveLength(1);
+      }, WAIT);
+      expect(repeatText()).toBeNull();
+    });
+
+    it('con un added_at no válido en el expediente, el aviso sale sin hora y la página no cae', async () => {
+      await renderClosure('closure', { records: [evidenceRecord(1, { added_at: 'sin-fecha' })] });
+      const user = await load();
+      const bodies = serveEvidence();
+      await fill(user);
+      await submitEvidence(user);
+      await waitFor(() => {
+        expect(repeatText()).toBe(
+          `${text('scr09.closure.repeat_notice_untimed')} ${text('scr09.closure.repeat_question')}`,
+        );
+      }, WAIT);
+      expect(bodies).toEqual([]);
+    });
+
+    it('si el servidor rechaza el registro no hay acuse y el formulario conserva lo escrito', async () => {
+      await renderClosure();
+      const user = await load();
+      let posts = 0;
+      server.use(
+        http.post(`http://localhost/loop/actions/${ACTION}/evidence`, () => {
+          posts++;
+          return apiError('conflict', 409, { detailCode: 'loop_transition_not_allowed' });
+        }),
+      );
+      await fill(user);
+      await submitEvidence(user);
+      await waitFor(() => {
+        expect({
+          posts,
+          settled: !screen.getByRole<HTMLButtonElement>('button', {
+            name: text('scr09.closure.submit_evidence'),
+          }).disabled,
+        }).toEqual({ posts: 1, settled: true });
+      }, WAIT);
+      expect(receipt()).toBeNull();
+      expect(values()).toEqual(FILLED);
+    });
   },
 );
 
@@ -372,6 +475,58 @@ describe(
       });
       expect(document.activeElement).toBe(region.querySelector('[data-part="ended_summary"]'));
       expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it('cerrado sin actions.manage: no aparece «Reabrir»', async () => {
+      await renderClosure('closure', {
+        detail: lifecycle('closed'),
+        permissions: PERMISSIONS.filter((permission) => permission !== 'actions.manage'),
+      });
+      await load();
+      await waitFor(() => {
+        expect(ending()?.links).toEqual([
+          [text('scr09.closure.ended.timeline'), `/findings/${FINDING}/timeline`],
+        ]);
+      }, WAIT);
+    });
+
+    it('el cierre firmado aquí no pasa a otro hallazgo abierto en la misma página', async () => {
+      const other = '0190a1b2-2222-7000-8000-00000000000a';
+      const { router } = await renderClosure('closure', { records: [] });
+      const user = await load();
+      server.use(
+        http.post(`http://localhost/loop/findings/${FINDING}/closure`, () =>
+          HttpResponse.json(
+            {
+              ...(exampleFor('close_loop_findings__finding_state_id__closure_post') as object),
+              signed_at: INSTANT,
+            },
+            { status: 201 },
+          ),
+        ),
+        http.get(`http://localhost/loop/findings/${other}`, () =>
+          HttpResponse.json({ ...detail, finding_state_id: other }),
+        ),
+      );
+      await user.type(
+        screen.getByRole('textbox', { name: reasonName('scr09.closure.sign_description') }),
+        DESCRIPTION,
+      );
+      await user.click(
+        screen.getByRole('button', { name: text('components_forms.signature.sign') }),
+      );
+      await waitFor(() => {
+        expect(offered()).toEqual({ evidence: false, close: false });
+      }, WAIT);
+      await act(async () => {
+        await router.navigate(`/findings/${other}/loop/closure`);
+      });
+      await waitFor(() => {
+        expect({ ending: ending(), offered: offered() }).toEqual({
+          ending: null,
+          offered: { evidence: true, close: true },
+        });
+      }, WAIT);
     });
   },
 );

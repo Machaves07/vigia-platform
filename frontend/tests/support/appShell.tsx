@@ -133,6 +133,8 @@ export interface ShellFixture {
   readonly container: HTMLElement;
   /** Ruta actual del enrutador en memoria. */
   readonly route: () => string;
+  /** El último enrutador en memoria construido (el montado, salvo con StrictMode). */
+  readonly router: () => ReturnType<typeof createMemoryRouter> | null;
 }
 
 /** Monta `App` en `path` con servicios nuevos (sesión `anonymous` hasta que responda `GET /me`). */
@@ -173,7 +175,13 @@ export function mountShell(
     onCaughtError: rootErrorOptions.onCaughtError,
     onRecoverableError: rootErrorOptions.onRecoverableError,
   });
-  return { clock, services, container: view.container, route: () => services.currentRoute() };
+  return {
+    clock,
+    services,
+    container: view.container,
+    route: () => services.currentRoute(),
+    router: () => previousRouter,
+  };
 }
 
 /** Avanza el reloj simulado dentro de `act`. */

@@ -3,6 +3,7 @@
  * descartado o incerrable no se ofrecen los formularios: arriba, cómo terminó y lo que sigue (O-18).
  */
 import { useRef, useState } from 'react';
+import { useParams } from 'react-router';
 import { text } from '@/texts';
 import { ClosureScreen } from './common';
 import { Evidence } from './Evidence';
@@ -12,7 +13,13 @@ import { Overdue } from './Overdue';
 
 export default function Page() {
   // El cierre que esta página acaba de firmar: el aviso no espera a la relectura del detalle.
-  const [closedNow, setClosedNow] = useState<ClosedNow | null>(null);
+  // Es del hallazgo en que se firmó: otro hallazgo en la misma página no lo hereda.
+  const { finding_state_id: findingId = '' } = useParams();
+  const [signed, setSigned] = useState<{
+    readonly findingId: string;
+    readonly closure: ClosedNow;
+  } | null>(null);
+  const closedNow = signed !== null && signed.findingId === findingId ? signed.closure : null;
   const signHeading = useRef<HTMLHeadingElement>(null);
   return (
     <ClosureScreen
@@ -55,9 +62,12 @@ export default function Page() {
                 context={context}
                 onWritten={onWritten}
                 onClosed={(closure) => {
-                  setClosedNow({
-                    signedAt: closure.signed_at,
-                    signer: context.principal?.display_name ?? null,
+                  setSigned({
+                    findingId: context.findingId,
+                    closure: {
+                      signedAt: closure.signed_at,
+                      signer: context.principal?.display_name ?? null,
+                    },
                   });
                 }}
                 headingRef={signHeading}

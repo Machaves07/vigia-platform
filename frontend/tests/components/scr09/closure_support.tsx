@@ -232,6 +232,7 @@ export async function renderClosure(
   );
   return {
     ...view,
+    router,
     clock,
     connection,
     cache,

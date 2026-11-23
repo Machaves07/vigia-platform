@@ -80,6 +80,26 @@ function recordedEvidence(
   };
 }
 
+/** `HH:mm` de `instant` en la planta; `null` si el instante no es válido. */
+function plantClock(instant: string, timeZone: string): string | null {
+  if (!Number.isFinite(Date.parse(instant))) return null;
+  try {
+    return formatInTimeZone(instant, timeZone, 'HH:mm');
+  } catch {
+    return null;
+  }
+}
+
+/** El aviso de una evidencia igual, con su hora si se conoce. */
+function repeatNotice(addedAt: string, timeZone: string): string {
+  const time = plantClock(addedAt, timeZone);
+  const notice =
+    time === null
+      ? text('scr09.closure.repeat_notice_untimed')
+      : `${text('scr09.closure.repeat_notice')} ${time}.`;
+  return `${notice} ${text('scr09.closure.repeat_question')}`;
+}
+
 /** La más reciente de las candidatas (la registrada desde esta página o la del expediente). */
 function latest(entries: readonly (EvidenceEntry | null | undefined)[]): EvidenceEntry | null {
   let found: EvidenceEntry | null = null;
@@ -357,9 +377,7 @@ export function Evidence({
       </button>
       {repeat !== null && (
         <div role="alert" className={styles.notice} data-part="repeat_confirmation">
-          <p data-part="repeat_text">
-            {`${text('scr09.closure.repeat_notice')} ${formatInTimeZone(repeat.addedAt, timeZone, 'HH:mm')}. ${text('scr09.closure.repeat_question')}`}
-          </p>
+          <p data-part="repeat_text">{repeatNotice(repeat.addedAt, timeZone)}</p>
           <button
             type="button"
             onClick={() => {

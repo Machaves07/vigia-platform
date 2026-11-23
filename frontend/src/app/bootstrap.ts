@@ -140,6 +140,12 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
   let pending: { readonly route: string; readonly options: NavigateOptions } | null = null;
   const currentRoute = (): string => bridge?.route() ?? locationRoute();
   const navigate = (route: string, options: NavigateOptions = {}): void => {
+    // Ya en esa ruta: no hay nada que completar. Si quedara pendiente (el enrutador no avisa de
+    // un cambio que no ocurre), la siguiente reconstrucción devolvería a esta ruta (PR 335).
+    if (bridge !== null && bridge.route() === route) {
+      pending = null;
+      return;
+    }
     pending = { route, options };
     bridge?.navigate(route, options);
   };

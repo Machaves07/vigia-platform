@@ -64,4 +64,16 @@ describe('O-13: navegación de la sesión con el enrutador montado', () => {
     app.session.navigate('/findings', { replace: true });
     expect(mounted.calls).toEqual([['/findings', { replace: true }]]);
   });
+
+  it('a la ruta en que ya está el enrutador no navega ni deja nada pendiente (PR 335)', () => {
+    const app = create();
+    const mounted = bridge('/other');
+    app.attachRouter(mounted.bridge);
+    app.session.navigate('/other', { replace: true });
+    expect(mounted.calls).toEqual([]);
+    // La siguiente reconstrucción (otros permisos) no devuelve a `/other`.
+    const rebuilt = bridge('/findings');
+    app.attachRouter(rebuilt.bridge);
+    expect(rebuilt.calls).toEqual([]);
+  });
 });
