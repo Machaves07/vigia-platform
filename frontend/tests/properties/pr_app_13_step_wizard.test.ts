@@ -115,6 +115,14 @@ describe('PR-APP-13 · flujo por pasos', () => {
                 expect(state).toBe(before);
               } else {
                 expect(state.stepCount).toBe(applied.from.length);
+                // El paso en pantalla se sigue por identidad, y el resumen sigue siendo el resumen,
+                // mientras ningún paso anterior quede incompleto.
+                const kept = applied.from.indexOf(before.position);
+                if (isSummary(before) && state.completed.every(Boolean)) {
+                  expect(isSummary(state)).toBe(true);
+                } else if (!isSummary(before) && kept >= 0 && allCompleteBefore(state, kept)) {
+                  expect(state.position).toBe(kept);
+                }
                 state.completed.forEach((done, i) => {
                   const old = applied.from[i];
                   const known = old != null && old >= 0 && old < before.stepCount;

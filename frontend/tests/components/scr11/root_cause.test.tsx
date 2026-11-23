@@ -1029,6 +1029,11 @@ describe('SCR-11 TASK-581: causa raíz que se puede completar', { timeout: 60_00
       },
     ]);
     expect(progress()).toEqual({ current: 2, total: 3 });
+    // Volver al porqué guardado no lo vuelve a guardar ni avanza solo.
+    fireEvent.click(screen.getByRole('button', { name: text('components_structure.wizard.back') }));
+    await settle();
+    expect(title()).toBe(whyLabel(1));
+    expect(loop.calls.steps).toHaveLength(1);
   });
 
   it('«Siguiente» con un error local no envía ni avanza, y el error queda en el campo', async () => {
