@@ -131,7 +131,8 @@ _ZONE: Final = text(
 )
 _RESPONSIBLE: Final = text(
     # Un usuario activo de la organización con un rol vigente sobre la organización, la planta del
-    # paquete o su zona (el patrón de A-58, como ``loop.actions._ASSIGNEE``).
+    # paquete o su zona (el patrón de A-58). ``loop.application.actions.ASSIGNEES`` añade la
+    # restricción de roles de A-126, que vale para la acción correctiva, no para este compromiso.
     "SELECT u.user_id FROM identity.user_account AS u"
     " WHERE u.organization_id = :organization_id AND u.user_id = :user_id"
     " AND u.status = 'active' AND EXISTS (SELECT 1 FROM identity.role_assignment AS r"

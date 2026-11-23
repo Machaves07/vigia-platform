@@ -2169,6 +2169,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/loop/findings/{finding_state_id}/assignees': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Personas que pueden ser responsables de la acción del hallazgo */
+    get: operations['list_assignees_loop_findings__finding_state_id__assignees_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/accreditation/exports': {
     parameters: {
       query?: never;
@@ -2859,6 +2876,29 @@ export interface components {
        * Format: uuid
        */
       scope_id: string;
+    };
+    /**
+     * AssigneeOut
+     * @description Una persona que puede ser responsable: un usuario de la plataforma, nunca una persona
+     *     observada (BR-APP-33). Solo lo necesario para elegirla.
+     */
+    AssigneeOut: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Display Name */
+      display_name: string;
+      /** Roles */
+      roles: ('coordinator_sst' | 'line_manager' | 'plant_manager')[];
+    };
+    /** AssigneePageOut */
+    AssigneePageOut: {
+      /** Items */
+      items: components['schemas']['AssigneeOut'][];
+      /** Next Cursor */
+      next_cursor: string | null;
     };
     /** AssignmentBody */
     AssignmentBody: {
@@ -14253,6 +14293,40 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['UnclosableReviewOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  list_assignees_loop_findings__finding_state_id__assignees_get: {
+    parameters: {
+      query?: {
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        finding_state_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AssigneePageOut'];
         };
       };
       /** @description Error genérico (ApiError) */
