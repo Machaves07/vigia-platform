@@ -1,5 +1,9 @@
-/** La firma es explícita; ni la falta de licencia ni el estado ocultan la acción. */
-import { useState } from 'react';
+/**
+ * La firma es explícita; ni la falta de licencia ni el estado ocultan la acción. Firmado, la
+ * página deja de ofrecer los formularios y el aviso «Lazo cerrado» de arriba confirma el cierre
+ * (`onClosed`, O-18).
+ */
+import { useState, type Ref } from 'react';
 import closeBody from '../../../../../openapi/bodies/close_loop_findings__finding_state_id__closure_post.json';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
 import { reasonLimits } from '@/components/ReasonField/limits';
@@ -11,7 +15,12 @@ import {
 } from '@/components/ReasonField/ReasonField';
 import { textFields } from '@/components/ReasonField/TextNotice';
 import { SignatureBlock, type SignerProfile } from '@/components/SignatureBlock/SignatureBlock';
-import { closureNotice, closurePort, type ClosureBody } from '@/ports/scr09Closure';
+import {
+  closureNotice,
+  closurePort,
+  type ClosureBody,
+  type ClosureResult,
+} from '@/ports/scr09Closure';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import { Failure, type ClosureContext } from './common';
@@ -19,9 +28,15 @@ import { Failure, type ClosureContext } from './common';
 export function Close({
   context,
   onWritten,
+  onClosed,
+  headingRef,
 }: {
   readonly context: ClosureContext;
   readonly onWritten: () => void;
+  /** El cierre quedó firmado: la respuesta del servidor (O-18). */
+  readonly onClosed: (closure: ClosureResult) => void;
+  /** El título, al que lleva «Ir a Cerrar y firmar» tras registrar la evidencia (O-17). */
+  readonly headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const [description, setDescription] = useState('');
   const [verification, setVerification] = useState('');
@@ -56,12 +71,17 @@ export function Close({
         verification_note: optionalText(verification),
         professional_license: snapshot.professional_license,
       })
-      .then(onWritten)
+      .then((closure) => {
+        onClosed(closure);
+        onWritten();
+      })
       .catch(() => undefined);
   };
   return (
     <section aria-label={text('scr09.closure.sign')}>
-      <h2>{text('scr09.closure.sign')}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>
+        {text('scr09.closure.sign')}
+      </h2>
       <ReasonField
         name="closure_description"
         label={text('scr09.closure.sign_description')}
@@ -111,7 +131,6 @@ export function Close({
           onSign={sign}
         />
       )}
-      {mutation.status === 'success' && <p role="status">{text('scr09.closure.saved')}</p>}
     </section>
   );
 }

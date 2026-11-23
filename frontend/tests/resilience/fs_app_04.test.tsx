@@ -162,7 +162,7 @@ describe('FS-APP-04 · almacén de evidencias caído', { timeout: 120_000 }, () 
     expect(connection.canWrite()).toBe(true);
 
     await user.click(screen.getByRole('button', { name: text('scr09.closure.submit_evidence') }));
-    await screen.findByText(text('scr09.closure.saved'), {}, WAIT);
+    await screen.findByText(text('scr09.closure.evidence_registered'), {}, WAIT);
     expect(evidence).toEqual([
       {
         description: DESCRIPTION,

@@ -11,6 +11,7 @@ import { currentTransport } from './base/http';
 export type Detail = components['schemas']['FindingDetailOut'];
 export type EvidenceBody = components['schemas']['EvidenceEntryBody'];
 export type ClosureBody = components['schemas']['ClosureBody'];
+export type ClosureResult = components['schemas']['ClosureOut'];
 export type DeclarationBody = components['schemas']['UnclosableDeclarationBody'];
 export type ReviewBody = components['schemas']['UnclosableReviewBody'];
 export type ReopeningBody = components['schemas']['ReopeningBody'];

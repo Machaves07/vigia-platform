@@ -535,8 +535,15 @@ describe('SCR-09 textos secundarios', { timeout: 60_000 }, () => {
       expect(state.bodies).toHaveLength(1);
     }, WAIT);
     expect(state.bodies[0]?.verification_note).toBeNull();
+    // Registrada, el formulario queda vacío (O-17): la segunda evidencia se escribe entera.
+    await screen.findByText(text('scr09.closure.evidence_registered'), {}, WAIT);
+    changeDateTime(screen.getByLabelText(text('scr09.closure.performed_at')), '2026-10-24T10:00');
+    await user.type(
+      screen.getByLabelText(text('scr09.closure.performed_by_role')),
+      'Mantenimiento',
+    );
     fireEvent.change(note(), { target: { value: 'Nota sintética de verificación\n' } });
-    await EVIDENCE.submit(user);
+    await send(EVIDENCE, user, TEXT);
     await waitFor(() => {
       expect(state.bodies).toHaveLength(2);
     }, WAIT);

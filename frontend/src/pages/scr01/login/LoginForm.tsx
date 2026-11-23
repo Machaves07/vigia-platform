@@ -43,7 +43,7 @@ export function LoginForm(): ReactNode {
       });
       setPassword('');
       if (response.status === 'authenticated') {
-        await completeSignIn(session, navigate);
+        await completeSignIn(session);
         return;
       }
       const enroll = response.status === 'second_factor_enrollment_required';
