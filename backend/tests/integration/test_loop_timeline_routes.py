@@ -806,14 +806,17 @@ def test_the_reader_caps_the_subject_records_and_says_truncated(
     assert exact is not None and (len(exact.records), exact.truncated) == (3, False)
 
 
-def _configure(stack: TimelineStack, organization: LoopOrganization, plant_id: uuid.UUID) -> None:
+def _configure(
+    stack: TimelineStack, organization: LoopOrganization, plant_id: uuid.UUID, days: int = 7
+) -> None:
+    """Un cambio real del plazo (un valor igual al vigente no escribe nada)."""
     actions = stack.actions
     actions.tick()
     actions.run(
         actions.configuration.change(
             actions.context(actions.member(organization, Role.PLANT_MANAGER)),
             plant_id,
-            integers={"classification_deadline_business_days": 7},
+            integers={"classification_deadline_business_days": days},
             business_calendar=None,
             reason=_CONFIGURATION_REASON,
         )
@@ -828,7 +831,7 @@ def test_the_reader_brings_only_the_plant_configuration_before_the_reception(
     _configure(stack, organization, organization.plant_id)  # antes: cuenta
     _configure(stack, organization, actions.world.add_plant(organization))  # otra planta
     finding = actions.received(organization)
-    _configure(stack, organization, organization.plant_id)  # después: no cuenta
+    _configure(stack, organization, organization.plant_id, days=9)  # después: no cuenta
     records = actions.world.ledger_records(organization)
     (reception,) = [r for r in records if r.record_id == finding.record_id]
     expected = [
@@ -838,6 +841,13 @@ def test_the_reader_brings_only_the_plant_configuration_before_the_reception(
         and r.chain_sequence < reception.chain_sequence
     ]
     assert len(expected) == 2  # la versión 1 de fábrica y el cambio
+    later = [
+        r
+        for r in records
+        if r.record_type == "loop_configuration_changed"
+        and r.chain_sequence > reception.chain_sequence
+    ]
+    assert len(later) == 1  # el cambio posterior existe en el expediente y no debe llegar
     who = actions.member(organization)
     history = _history(stack, who, finding, preceding=("loop_configuration_changed",))
     assert history is not None and history.preceding_complete is True
