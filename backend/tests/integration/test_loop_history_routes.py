@@ -89,7 +89,9 @@ BASE: Final = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
 BUDGET: Final = {"ci": 25, "pr": 25, "nightly": 200}
 """Ejemplos por perfil: cada uno siembra una zona nueva sobre la base real y la recorre."""
 EXAMPLES: Final = BUDGET.get(settings.get_current_profile_name(), BUDGET["nightly"])
-_EXPLAIN: Final = text("EXPLAIN (FORMAT JSON) " + closed_findings_statement())
+_EXPLAIN_SQL: Final = "EXPLAIN (FORMAT JSON) " + closed_findings_statement()
+_EXPLAIN: Final = text(_EXPLAIN_SQL)
+"""El plan de la sentencia del histórico (solo constantes)."""
 
 ACTIVE: Final = (
     "received",

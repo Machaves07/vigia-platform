@@ -3,9 +3,9 @@
 LC-LAZ §6 define 41 operaciones, aunque ``SUP-U05-35`` usa dos verbos sobre el mismo recurso de
 preferencias, ``SUP-U05-16`` lee además el análisis en curso para retomarlo (VIG-363),
 ``SUP-U05-02`` también la ficha de vida del mismo hallazgo (TASK-585) y ``SUP-U05-01`` también el
-histórico de lo cerrado (TASK-586). Por ello hay 45 rutas y 45 casos de aislamiento. Esta metapropiedad mantiene ambas
-fronteras sincronizadas: una ruta nueva, una operación sin caso, una ruta pública o una clave de
-instalador del proveedor rompe la prueba antes de llegar a producción.
+histórico de lo cerrado (TASK-586). Por ello hay 45 rutas y 45 casos de aislamiento. Esta
+metapropiedad mantiene ambas fronteras sincronizadas: una ruta nueva, una operación sin caso, una
+ruta pública o una clave de instalador del proveedor rompe la prueba antes de llegar a producción.
 """
 
 from __future__ import annotations

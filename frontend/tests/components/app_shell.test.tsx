@@ -297,6 +297,7 @@ describe('UI-07 NavMenu: solo pantallas visibles, en orden fijo (BR-APP-01, 03)'
       ['SCR-08', '/home'],
       ['SCR-08', '/findings'],
       ['SCR-08', '/findings/loops'],
+      ['SCR-08', '/findings/closed'],
       ['SCR-10', '/review-queue'],
       ['SCR-13', '/metrics'],
       ['SCR-15', '/notifications'],
