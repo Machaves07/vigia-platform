@@ -34,6 +34,7 @@ from hypothesis import strategies as st
 from tests.writer_support import unit_context
 from vigia_platform.accreditation.metrics.compute import compute_metrics
 from vigia_platform.accreditation.metrics.model import MetricValue
+from vigia_platform.fleet.application.finding_photos import FindingPhoto, FindingPhotoKey
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.ledger.application.audit_writer import ResourceRef
 from vigia_platform.ledger.application.reader import (
@@ -56,6 +57,7 @@ from vigia_platform.loop.application.timeline import (
     TimelineInputs,
     TimelineSource,
     finding_timeline,
+    photo_documents,
 )
 from vigia_platform.loop.calendar import business_deadline
 from vigia_platform.loop.config.classification_deadline import (
@@ -1125,6 +1127,12 @@ class _Subjects:
         self.calls += 1
         return context, self.row
 
+    async def record_photos(
+        self, context: ScopeContext, subject: Mapping[str, Any], documents: Any
+    ) -> Mapping[Any, Any]:
+        """Sin fotos (TASK-589): la ficha con fotos la prueban las de integración."""
+        return {}
+
 
 class _Reader:
     def __init__(self, history: SubjectHistory | None) -> None:
@@ -1270,3 +1278,99 @@ def test_a_snapshot_without_a_name_has_no_actor() -> None:
         if m.kind is MilestoneKind.CLASSIFICATION
     ]
     assert shown is None
+
+
+# --- fotos del hallazgo (TASK-589, A-128) --------------------------------------------------------
+
+
+def _finding_photo(index: int, at: datetime) -> FindingPhoto:
+    return FindingPhoto(
+        photo_id=uuid.UUID(int=7000 + index),
+        photo_index=index,
+        photo_role="peak" if index == 0 else "burst",
+        classified_as="finding",
+        family="coexistence",
+        standard_id=uuid.UUID(int=7),
+        standard_version=1,
+        max_confidence=0.9,
+        started_at=at,
+        ended_at=at + timedelta(seconds=2),
+        received_at=at + timedelta(seconds=40),
+        expires_at=None,
+        camera_id=None,
+        frame_at=at + timedelta(seconds=1),
+        width=320,
+        height=240,
+        has_image=True,
+        image_absent_reason=None,
+    )
+
+
+def test_the_reception_and_the_late_segment_carry_the_photos_of_their_segment() -> None:
+    """``finding_received`` lleva las de su tramo y ``late_segment_attached`` las de la recepción
+    que cita (``segment_record_id``); ningún otro hito lleva fotos (TASK-589)."""
+    at = START + timedelta(hours=3, minutes=17, seconds=5)
+    first_id, late_id = uuid.UUID(int=6001), uuid.UUID(int=6002)
+    node_first, node_late = uuid.UUID(int=6101), uuid.UUID(int=6102)
+    first = TimelineSource(
+        record_id=first_id,
+        chain_sequence=1,
+        record_type="finding_received",
+        received_at=at,
+        document={**received_document(at), "finding_id": str(node_first)},
+    )
+    late_document = received_document(at + timedelta(minutes=2))
+    late_document["episode"] = {**late_document["episode"], "segment_index": 1}
+    late_reception = TimelineSource(
+        record_id=late_id,
+        chain_sequence=2,
+        record_type="finding_received",
+        received_at=at + timedelta(minutes=2),
+        document={**late_document, "finding_id": str(node_late)},
+    )
+    attached = TimelineSource(
+        record_id=uuid.UUID(int=6003),
+        chain_sequence=3,
+        record_type="late_segment_attached",
+        received_at=at + timedelta(minutes=2, seconds=1),
+        document={
+            "segment_record_id": str(late_id),
+            "episode_id": str(SUBJECT),
+            "segment_index": 1,
+        },
+    )
+    photos = {
+        FindingPhotoKey(node_first, SUBJECT, 0): (_finding_photo(1, at), _finding_photo(0, at)),
+        FindingPhotoKey(node_late, SUBJECT, 1): (_finding_photo(2, at),),
+    }
+    records = (first, late_reception, attached)
+    assert photo_documents(records) == (
+        first.document,
+        late_reception.document,
+        late_reception.document,
+    )
+    for single in (False, True):
+        timeline = finding_timeline(
+            TimelineInputs(
+                subject=subject_row(single=single),
+                records=records,
+                truncated=False,
+                configuration=(),
+                timezone="UTC",
+                photos=photos,
+            )
+        )
+        indexes = [[p.photo_index for p in m.photos] for m in timeline.milestones]
+        assert indexes == [[0, 1], [2], [2]]
+        photo = timeline.milestones[0].photos[0]
+        moments = (photo.frame_at, photo.started_at, photo.ended_at, photo.received_at)
+        if single:
+            assert all(_on_grid(m) for m in moments if m is not None)
+        else:
+            assert moments == (
+                at + timedelta(seconds=1),
+                at,
+                at + timedelta(seconds=2),
+                at + timedelta(seconds=40),
+            )
+        assert photo.episode_duration_ms == 2000

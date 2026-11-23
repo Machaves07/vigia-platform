@@ -34,7 +34,14 @@ lectura de la foto del hallazgo (TASK-589) es aparte: filas ``productive`` por `
 - ``location`` y ``image``: la foto de la petición de imagen; ``image`` es la única sentencia que
   lee los bytes, y solo de una foto viva;
 - ``purge_retired`` y ``purge_expired``: ``DELETE`` de a lo sumo ``limit`` filas, que devuelve solo
-  las que borró, con su modo (una pasada repetida o solapada no cuenta dos veces).
+  las que borró, con su modo (una pasada repetida o solapada no cuenta dos veces);
+- ``record_photos`` y ``finding_image`` (TASK-589): la foto del hallazgo. Solo filas
+  ``productive`` vivas de la organización, la **planta** y la zona del hallazgo (el índice
+  ``episode_photo_record`` empieza por ``(organization_id, plant_id)``) con el ``record_id`` del
+  nodo **y** el mismo episodio y tramo de su registro. ``record_photos`` nunca selecciona la
+  columna ``image``; ``finding_image`` exige además que el registro esté entre los del hallazgo
+  (``ledger.ledger_record`` por su ``platform_record_id``, con el ``finding_id`` o el
+  ``detection_id``, el episodio y el tramo de la foto en su contenido).
 
 SQL sin valores en trazas ni registros (NFR-GOB-57); ``StoredImage`` no muestra sus bytes.
 """
@@ -55,6 +62,8 @@ from vigia_platform.shared.db import Transaction
 
 __all__ = [
     "EpisodePhotoSummary",
+    "FindingPhoto",
+    "FindingPhotoKey",
     "PhotoLocation",
     "PostgresEpisodePhotoQueries",
     "PurgedPhoto",
@@ -141,6 +150,34 @@ _PURGE_EXPIRED: Final = text(
     " AND p.expires_at <= CAST(:now AS timestamptz)"
     " RETURNING p.photo_id, p.zone_mode"
 )
+_RECORD_PHOTOS: Final = text(
+    "SELECT p.photo_id, p.record_id, p.episode_id, p.segment_index, p.photo_index, p.photo_role,"
+    " p.classified_as, p.family, p.standard_id, p.standard_version, p.max_confidence,"
+    " p.started_at, p.ended_at, p.received_at, p.expires_at, p.camera_id, p.frame_at, p.width,"
+    " p.height, p.image IS NOT NULL AS has_image, p.image_absent_reason"
+    " FROM fleet.episode_photo AS p"
+    " JOIN unnest(CAST(:record_ids AS uuid[]), CAST(:episode_ids AS uuid[]),"
+    " CAST(:segment_indexes AS integer[])) AS k(record_id, episode_id, segment_index)"
+    " ON p.record_id = k.record_id AND p.episode_id = k.episode_id"
+    " AND p.segment_index = k.segment_index"
+    " WHERE p.organization_id = :organization_id AND p.plant_id = :plant_id"
+    " AND p.zone_id = :zone_id AND p.zone_mode = 'productive'"
+    " AND (p.expires_at IS NULL OR p.expires_at > CAST(:now AS timestamptz))"
+    " ORDER BY p.record_id, p.episode_id, p.segment_index, p.photo_index, p.photo_id"
+)
+_FINDING_IMAGE: Final = text(
+    "SELECT p.plant_id, p.zone_id, p.size_bytes, p.sha256, p.image FROM fleet.episode_photo AS p"
+    " WHERE p.organization_id = :organization_id AND p.plant_id = :plant_id"
+    " AND p.zone_id = :zone_id AND p.photo_id = :photo_id AND p.zone_mode = 'productive'"
+    " AND (p.expires_at IS NULL OR p.expires_at > CAST(:now AS timestamptz))"
+    " AND EXISTS (SELECT 1 FROM ledger.ledger_record AS r"
+    " WHERE r.organization_id = p.organization_id AND r.plant_id = p.plant_id"
+    " AND r.scope_zone_id = p.zone_id AND r.record_id = ANY(CAST(:record_ids AS uuid[]))"
+    " AND (r.content_json ->> 'finding_id' = CAST(p.record_id AS text)"
+    " OR r.content_json ->> 'detection_id' = CAST(p.record_id AS text))"
+    " AND r.content_json -> 'episode' ->> 'episode_id' = CAST(p.episode_id AS text)"
+    " AND r.content_json -> 'episode' ->> 'segment_index' = CAST(p.segment_index AS text))"
+)
 
 
 def _plain(value: object) -> uuid.UUID:
@@ -207,6 +244,63 @@ class StoredImage:
     size_bytes: int | None
     sha256: str | None
     data: bytes | None = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class FindingPhotoKey:
+    """El tramo de un registro del hallazgo: el ``record_id`` **del nodo** (``finding_id`` o
+    ``detection_id`` del documento, nunca el ``platform_record_id``), su episodio y su tramo."""
+
+    record_id: uuid.UUID
+    episode_id: uuid.UUID
+    segment_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class FindingPhoto:
+    """Una foto del hallazgo: metadatos y si hay imagen; nunca los bytes, su suma ni su tamaño."""
+
+    photo_id: uuid.UUID
+    photo_index: int
+    photo_role: str
+    classified_as: str
+    family: str
+    standard_id: uuid.UUID
+    standard_version: int
+    max_confidence: float
+    started_at: datetime
+    ended_at: datetime
+    received_at: datetime
+    expires_at: datetime | None
+    camera_id: uuid.UUID | None
+    frame_at: datetime | None
+    width: int | None
+    height: int | None
+    has_image: bool
+    image_absent_reason: str | None
+
+
+def _finding_photo(values: Any) -> FindingPhoto:
+    return FindingPhoto(
+        photo_id=_plain(values["photo_id"]),
+        photo_index=int(values["photo_index"]),
+        photo_role=str(values["photo_role"]),
+        classified_as=str(values["classified_as"]),
+        family=str(values["family"]),
+        standard_id=_plain(values["standard_id"]),
+        standard_version=int(values["standard_version"]),
+        max_confidence=float(values["max_confidence"]),
+        started_at=values["started_at"],
+        ended_at=values["ended_at"],
+        received_at=values["received_at"],
+        expires_at=values["expires_at"],
+        camera_id=_optional(values["camera_id"]),
+        frame_at=values["frame_at"],
+        width=values["width"],
+        height=values["height"],
+        has_image=bool(values["has_image"]),
+        image_absent_reason=values["image_absent_reason"],
+    )
 
 
 def _summary(row: Any) -> EpisodePhotoSummary:
@@ -337,6 +431,79 @@ class PostgresEpisodePhotoQueries:
                 {
                     "organization_id": transaction.context.organization_id,
                     "photo_id": photo_id,
+                    "now": now,
+                },
+            )
+        ).first()
+        if row is None:
+            return None
+        data = row.image
+        return StoredImage(
+            plant_id=_plain(row.plant_id),
+            zone_id=_plain(row.zone_id),
+            size_bytes=row.size_bytes,
+            sha256=row.sha256,
+            data=None if data is None else bytes(data),
+        )
+
+    async def record_photos(
+        self,
+        context: ScopeContext,
+        *,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        keys: tuple[FindingPhotoKey, ...],
+        now: datetime,
+    ) -> dict[FindingPhotoKey, tuple[FindingPhoto, ...]]:
+        """Las fotos ``productive`` vivas de cada tramo de ``keys`` en la planta y la zona, por
+        ``photo_index``; un tramo sin fotos no aparece. Sin bytes."""
+        if not keys:
+            return {}
+        rows = await self._database.read(
+            context,
+            _RECORD_PHOTOS,
+            {
+                "organization_id": context.organization_id,
+                "plant_id": plant_id,
+                "zone_id": zone_id,
+                "record_ids": [key.record_id for key in keys],
+                "episode_ids": [key.episode_id for key in keys],
+                "segment_indexes": [key.segment_index for key in keys],
+                "now": now,
+            },
+        )
+        found: dict[FindingPhotoKey, list[FindingPhoto]] = {}
+        for row in rows:
+            values = row._mapping
+            key = FindingPhotoKey(
+                _plain(values["record_id"]),
+                _plain(values["episode_id"]),
+                int(values["segment_index"]),
+            )
+            found.setdefault(key, []).append(_finding_photo(values))
+        return {key: tuple(photos) for key, photos in found.items()}
+
+    async def finding_image(
+        self,
+        transaction: Transaction,
+        photo_id: uuid.UUID,
+        *,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        record_ids: tuple[uuid.UUID, ...],
+        now: datetime,
+    ) -> StoredImage | None:
+        """La foto ``productive`` viva de uno de los registros ``record_ids`` (sus
+        ``platform_record_id``) en la planta y la zona, con sus bytes; ``None`` si no lo es."""
+        row = (
+            await transaction.execute(
+                _FINDING_IMAGE,
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "plant_id": plant_id,
+                    "zone_id": zone_id,
+                    "photo_id": photo_id,
+                    "record_ids": list(record_ids),
                     "now": now,
                 },
             )

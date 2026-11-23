@@ -61,7 +61,8 @@ def test_pr_laz_34_no_u04_route_accepts_a_person_or_productivity_breakdown() -> 
         if _words(name) & ROUTE_FORBIDDEN
         and (method, route.path, place, name) not in ROUTE_EXCEPTIONS
     ]
-    # + responsables (TASK-583), ficha de vida (TASK-585) e histórico de lo cerrado (TASK-586).
-    assert len(routes) == len(dict(LAZ_CASES)) == 46
+    # + responsables (TASK-583), ficha de vida (TASK-585), histórico de lo cerrado (TASK-586)
+    # e imagen de la foto del hallazgo (TASK-589).
+    assert len(routes) == len(dict(LAZ_CASES)) == 47
     assert set(LAZ_OPERATION_CASES) == {f"SUP-U05-{number:02d}" for number in range(1, 42)}
     assert found == []

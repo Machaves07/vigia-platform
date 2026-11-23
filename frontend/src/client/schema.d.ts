@@ -2220,6 +2220,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/loop/findings/{finding_state_id}/photos/{photo_id}/image': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Imagen difuminada de una foto del hallazgo (auditada en cada petición) */
+    get: operations['finding_photo_image_loop_findings__finding_state_id__photos__photo_id__image_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/accreditation/exports': {
     parameters: {
       query?: never;
@@ -5434,6 +5451,61 @@ export interface components {
       /** Cause */
       cause: string | null;
     };
+    /**
+     * FindingPhotoOut
+     * @description Una foto del hallazgo (A-128): solo metadatos. **Sin** bytes, suma, tamaño ni URL: la
+     *     imagen se pide por ``GET …/photos/{photo_id}/image`` (``evidence.read``, auditada).
+     */
+    FindingPhotoOut: {
+      /**
+       * Photo Id
+       * Format: uuid
+       */
+      photo_id: string;
+      /** Photo Index */
+      photo_index: number;
+      /** Photo Role */
+      photo_role: string;
+      /** Classified As */
+      classified_as: string;
+      /** Camera Id */
+      camera_id: string | null;
+      /** Frame At */
+      frame_at: string | null;
+      /** Family */
+      family: string;
+      standard: components['schemas']['FindingPhotoStandardOut'];
+      /** Max Confidence */
+      max_confidence: number;
+      /** Started At */
+      started_at: string;
+      /** Ended At */
+      ended_at: string;
+      /** Episode Duration Ms */
+      episode_duration_ms: number;
+      /** Received At */
+      received_at: string;
+      /** Expires At */
+      expires_at: string | null;
+      /** Has Image */
+      has_image: boolean;
+      /** Image Absent Reason */
+      image_absent_reason: string | null;
+      /** Width */
+      width: number | null;
+      /** Height */
+      height: number | null;
+    };
+    /** FindingPhotoStandardOut */
+    FindingPhotoStandardOut: {
+      /**
+       * Standard Id
+       * Format: uuid
+       */
+      standard_id: string;
+      /** Version */
+      version: number;
+    };
     /** FindingTimelineOut */
     FindingTimelineOut: {
       /**
@@ -7408,6 +7480,8 @@ export interface components {
       signals: components['schemas']['vigia_platform__loop__adapters__http__findings_routes__SignalOut'][];
       /** Clips */
       clips: components['schemas']['ClipOut'][];
+      /** Photos */
+      photos: components['schemas']['FindingPhotoOut'][];
     };
     /** RecurrenceEntryOut */
     RecurrenceEntryOut: {
@@ -8529,6 +8603,8 @@ export interface components {
       actor: components['schemas']['TimelineActorOut'] | null;
       details: components['schemas']['TimelineDetailsOut'];
       deadline: components['schemas']['TimelineDeadlineOut'] | null;
+      /** Photos */
+      photos: components['schemas']['FindingPhotoOut'][];
     };
     /** TimelineSummaryOut */
     TimelineSummaryOut: {
@@ -14632,6 +14708,38 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ClosedFindingsPageOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  finding_photo_image_loop_findings__finding_state_id__photos__photo_id__image_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        finding_state_id: string;
+        photo_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description JPEG difuminado de la foto del hallazgo (mismo origen, private, no-store); la sha256 se verifica antes de servirlo */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'image/jpeg': string;
         };
       };
       /** @description Error genérico (ApiError) */

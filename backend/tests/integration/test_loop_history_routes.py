@@ -50,6 +50,7 @@ from tests.laz_support import IngestedSubject, LoopOrganization, RealPorts, loop
 from tests.loop_detail_support import DetailEvidenceStore
 from tests.loop_inbox_support import SAME_ORIGIN, InboxStack, Who
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.finding_photos import FindingPhotos
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
@@ -218,6 +219,7 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HistoryStack]:
             gates=ports.gates,
             fleet=ports.fleet,
             coverage=ports.coverage,
+            photos=FindingPhotos(database=database, clock=clock),
         )
         timeline = FindingTimelineService(
             subjects=detail,

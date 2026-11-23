@@ -47,6 +47,7 @@ from tests.loop_detail_support import DetailEvidenceStore, DetailPorts
 from vigia_platform.accreditation.metrics.compute import compute_metrics
 from vigia_platform.accreditation.metrics.model import MetricValue
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.finding_photos import FindingPhotos
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
@@ -160,6 +161,7 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[TimelineStack]:
             gates=ports,
             fleet=ports,
             coverage=ports,
+            photos=FindingPhotos(database=database, clock=clock),
         )
         timeline = FindingTimelineService(
             subjects=detail,

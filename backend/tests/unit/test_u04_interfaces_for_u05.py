@@ -446,6 +446,30 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             ),
         ),
     ),
+    ("GET", "/loop/findings/{finding_state_id}/photos/{photo_id}/image"): (
+        "SUP-U05-02",
+        Difference(
+            design="SUP-U05-02 solo con GET /loop/findings/{finding_state_id}",
+            code=(
+                "GET …/{finding_state_id} con las fotos de cada registro (metadatos) y GET "
+                "…/photos/{photo_id}/image, misma clave y alcance (zona del hallazgo) y además "
+                "evidence.read en esa zona"
+            ),
+            reason=(
+                "TASK-589 (A-128): la foto del episodio es la evidencia visible del hallazgo en la "
+                "fase 1; la imagen está en PostgreSQL y se sirve del mismo origen, auditada por "
+                "petición; PR-LAZ-62 la cuenta como otra lectura de SUP-U05-02 (41 operaciones, 47 "
+                "rutas)"
+            ),
+            note=(
+                "**Foto del hallazgo** (SCR-08 y SCR-09): el detalle y la ficha de vida traen las "
+                "fotos de cada registro sin bytes, suma ni URL; U-04 sirve además "
+                "`GET /loop/findings/{finding_state_id}/photos/{photo_id}/image` (`findings.read` "
+                "y `evidence.read` en la zona del hallazgo), `image/jpeg` con "
+                "`Cache-Control: private, no-store`, una entrada `finding_photo_read` por petición."
+            ),
+        ),
+    ),
 }
 
 SCOPES: Final = frozenset({"zona", "planta", "organización", "propias", "zona o planta"})
