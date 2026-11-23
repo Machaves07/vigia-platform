@@ -9,7 +9,8 @@
  * - Con cambios sin enviar (`dirty`), salir de la pantalla pide confirmación (`useLeaveGuard`);
  *   tras enviar, ya no. Exige el enrutador en modo de datos.
  * - Barra legible (TASK-581, O-5): cada paso en su `<li>`, un separador `aria-hidden` entre pasos
- *   y «Paso x de n» con sus números en `data-part="progress-current"` y `"progress-total"`.
+ *   y «Paso x de n» con sus números en `data-part="progress-current"` y `"progress-total"`. El
+ *   `<ol>` lleva `role="list"` porque `list-style: none` le quita la semántica en Safari.
  * - Pasos dinámicos (TASK-581): si la pantalla cambia la lista, el reductor la sigue por `id`
  *   (`reshape`). Un paso con `onNext` deja pulsar «Siguiente» sin estar completo: la pantalla lo
  *   guarda y el flujo avanza solo si, tras guardarlo, el paso queda completo.
@@ -230,7 +231,12 @@ export function StepWizard({
       <h2 id={headingId} className={styles.title}>
         {title}
       </h2>
-      <ol className={styles.steps} aria-label={text('components_structure.wizard.steps_label')}>
+      {/* eslint-disable-next-line jsx-a11y/no-redundant-roles -- con `list-style: none`, Safari y VoiceOver quitan la semántica de lista si no se declara. */}
+      <ol
+        className={styles.steps}
+        role="list"
+        aria-label={text('components_structure.wizard.steps_label')}
+      >
         {[...steps.map((step) => step.title), text('components_structure.wizard.summary')].map(
           (label, index) => {
             const isCurrent = index === position;
