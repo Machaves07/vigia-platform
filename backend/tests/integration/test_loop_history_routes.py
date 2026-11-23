@@ -432,6 +432,40 @@ def test_filters_are_zone_family_tier_state_and_period(stack: HistoryStack) -> N
     ) == {str(rows["late"])}
 
 
+def test_the_period_compares_the_mark_that_is_shown(stack: HistoryStack) -> None:
+    """BR-LAZ-06 (sonda de la revisión de #332): exacta a las 10:45, cubo de 10:00. En zona no
+    unipersonal se muestra la exacta y el periodo la compara a ella; en zona unipersonal, el cubo,
+    así que mover ``from`` o ``to`` dentro de la ventana nunca deja bisecar la hora exacta."""
+    organization = stack.inbox.world.organization()
+    who = stack.inbox.member(organization)
+    finding = stack.inbox.finding(organization)
+    exact = datetime(2026, 10, 6, 10, 45, tzinfo=UTC)
+    bucket = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
+    common: dict[str, Any] = {
+        "occurred_at_exact": exact,
+        "occurred_at_bucket": bucket,
+        "aggregation_window_minutes": 60,
+        **_columns("closed"),
+    }
+    plain = str(stack.inbox.row(finding, single_occupancy_zone=False, **common))
+    single = str(stack.inbox.row(finding, single_occupancy_zone=True, **common))
+
+    def ids(params: dict[str, Any]) -> set[str]:
+        return set(stack.ids(who, params)) & {plain, single}
+
+    half = datetime(2026, 10, 6, 10, 30, tzinfo=UTC)
+    eleven = datetime(2026, 10, 6, 11, 0, tzinfo=UTC)
+    # ``from`` entre el cubo y la exacta: la exacta entra; la unipersonal (su cubo) no.
+    assert ids({"from": format_timestamp(half)}) == {plain}
+    assert ids({"from": format_timestamp(half), "to": format_timestamp(eleven)}) == {plain}
+    # ``to`` entre el cubo y la exacta: la unipersonal (su cubo) entra; la exacta no.
+    assert ids({"to": format_timestamp(half)}) == {single}
+    assert ids({"from": format_timestamp(bucket), "to": format_timestamp(half)}) == {single}
+    # Bordes de la exacta: [10:45, …) la incluye; [… , 10:45) no.
+    assert ids({"from": format_timestamp(exact)}) == {plain}
+    assert ids({"to": format_timestamp(exact)}) == {single}
+
+
 @pytest.mark.parametrize(
     "params",
     [
@@ -581,6 +615,41 @@ def test_a_zone_scope_never_shows_the_sibling_zone_of_its_plant(stack: HistorySt
     assert str(sibling) in stack.ids(stack.inbox.member(organization))
 
 
+def test_the_scope_is_reduced_to_the_assignments_with_findings_read(
+    stack: HistoryStack,
+) -> None:
+    """Sonda de la revisión de #332: coordinador SST en una zona y COPASST (sin
+    ``findings.read``) en toda la organización. La asignación de COPASST no amplía lo que ve el
+    histórico: solo su zona, y la zona hermana pedida responde ``not_found``."""
+    organization = stack.inbox.world.organization()
+    site = organization.site
+    finding = stack.inbox.finding(organization)
+    own = stack.inbox.row(finding, **_columns("closed"))
+    sibling = stack.inbox.row(finding, zone_id=site.other_zone_id, **_columns("closed"))
+    authz = stack.inbox.world.stack.authz
+    user = authz.add_user(organization.organization_id)
+    authz.assign(
+        organization.organization_id, user, Role.COORDINATOR_SST, ScopeLevel.ZONE, site.zone_id
+    )
+    authz.assign(organization.organization_id, user, Role.COPASST, ScopeLevel.ORGANIZATION, None)
+    who = authz.open_session(organization.organization_id, user)
+    assert stack.ids(who) == [str(own)]
+    assert str(sibling) not in stack.ids(who)
+    sibling_response = stack.get(who, {"zone_id": str(site.other_zone_id)})
+    assert _error(sibling_response) == (404, "not_found")
+    assert _comparable(sibling_response) == _comparable(
+        stack.get(who, {"zone_id": str(uuid.uuid4())})
+    )
+
+
+def test_the_response_is_never_cached(stack: HistoryStack) -> None:
+    organization = stack.inbox.world.organization()
+    stack.inbox.row(stack.inbox.finding(organization), **_columns("closed"))
+    response = stack.get(stack.inbox.member(organization))
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_a_plant_scope_never_shows_another_plant_of_its_organization(stack: HistoryStack) -> None:
     organization = stack.inbox.world.organization()
     finding = stack.inbox.finding(organization)
@@ -675,13 +744,6 @@ def test_the_statement_uses_the_partial_closed_index(stack: HistoryStack) -> Non
     finding = stack.inbox.finding(organization)
     for index in range(20):
         stack.inbox.row(finding, **_columns(CLOSED[index % 2]))
-    indexes = {
-        row["relid"]
-        for row in stack.inbox.fetch(
-            "SELECT relid::regclass::text AS relid"
-            " FROM pg_partition_tree('loop.finding_state_closed')"
-        )
-    }
     context = stack.inbox.world.context(organization)
     site = organization.site
 
@@ -710,11 +772,52 @@ def test_the_statement_uses_the_partial_closed_index(stack: HistoryStack) -> Non
             )
             return result.scalar_one()
 
-    document = json.dumps(stack.inbox.run(explain()))
-    used = {name for name in indexes if f'"{name.split(".")[-1]}"' in document}
-    assert used - {"loop.finding_state_closed"}, document
-    # Y nunca el de la bandeja, que no cubre estos estados.
-    assert '"finding_state_inbox"' not in document
+    raw = stack.inbox.run(explain())
+    plan = (json.loads(raw) if isinstance(raw, str) else raw)[0]["Plan"]
+    closed = _partition_indexes(stack, "finding_state_closed")
+    inbox = _partition_indexes(stack, "finding_state_inbox")
+    assert closed and inbox
+    # Las particiones donde están las filas sembradas (como en ``test_laz_loop_schema``, el mes
+    # del hallazgo): ahí se mira el plan; las vacías no dicen nada del índice.
+    seeded = {
+        str(row["relname"])
+        for row in stack.inbox.fetch(
+            "SELECT DISTINCT c.relname FROM loop.finding_state f"
+            " JOIN pg_class c ON c.oid = f.tableoid WHERE f.organization_id = $1",
+            organization.organization_id,
+        )
+    }
+    scans = [
+        {str(child["Index Name"]) for child in _nodes(node) if "Index Name" in child}
+        for node in _nodes(plan)
+        if node.get("Relation Name") in seeded
+    ]
+    # Cada lectura de esas particiones va por la copia del índice del histórico (un recorrido
+    # secuencial daría un conjunto vacío) y nunca por la de la bandeja, que no cubre estos estados.
+    assert scans, json.dumps(plan)
+    assert all(used and used <= closed for used in scans), (scans, json.dumps(plan))
+    assert not any(used & inbox for used in scans), scans
+
+
+def _nodes(plan: Any) -> list[Any]:
+    """Todos los nodos del plan de ``EXPLAIN (FORMAT JSON)``."""
+    found = []
+    pending = [plan]
+    while pending:
+        node = pending.pop()
+        found.append(node)
+        pending.extend(node.get("Plans", []))
+    return found
+
+
+def _partition_indexes(stack: HistoryStack, parent_index: str) -> set[str]:
+    """Los índices de cada partición que cuelgan de ``parent_index`` de la tabla padre."""
+    rows = stack.inbox.fetch(
+        "SELECT child.relname FROM pg_inherits i JOIN pg_class child ON child.oid = i.inhrelid"
+        " WHERE i.inhparent = $1::regclass",
+        f"loop.{parent_index}",
+    )
+    return {str(row["relname"]) for row in rows}
 
 
 def test_the_migration_creates_the_index_on_every_partition_and_only_goes_forward(

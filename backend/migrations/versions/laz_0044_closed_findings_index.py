@@ -13,6 +13,14 @@ renumera a la siguiente libre, como prevé la tarea.
 - La sentencia de ``loop.adapters.postgres.history_query`` repite los dos estados como literal
   para que el planificador lo use también con un plan genérico.
 
+**Candado.** ``CREATE INDEX`` sin ``CONCURRENTLY`` toma ``SHARE`` sobre ``loop.finding_state``
+(y cada partición) y para la proyección (inserciones y actualizaciones del consumidor) mientras
+dura. Aquí se acepta: no hay base en producción (A-47 difiere el primer despliegue), así que el
+índice nace sobre una proyección vacía o pequeña, y es parcial (solo ``closed`` y ``discarded``);
+el consumidor reintenta lo que espere (reentrega del outbox). Sobre una proyección **con datos**:
+``CREATE INDEX … ON ONLY`` en la tabla padre, ``CREATE INDEX CONCURRENTLY`` en cada partición fuera
+de transacción y ``ALTER INDEX … ATTACH PARTITION``.
+
 La imagen anterior no lee ni escribe nada nuevo: arranca igual sobre este esquema (NFR-NUC-14).
 ``MINIMUM_SCHEMA_VERSION`` no sube: el histórico es correcto sin el índice (solo más lento).
 """
