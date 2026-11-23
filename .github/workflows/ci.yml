@@ -325,8 +325,9 @@ jobs:
   # Como «backend-pruebas»: pytest-split con backend/.test_durations_integracion, algoritmo least_duration,
   # sobre `-m integration` de toda la suite salvo tests/load (va en «backend (carga ci)»). Una prueba que no
   # está en el archivo cuenta con la media y cae en algún grupo igual; la unión la comprueban
-  # tools/check_test_split.py --collect y tests/unit/test_ci_split.py. Los tiempos se renuevan cuando falta
-  # una parte apreciable de la colección (el 2026-11-23 faltaban 1182 de 4707 pruebas).
+  # tools/check_test_split.py --collect y tests/unit/test_ci_split.py. Tiempos medidos en el CI del PR #337
+  # (2026-11-23, perfil pr, run 45273487275, ya con 8 grupos): 4707 pruebas, ~133 min de pruebas, ~16,6 por
+  # grupo. Se renuevan cuando falta una parte apreciable de la colección (aquel día faltaban 1182 de 4707).
   # Para renovar los tiempos (necesita Docker): o bien en local, desde backend/,
   #   uv run pytest -p no:cacheprovider --hypothesis-profile=pr -m integration --ignore=tests/load \
   #     --store-durations --clean-durations --durations-path=.test_durations_integracion

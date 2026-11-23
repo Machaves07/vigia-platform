@@ -70,7 +70,7 @@ REQUIRED_CHECKS = (
     "backend (lint y tipos)",
     "backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)",
     "backend (lint, tipos y pruebas sin integración)",
-    "backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)",
+    "backend (pruebas de integración, grupo ${{ matrix.grupo }} de 8)",
     "backend (pruebas de integración)",
     "backend (pruebas de integración, segunda mitad)",
     "backend (carga ci)",
