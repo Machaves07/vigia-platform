@@ -33,6 +33,8 @@ export const ATTACHMENT = '0190a1b2-8888-7000-8000-000000000001';
 export const DECLARATION = '0190a1b2-9999-7000-8000-000000000001';
 export const DESCRIPTION = 'Instalar un resguardo fijo sobre el acceso lateral de la prensa';
 export const LICENSE = 'LICENCIA-SINTETICA';
+/** Nombre visible sintético del responsable de la acción (O-16). */
+export const ASSIGNEE = 'Persona de prueba (line_manager)';
 export const PERMISSIONS = [
   'findings.read',
   'actions.manage',
@@ -54,6 +56,7 @@ export const detail: Detail = baseDetail({
       due_at: INSTANT,
       root_cause_analysis_id: null,
       counts_as_overdue: true,
+      assignee_display_name: ASSIGNEE,
     },
   ],
 });

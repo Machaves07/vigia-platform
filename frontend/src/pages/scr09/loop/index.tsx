@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import { StatusChip } from '@/components/StatusChip/StatusChip';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { currentAssignee } from '@/pages/shared/actionState';
 import { findingTitle } from '@/pages/shared/findingTitle';
 import layout from '@/pages/shared/findingLayout.module.css';
 import { LifecycleSteps } from '@/pages/shared/LifecycleSteps';
@@ -207,6 +208,7 @@ export default function Page() {
                 state={data.lifecycle_state}
                 permissions={granted}
                 dueAt={data.due_at}
+                assignee={currentAssignee(data.actions)}
                 detectionId={data.subject_kind === 'detection' ? data.subject_id : null}
                 commitment={unclosable ? unclosableCommitment(records.data ?? []) : null}
                 timeZone={timeZone}

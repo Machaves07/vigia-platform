@@ -78,6 +78,8 @@ export default {
       'assigned_at',
       'due_at',
       'counts_as_overdue',
+      // O-16: el nombre visible del responsable de cada acción.
+      'assignee_display_name',
       'analyses',
       'root_cause_category',
       'root_cause_statement',
