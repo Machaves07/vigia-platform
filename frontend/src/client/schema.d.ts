@@ -8360,18 +8360,12 @@ export interface components {
      * @description Los campos elegidos del registro por tipo; los que no son de su tipo van en ``null``.
      */
     TimelineDetailsOut: {
-      /** Segment Index */
-      segment_index: number | null;
-      /** Delay Ms */
-      delay_ms: number | null;
       /** Outcome */
       outcome: string | null;
       /** Reason Category */
       reason_category: string | null;
       /** Reason Text */
       reason_text: string | null;
-      /** Is Reclassification */
-      is_reclassification: boolean | null;
       /** Action Type */
       action_type: string | null;
       /** Description */
@@ -8382,8 +8376,6 @@ export interface components {
       assignee_display_name: string | null;
       /** Due At */
       due_at: string | null;
-      /** Deadline Days */
-      deadline_days: number | null;
       /** Performed At */
       performed_at: string | null;
       /** Performed By Role */
@@ -8396,8 +8388,6 @@ export interface components {
       escalation_level: string | null;
       /** Professional License */
       professional_license: string | null;
-      /** Analysis State */
-      analysis_state: string | null;
       /** Root Cause Category */
       root_cause_category: string | null;
       /** Root Cause Statement */
@@ -8412,8 +8402,6 @@ export interface components {
       review_due_at: string | null;
       /** Review Note */
       review_note: string | null;
-      /** Detected At */
-      detected_at: string | null;
     };
     /** TimelineMilestoneOut */
     TimelineMilestoneOut: {

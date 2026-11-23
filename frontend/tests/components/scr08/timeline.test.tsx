@@ -35,25 +35,20 @@ const MINUTE = 60_000;
 type Details = TimelineMilestone['details'];
 
 const NO_DETAILS: Details = {
-  segment_index: null,
-  delay_ms: null,
   outcome: null,
   reason_category: null,
   reason_text: null,
-  is_reclassification: null,
   action_type: null,
   description: null,
   expected_outcome: null,
   assignee_display_name: null,
   due_at: null,
-  deadline_days: null,
   performed_at: null,
   performed_by_role: null,
   verification_note: null,
   days_overdue: null,
   escalation_level: null,
   professional_license: null,
-  analysis_state: null,
   root_cause_category: null,
   root_cause_statement: null,
   conclusion: null,
@@ -61,7 +56,6 @@ const NO_DETAILS: Details = {
   compensatory_measure: null,
   review_due_at: null,
   review_note: null,
-  detected_at: null,
 };
 
 const ACTOR = { role_in_use: 'coordinator_sst', display_name: 'Coordinación SST sintética' };
@@ -97,7 +91,7 @@ function milestone(
 function cycle(): TimelineMilestone[] {
   const at = [0, 37, 71, 1500, 1650, 3200, 4400, 4520, 5900, 5901];
   return [
-    milestone(1, 'finding_received', at[0] ?? 0, null, {}, { segment_index: 0 }),
+    milestone(1, 'finding_received', at[0] ?? 0, null, {}, {}),
     milestone(
       2,
       'classification',
@@ -108,7 +102,6 @@ function cycle(): TimelineMilestone[] {
         outcome: 'confirmed',
         reason_category: 'guard_bypassed',
         reason_text: 'Motivo sintético de la clasificación de la zona.',
-        is_reclassification: false,
       },
     ),
     milestone(
@@ -122,7 +115,6 @@ function cycle(): TimelineMilestone[] {
         description: 'Descripción sintética de la acción sobre la guarda.',
         assignee_display_name: 'Mantenimiento sintético',
         due_at: iso(3000),
-        deadline_days: 2,
       },
     ),
     milestone(
@@ -172,7 +164,6 @@ function cycle(): TimelineMilestone[] {
       at[6] ?? 0,
       { actor: ACTOR },
       {
-        analysis_state: 'signed',
         root_cause_category: 'engineering',
         root_cause_statement: 'Enunciado sintético de la causa raíz.',
         conclusion: 'Conclusión sintética del análisis.',

@@ -16132,16 +16132,6 @@
       "title": "TimelineDeadlineOut"
     "TimelineDetailsOut":
       "properties":
-        "segment_index":
-          "anyOf":
-            - "type": "integer"
-            - "type": "null"
-          "title": "Segment Index"
-        "delay_ms":
-          "anyOf":
-            - "type": "integer"
-            - "type": "null"
-          "title": "Delay Ms"
         "outcome":
           "anyOf":
             - "type": "string"
@@ -16157,11 +16147,6 @@
             - "type": "string"
             - "type": "null"
           "title": "Reason Text"
-        "is_reclassification":
-          "anyOf":
-            - "type": "boolean"
-            - "type": "null"
-          "title": "Is Reclassification"
         "action_type":
           "anyOf":
             - "type": "string"
@@ -16187,11 +16172,6 @@
             - "type": "string"
             - "type": "null"
           "title": "Due At"
-        "deadline_days":
-          "anyOf":
-            - "type": "integer"
-            - "type": "null"
-          "title": "Deadline Days"
         "performed_at":
           "anyOf":
             - "type": "string"
@@ -16222,11 +16202,6 @@
             - "type": "string"
             - "type": "null"
           "title": "Professional License"
-        "analysis_state":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Analysis State"
         "root_cause_category":
           "anyOf":
             - "type": "string"
@@ -16262,33 +16237,23 @@
             - "type": "string"
             - "type": "null"
           "title": "Review Note"
-        "detected_at":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Detected At"
       "additionalProperties": false
       "type": "object"
       "required":
-        - "segment_index"
-        - "delay_ms"
         - "outcome"
         - "reason_category"
         - "reason_text"
-        - "is_reclassification"
         - "action_type"
         - "description"
         - "expected_outcome"
         - "assignee_display_name"
         - "due_at"
-        - "deadline_days"
         - "performed_at"
         - "performed_by_role"
         - "verification_note"
         - "days_overdue"
         - "escalation_level"
         - "professional_license"
-        - "analysis_state"
         - "root_cause_category"
         - "root_cause_statement"
         - "conclusion"
@@ -16296,7 +16261,6 @@
         - "compensatory_measure"
         - "review_due_at"
         - "review_note"
-        - "detected_at"
       "title": "TimelineDetailsOut"
       "description": "Los campos elegidos del registro por tipo; los que no son de su tipo van en ``null``."
     "TimelineMilestoneOut":

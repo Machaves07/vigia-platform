@@ -69,26 +69,21 @@ class TimelineDeadlineOut(_Strict):
 class TimelineDetailsOut(_Strict):
     """Los campos elegidos del registro por tipo; los que no son de su tipo van en ``null``."""
 
-    segment_index: int | None
-    delay_ms: int | None
     outcome: str | None
     reason_category: str | None
     reason_text: str | None
-    is_reclassification: bool | None
     action_type: str | None
     description: str | None
     expected_outcome: str | None
     assignee_display_name: str | None
     """La instantánea del responsable de la acción al asignarla (usuario de la plataforma)."""
     due_at: str | None
-    deadline_days: int | None
     performed_at: str | None
     performed_by_role: str | None
     verification_note: str | None
     days_overdue: int | None
     escalation_level: str | None
     professional_license: str | None
-    analysis_state: str | None
     root_cause_category: str | None
     root_cause_statement: str | None
     conclusion: str | None
@@ -96,7 +91,6 @@ class TimelineDetailsOut(_Strict):
     compensatory_measure: str | None
     review_due_at: str | None
     review_note: str | None
-    detected_at: str | None
 
 
 class TimelineMilestoneOut(_Strict):
@@ -147,25 +141,20 @@ def _optional(moment: datetime | None) -> str | None:
 
 def _details(details: MilestoneDetails) -> TimelineDetailsOut:
     return TimelineDetailsOut(
-        segment_index=details.segment_index,
-        delay_ms=details.delay_ms,
         outcome=details.outcome,
         reason_category=details.reason_category,
         reason_text=details.reason_text,
-        is_reclassification=details.is_reclassification,
         action_type=details.action_type,
         description=details.description,
         expected_outcome=details.expected_outcome,
         assignee_display_name=details.assignee_display_name,
         due_at=_optional(details.due_at),
-        deadline_days=details.deadline_days,
         performed_at=_optional(details.performed_at),
         performed_by_role=details.performed_by_role,
         verification_note=details.verification_note,
         days_overdue=details.days_overdue,
         escalation_level=details.escalation_level,
         professional_license=details.professional_license,
-        analysis_state=details.analysis_state,
         root_cause_category=details.root_cause_category,
         root_cause_statement=details.root_cause_statement,
         conclusion=details.conclusion,
@@ -173,7 +162,6 @@ def _details(details: MilestoneDetails) -> TimelineDetailsOut:
         compensatory_measure=details.compensatory_measure,
         review_due_at=_optional(details.review_due_at),
         review_note=details.review_note,
-        detected_at=_optional(details.detected_at),
     )
 
 
