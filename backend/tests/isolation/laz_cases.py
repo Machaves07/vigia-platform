@@ -74,6 +74,7 @@ from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.application.timeline import FindingTimelineService
 from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -231,6 +232,7 @@ def _loop(services: LazServices) -> Mapping[str, object]:
             ),
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
             detail=_detail(services),  # TASK-342
+            timeline=_timeline(services),  # TASK-585
             review_queue=ReviewQueueService(  # TASK-309
                 database=database,
                 writer=services.writer,
@@ -283,6 +285,16 @@ def _detail(services: LazServices) -> FindingDetailService:
             provider_organization_id=_NO_PROVIDER,
         ),
         coverage=CoverageService(database=database, audit=services.audit, clock=services.clock),
+    )
+
+
+def _timeline(services: LazServices) -> FindingTimelineService:
+    """La ficha de vida (TASK-585): los pasos de alcance del detalle y una lectura auditada."""
+    database: Any = services.database
+    return FindingTimelineService(
+        subjects=_detail(services),
+        reader=LectorExpediente(database=database, audit=services.audit, clock=services.clock),
+        timezones=PostgresLoopConfigurationRepository(database),
     )
 
 
@@ -619,6 +631,13 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/findings/{finding_state_id}/classifications"),
         Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.finding}/classifications")),
     ),
+    # TASK-585: la ficha de vida de un hallazgo de B responde igual que la de uno inexistente
+    # (not_found, nunca gate_state_unavailable ni una línea de tiempo vacía); no se lee el
+    # expediente de B ni se escribe ninguna entrada de auditoría en B.
+    (
+        ("GET", "/loop/findings/{finding_state_id}/timeline"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.finding}/timeline")),
+    ),
     # VIG-229 (TASK-313): el panel de vencidos de una planta de B responde igual que el de una
     # inexistente (not_found, nunca forbidden ni una página vacía con el umbral de B).
     (
@@ -915,7 +934,13 @@ Los demás RESOURCE deben alcanzar 2xx; ningún 404 ni 400 genérico satisface l
 
 LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
     "SUP-U05-01": frozenset({("GET", "/loop/findings")}),
-    "SUP-U05-02": frozenset({("GET", "/loop/findings/{finding_state_id}")}),
+    # TASK-585: la ficha de vida es otra lectura del mismo detalle (ver_detalle_hallazgo).
+    "SUP-U05-02": frozenset(
+        {
+            ("GET", "/loop/findings/{finding_state_id}"),
+            ("GET", "/loop/findings/{finding_state_id}/timeline"),
+        }
+    ),
     "SUP-U05-03": frozenset({("POST", "/loop/findings/{finding_state_id}/classifications")}),
     "SUP-U05-04": frozenset({("GET", "/loop/findings/{finding_state_id}/classifications")}),
     "SUP-U05-05": frozenset({("GET", "/loop/review-queue")}),
@@ -979,9 +1004,10 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
 }
 """Las 41 operaciones de LC-LAZ §6 y sus rutas.
 
-``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias y ``SUP-U05-16`` lee además
-el análisis en curso para retomarlo (VIG-363), y ``SUP-U05-07`` lista además los responsables
-posibles de la acción (TASK-583); por eso las 41 operaciones ocupan 44 rutas declaradas y 44 casos
+``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias, ``SUP-U05-16`` lee
+además el análisis en curso para retomarlo (VIG-363), ``SUP-U05-07`` lista además los
+responsables posibles de la acción (TASK-583) y ``SUP-U05-02`` también la ficha de vida del
+mismo hallazgo (TASK-585); por eso las 41 operaciones ocupan 45 rutas declaradas y 45 casos
 de aislamiento.
 """
 

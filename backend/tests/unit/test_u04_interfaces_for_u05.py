@@ -392,7 +392,7 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             reason=(
                 "TASK-583 (O-3 del recorrido SST, A-126): la consola solo podía ofrecer como "
                 "responsable a quien estaba en sesión porque `GET /users` exige `users.manage`; "
-                "PR-LAZ-62 la cuenta como segundo verbo de SUP-U05-07 (41 operaciones, 44 rutas)"
+                "PR-LAZ-62 la cuenta como segundo verbo de SUP-U05-07 (41 operaciones, 45 rutas)"
             ),
             note=(
                 "**Responsable de la acción** (SCR-09): además de `SUP-U05-07` (`POST`), U-04 "
@@ -400,6 +400,28 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
                 "zona), que lista por clave las personas que `assign` acepta (usuario activo con "
                 "`coordinator_sst`, `line_manager` o `plant_manager` sobre la zona, A-126) con "
                 "solo `user_id`, `display_name` y `roles`, sin búsqueda por persona."
+            ),
+        ),
+    ),
+    ("GET", "/loop/findings/{finding_state_id}/timeline"): (
+        "SUP-U05-02",
+        Difference(
+            design="SUP-U05-02 solo con GET /loop/findings/{finding_state_id}",
+            code=(
+                "GET …/{finding_state_id} y GET …/timeline, misma clave y alcance (zona del "
+                "hallazgo)"
+            ),
+            reason=(
+                "TASK-585 (O-11 y O-12 del recorrido SST, A-126): el detalle no reunía el ciclo de "
+                "vida completo del hallazgo; PR-LAZ-62 la cuenta como segundo verbo de SUP-U05-02 "
+                "(41 operaciones, 45 rutas)"
+            ),
+            note=(
+                "**Ficha de vida** (SCR-08): además de `SUP-U05-02`, U-04 sirve "
+                "`GET /loop/findings/{finding_state_id}/timeline` (`findings.read`, zona), que "
+                "devuelve los hitos del hallazgo en orden (recepción, clasificaciones, acciones, "
+                "evidencias, cierre, causa raíz y reaperturas) con rol y nombre visible de quien "
+                "actuó, nunca su `user_id`, y una sola entrada de auditoría por consulta."
             ),
         ),
     ),

@@ -100,9 +100,9 @@ avisos de la bandeja (TASK-307) y del detalle (TASK-342)."""
 DETAIL_CODE_ENUMERATIONS: Final = frozenset(
     {"loop_detail_code", "accreditation_detail_code", "notifications_detail_code"}
 )
-RESPONSE_ENUMERATIONS: Final = frozenset({"analysis_missing_item"})
+RESPONSE_ENUMERATIONS: Final = frozenset({"analysis_missing_item", "milestone_kind"})
 """Listas cerradas que una respuesta muestra a una persona: ``pending_information`` del análisis
-de causa raíz (TASK-315, BR-LAZ-64)."""
+de causa raíz (TASK-315, BR-LAZ-64) y los hitos de la ficha de vida (TASK-585)."""
 
 
 def test_the_loop_file_has_exactly_the_u04_enumerations() -> None:

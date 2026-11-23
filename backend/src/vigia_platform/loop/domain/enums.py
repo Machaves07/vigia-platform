@@ -57,6 +57,7 @@ __all__ = [
     "MetricKey",
     "MetricStatus",
     "MetricUnit",
+    "MilestoneKind",
     "MonthlyPackageState",
     "NotificationAudience",
     "NotificationChannel",
@@ -501,6 +502,28 @@ class NotificationAudience(enum.StrEnum):
 # --- etiquetas ------------------------------------------------------------------------------
 
 
+class MilestoneKind(enum.StrEnum):
+    """``milestone_kind``: los hitos de la ficha de vida del hallazgo (TASK-585), un tipo de
+    registro del sujeto cada uno, y ``other`` para un tipo que no está en la lista (nunca se
+    oculta).
+    """
+
+    FINDING_RECEIVED = "finding_received"
+    LATE_SEGMENT_ATTACHED = "late_segment_attached"
+    CLASSIFICATION = "classification"
+    REVIEW_RESOLUTION = "review_resolution"
+    ACTION_ASSIGNED = "action_assigned"
+    ACTION_EVIDENCE_ADDED = "action_evidence_added"
+    ACTION_OVERDUE = "action_overdue"
+    CLOSURE = "closure"
+    CLOSURE_ATTACHMENT_UNRECOVERABLE = "closure_attachment_unrecoverable"
+    ROOT_CAUSE_ANALYSIS = "root_cause_analysis"
+    REOPENING = "reopening"
+    UNCLOSABLE_STATE_DECLARED = "unclosable_state_declared"
+    UNCLOSABLE_REVIEW = "unclosable_review"
+    OTHER = "other"
+
+
 LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "finding_lifecycle_state": FindingLifecycleState,
     "classification_outcome": ClassificationOutcome,
@@ -530,6 +553,7 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "inbox_partition_notice": InboxPartitionNotice,
     "inbox_finding_notice": InboxFindingNotice,
     "finding_detail_notice": FindingDetailNotice,
+    "milestone_kind": MilestoneKind,
 }
 """Enumeraciones del lazo con etiqueta en ``labels.loop.es.json`` (NFR-LAZ-52)."""
 

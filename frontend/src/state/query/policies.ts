@@ -86,6 +86,8 @@ const POLICY_KINDS = {
   // Lecturas auditadas: frescura 0 y solo a demanda (BR-APP-54, A-6).
   'GET /loop/findings/{finding_state_id}': 'audited',
   'GET /loop/findings/{finding_state_id}/classifications': 'audited',
+  // La ficha de vida (TASK-585): una lectura auditada por apertura.
+  'GET /loop/findings/{finding_state_id}/timeline': 'audited',
   'GET /zones/{zone_id}/coverage': 'audited',
   'GET /zones/{zone_id}/coverage/at': 'audited',
   'GET /integrity/results': 'audited',

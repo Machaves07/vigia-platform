@@ -15,8 +15,11 @@ from datetime import datetime, timedelta
 
 from vigia_platform.accreditation.detail_codes import AccreditationDetailCode
 from vigia_platform.accreditation.metrics.model import MetricValue
-from vigia_platform.loop.calendar import BusinessCalendar, business_deadline, local_date
-from vigia_platform.loop.config.parameters import LoopSettings
+from vigia_platform.loop.calendar import local_date
+from vigia_platform.loop.config.classification_deadline import (
+    ClassificationDeadlineRule,
+    classified_in_time,
+)
 from vigia_platform.loop.domain.enums import (
     FindingLifecycleState,
     MetricKey,
@@ -93,32 +96,27 @@ def compute_metrics(
     receipts: dict[uuid.UUID, datetime] = {}
     deadlines: dict[uuid.UUID, datetime] = {}
     first_flags: dict[uuid.UUID, bool] = {}
-    defaults = LoopSettings.defaults()
-    deadline_days = defaults["classification_deadline_business_days"]
-    calendar = defaults.business_calendar
+    # La regla del plazo es la de la ficha de vida (TASK-585): vigente en la recepción.
+    rule = ClassificationDeadlineRule.defaults()
     engineering = 0
     closed_families: list[tuple[str, datetime]] = []
     evidence: set[str] = set()
     for item in history:
         doc = item.document
         if item.record_type == "loop_configuration_changed":
-            for setting in doc["new_values"]:
-                if setting["parameter"] == "classification_deadline_business_days":
-                    deadline_days = int(setting["integer_value"])
-                elif setting["parameter"] == "business_calendar":
-                    calendar = BusinessCalendar.from_document(setting["business_calendar"])
+            rule = rule.after_change(doc["new_values"])
             continue
         if item.record_type == "finding_received":
             subject = uuid.UUID(str(doc["episode"]["episode_id"]))
             if subject not in receipts:
                 receipts[subject] = item.received_at
-                deadlines[subject] = business_deadline(
-                    item.received_at, deadline_days, calendar, timezone
-                )
+                deadlines[subject] = rule.deadline(item.received_at, timezone)
         if item.record_type == "classification":
             subject = uuid.UUID(str(doc["subject_id"]))
             if subject in deadlines:
-                first_flags.setdefault(subject, instant(doc["classified_at"]) < deadlines[subject])
+                first_flags.setdefault(
+                    subject, classified_in_time(instant(doc["classified_at"]), deadlines[subject])
+                )
         if item.record_type == "action_evidence_added":
             evidence.add(str(doc["evidence_entry_id"]))
         if item.record_type == "closure":

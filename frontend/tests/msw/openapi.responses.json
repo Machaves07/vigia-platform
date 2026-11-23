@@ -2711,6 +2711,23 @@
       }
     },
     {
+      "operationId": "get_timeline_loop_findings__finding_state_id__timeline_get",
+      "method": "get",
+      "path": "/loop/findings/{finding_state_id}/timeline",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/FindingTimelineOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "request_export_accreditation_exports_post",
       "method": "post",
       "path": "/accreditation/exports",
@@ -9218,6 +9235,71 @@
         "cause"
       ]
     },
+    "FindingTimelineOut": {
+      "properties": {
+        "finding_state_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "subject_kind": {
+          "type": "string"
+        },
+        "plant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "zone_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "family": {
+          "type": "string"
+        },
+        "lifecycle_state": {
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        },
+        "time_aggregated": {
+          "type": "boolean"
+        },
+        "aggregation_window_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "summary": {
+          "$ref": "#/components/schemas/TimelineSummaryOut"
+        },
+        "milestones": {
+          "items": {
+            "$ref": "#/components/schemas/TimelineMilestoneOut"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "finding_state_id",
+        "subject_kind",
+        "plant_id",
+        "zone_id",
+        "family",
+        "lifecycle_state",
+        "time_aggregated",
+        "aggregation_window_minutes",
+        "truncated",
+        "summary",
+        "milestones"
+      ]
+    },
     "FindingsSummaryOut": {
       "properties": {
         "received": {
@@ -11182,6 +11264,25 @@
         "plant_id",
         "period",
         "zones"
+      ]
+    },
+    "MilestoneKind": {
+      "type": "string",
+      "enum": [
+        "finding_received",
+        "late_segment_attached",
+        "classification",
+        "review_resolution",
+        "action_assigned",
+        "action_evidence_added",
+        "action_overdue",
+        "closure",
+        "closure_attachment_unrecoverable",
+        "root_cause_analysis",
+        "reopening",
+        "unclosable_state_declared",
+        "unclosable_review",
+        "other"
       ]
     },
     "MinimumCoverage": {
@@ -16010,6 +16111,420 @@
       "maxLength": 128,
       "minLength": 1,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "TimelineActorOut": {
+      "properties": {
+        "role_in_use": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "role_in_use",
+        "display_name"
+      ]
+    },
+    "TimelineDeadlineOut": {
+      "properties": {
+        "due_at": {
+          "type": "string"
+        },
+        "met": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "due_at",
+        "met"
+      ]
+    },
+    "TimelineDetailsOut": {
+      "properties": {
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignee_display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "performed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "performed_by_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "days_overdue": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "escalation_level": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professional_license": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_cause_category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_cause_statement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conclusion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compensatory_measure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_due_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "outcome",
+        "reason_category",
+        "reason_text",
+        "action_type",
+        "description",
+        "expected_outcome",
+        "assignee_display_name",
+        "due_at",
+        "performed_at",
+        "performed_by_role",
+        "verification_note",
+        "days_overdue",
+        "escalation_level",
+        "professional_license",
+        "root_cause_category",
+        "root_cause_statement",
+        "conclusion",
+        "from_state",
+        "compensatory_measure",
+        "review_due_at",
+        "review_note"
+      ]
+    },
+    "TimelineMilestoneOut": {
+      "properties": {
+        "kind": {
+          "$ref": "#/components/schemas/MilestoneKind"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "record_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "chain_sequence": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string"
+        },
+        "elapsed_ms_since_previous": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/TimelineActorOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "details": {
+          "$ref": "#/components/schemas/TimelineDetailsOut"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/TimelineDeadlineOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "record_type",
+        "record_id",
+        "chain_sequence",
+        "at",
+        "elapsed_ms_since_previous",
+        "actor",
+        "details",
+        "deadline"
+      ]
+    },
+    "TimelineSummaryOut": {
+      "properties": {
+        "received_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "business_days_to_close": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "classification_met": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_met": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "received_at",
+        "closed_at",
+        "business_days_to_close",
+        "classification_met",
+        "action_met"
+      ]
     },
     "Timestamp": {
       "type": "string",

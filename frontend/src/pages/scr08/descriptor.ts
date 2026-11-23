@@ -5,7 +5,8 @@
  * secciones cuyo permiso tiene; la cola es visible con `findings.read` (diferencia 1 del PR #197).
  * Solo como inicio (VIG-363): `/home` lleva a cualquier otro rol a su propio inicio; en el menú,
  * «Inicio del coordinador» (solo el suyo) y «Bandeja de hallazgos», cada una con el nombre de su
- * página.
+ * página. `timeline` (TASK-585) es la ficha de vida de un hallazgo: va por `finding_state_id`, así
+ * que no tiene entrada de menú (el menú solo elige zona o planta); se llega desde el detalle.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -55,6 +56,13 @@ export const descriptor: ScreenDescriptor = {
       required_permissions: ['findings.read', 'evidence.read'],
       load: () => import('./detail'),
     },
+    {
+      id: 'timeline',
+      paths: ['/findings/:finding_state_id/timeline'],
+      access: 'permission',
+      required_permissions: ['findings.read'],
+      load: () => import('./timeline'),
+    },
   ],
   sections: [
     { id: 'observability', group: 'home', required_permissions: ['coverage.read'] },
@@ -66,6 +74,7 @@ export const descriptor: ScreenDescriptor = {
     { id: 'clips', group: 'detail', required_permissions: ['evidence.read'] },
     { id: 'coverage_at', group: 'detail', required_permissions: ['coverage.read'] },
     { id: 'labels', group: 'labels', required_permissions: ['labels.read'] },
+    { id: 'timeline', group: 'timeline', required_permissions: ['findings.read'] },
   ],
   expected_roles: ['coordinator_sst'],
   backend_unit: 'U-04',

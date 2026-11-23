@@ -160,6 +160,12 @@ SIGNER_FIELDS: Final = frozenset(
         # plataforma que se compromete a ejecutarla (BR-APP-33, DE §2.2 ``assignee_user_id``), con
         # lo mínimo para elegirlo; nunca una persona observada. Sin parámetro de persona.
         ("GET", "/loop/findings/{finding_state_id}/assignees", "response", "display_name"),
+        # La ficha de vida (TASK-585): quien hizo cada paso (``TimelineActorOut``, el usuario de la
+        # plataforma que clasificó, asignó, firmó o reabrió, P8) y la instantánea del responsable
+        # de la acción al asignarla (``assignee_display_name``, un usuario activo de la planta,
+        # A-126); ninguno es una persona observada.
+        ("GET", "/loop/findings/{finding_state_id}/timeline", "response", "display_name"),
+        ("GET", "/loop/findings/{finding_state_id}/timeline", "response", "assignee_display_name"),
         # La declaración de privacidad de un adjunto de evidencia (VIG-223, TASK-310): afirma que
         # **ninguna** persona identificable aparece; es la guarda de P3, no un dato de persona.
         ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),
@@ -231,9 +237,9 @@ REGISTERED_U04: Final = tuple(
     if isinstance(declared.route, APIRoute)
     and declared.path.startswith(("/loop", "/accreditation", "/notifications"))
 )
-"""Las 44 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
+"""Las 45 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
 causa raíz, POST y la lectura del análisis en curso, VIG-363; asignar la acción, POST y la lista de
-responsables posibles, TASK-583)."""
+responsables posibles, TASK-583; el detalle, también la ficha de vida, TASK-585)."""
 
 
 def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field() -> None:
@@ -255,7 +261,7 @@ def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field(
 
 def test_pr_laz_01_no_u04_operation_has_a_person_parameter_or_field() -> None:
     """La misma ausencia estructural se mantiene en la acreditación y las notificaciones."""
-    assert len(REGISTERED_U04) == 44
+    assert len(REGISTERED_U04) == 45
     assert violations(REGISTERED_U04, ("/loop", "/accreditation", "/notifications")) == []
 
 
