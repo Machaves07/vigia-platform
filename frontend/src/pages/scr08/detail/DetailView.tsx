@@ -714,6 +714,7 @@ export function DetailView({
   clock,
   canViewClips,
   rootCauseHref,
+  timelineHref = null,
 }: {
   readonly detail: FindingDetail;
   readonly zone: string | null;
@@ -724,15 +725,19 @@ export function DetailView({
   readonly canViewClips: boolean;
   /** La ruta de SCR-11 del hallazgo si la sesión puede abrirla; `null` si no. */
   readonly rootCauseHref: string | null;
+  /** La ficha de vida del hallazgo (TASK-585); sin ella (la vista RV-12), ningún enlace. */
+  readonly timelineHref?: string | null;
 }) {
   return (
     <>
       {/* La ficha de vida (TASK-585): el ciclo completo con sus tiempos y plazos, en una página. */}
-      <p data-part="timeline_link_paragraph">
-        <Link to={`/findings/${detail.finding_state_id}/timeline`} data-part="timeline_link">
-          {text('scr08.timeline.link')}
-        </Link>
-      </p>
+      {timelineHref !== null && (
+        <p>
+          <Link to={timelineHref} data-part="timeline_link">
+            {text('scr08.timeline.link')}
+          </Link>
+        </p>
+      )}
       <Notices detail={detail} timeZone={timeZone} />
       <Summary detail={detail} timeZone={timeZone} zone={zone} />
       <Observability

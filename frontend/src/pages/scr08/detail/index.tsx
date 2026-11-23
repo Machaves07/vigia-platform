@@ -195,6 +195,8 @@ function Finding({
           ? `/findings/${context.findingId}/root-cause`
           : null
       }
+      // La ficha de vida pide solo `findings.read`, que el detalle ya exige (TASK-585).
+      timelineHref={`/findings/${context.findingId}/timeline`}
     />
   );
 }
