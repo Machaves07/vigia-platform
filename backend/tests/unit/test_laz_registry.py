@@ -213,7 +213,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 # TASK-312: SUP-U05-12 y 13 (el estado incerrable y su revisión).
                 ("POST", "/loop/findings/{finding_state_id}/unclosable"),
                 ("POST", "/loop/unclosable/{declaration_id}/reviews"),
+                # TASK-583: los responsables posibles (segundo verbo de SUP-U05-07, A-126).
+                ("GET", "/loop/findings/{finding_state_id}/assignees"),
             ]
+            assert state[LOOP_STATE_KEY].assignees is not None
             assert state[LOOP_STATE_KEY].overdue is not None
             assert state[LOOP_STATE_KEY].vocabulary is not None
             assert state[LOOP_STATE_KEY].classification is not None
