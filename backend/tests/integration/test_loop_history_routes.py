@@ -53,6 +53,7 @@ from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_p
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
+from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.reader import LectorExpediente
@@ -64,6 +65,7 @@ from vigia_platform.loop.adapters.postgres.history_query import (
     closed_findings_statement,
 )
 from vigia_platform.loop.adapters.postgres.inbox_query import InboxCursor, InboxFilters
+from vigia_platform.loop.application import history as history_module
 from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.history import (
     MAX_HISTORY_PAGE,
@@ -773,3 +775,17 @@ def test_the_service_rejects_impossible_filters(
     context = stack.inbox.world.context(stack.inbox.world.a)
     with pytest.raises(HistoryRequestInvalid):
         stack.inbox.run(stack.history.page(context, filters=filters, limit=limit))
+
+
+def test_the_service_denies_a_context_without_findings_read(
+    stack: HistoryStack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defensa en profundidad bajo la guarda de la ruta: si el contexto no conserva ninguna
+    asignación con ``findings.read`` (``narrowed`` da ``None``), el servicio deniega (auditado)
+    con ``ResourceNotFound`` sin abrir transacción, nunca con una lista."""
+    organization = stack.inbox.world.organization()
+    stack.inbox.row(stack.inbox.finding(organization), **_columns("closed"))
+    monkeypatch.setattr(history_module, "narrowed", lambda *args, **kwargs: None)
+    context = stack.inbox.world.context(organization)
+    with pytest.raises(ResourceNotFound):
+        stack.inbox.run(stack.history.page(context))
