@@ -50,6 +50,8 @@ from vigia_platform.loop.application.timeline import (
     MAX_TIMELINE_MILESTONES,
     FindingTimeline,
     FindingTimelineService,
+    MilestoneActor,
+    MilestoneDetails,
     MilestoneKind,
     TimelineInputs,
     TimelineSource,
@@ -637,7 +639,7 @@ def _instants(timeline: FindingTimeline) -> Iterator[datetime]:
 def test_in_a_single_occupancy_zone_every_time_and_every_gap_comes_from_the_aggregated_times() -> (
     None
 ):
-    records = cycle()
+    records = [*cycle(), *extras()]
     timeline = compose(records, single=True, state="closed")
     assert timeline.time_aggregated is True
     assert timeline.aggregation_window_minutes == WINDOW
@@ -779,30 +781,287 @@ def test_a_licensed_signer_takes_its_role_only_from_its_own_record_envelope() ->
         assert (other.role_in_use, other.display_name) == (None, "Coordinación SST sintética")
 
 
-def test_details_are_the_chosen_fields_of_each_record() -> None:
-    by_kind: dict[MilestoneKind, Any] = {}
-    for milestone in compose(cycle()).milestones:
-        by_kind.setdefault(milestone.kind, milestone.details)
-    assert by_kind[MilestoneKind.FINDING_RECEIVED].segment_index == 0
-    action = by_kind[MilestoneKind.ACTION_ASSIGNED]
-    assert (action.action_type, action.assignee_display_name, action.deadline_days) == (
-        "engineering",
-        "Mantenimiento sintético",
-        2,
+RESPONSIBLE: Final = "Responsable sintético del incerrable"
+LATE: Final = T0 + timedelta(days=9, minutes=7, seconds=11)
+
+
+def extras() -> list[TimelineSource]:
+    """Los cinco tipos que el ciclo no recorre: tramo tardío, resolución de la cola, adjunto no
+    recuperable, declaración SIN ALTERNATIVA SEGURA DISPONIBLE y su revisión (horas fuera de la
+    cuadrícula, para la prueba unipersonal)."""
+    review_due = LATE + timedelta(days=30, minutes=13)
+    steps: list[tuple[str, dict[str, Any], timedelta, bool]] = [
+        (
+            "late_segment_attached",
+            {
+                "segment_record_id": str(uuid.UUID(int=5001)),
+                "episode_id": str(SUBJECT),
+                "segment_index": 1,
+                "received_at": stamp(LATE),
+                "episode_state_at_arrival": "closed",
+                "reopened_loop": False,
+                "delay_ms": 3_456_789,
+            },
+            timedelta(0),
+            False,
+        ),
+        (
+            "review_resolution",
+            {
+                "resolution_id": str(uuid.UUID(int=5002)),
+                "detection_id": str(SUBJECT),
+                "outcome": "review_confirmed",
+                "reason_category": "real_coexistence",
+                "reason_text": "Coexistencia sintética confirmada al revisar la detección",
+                "resolved_by": _user(),
+                "resolved_at": stamp(LATE + timedelta(minutes=3)),
+            },
+            timedelta(minutes=3, seconds=17),
+            False,
+        ),
+        (
+            "closure_attachment_unrecoverable",
+            {
+                "declaration_id": str(uuid.UUID(int=5003)),
+                "subject_id": str(SUBJECT),
+                "action_id": str(ACTION),
+                "attachment_id": str(uuid.UUID(int=5004)),
+                "sha256": "d" * 64,
+                "detected_at": stamp(LATE + timedelta(minutes=41, seconds=5)),
+                "previous_version_available": False,
+            },
+            timedelta(minutes=47, seconds=29),
+            False,
+        ),
+        (
+            "unclosable_state_declared",
+            {
+                "declaration_id": str(uuid.UUID(int=5005)),
+                "subject_id": str(SUBJECT),
+                "evaluated_alternative": "Reubicar la estación de carga al costado norte",
+                "rejection_reason": "La reubicación deja el pasillo sin salida de emergencia",
+                "responsible_user_id": str(uuid.UUID(int=901)),
+                "responsible_display_name": RESPONSIBLE,
+                "compensatory_measure": "Vigilancia peatonal permanente durante la carga",
+                "review_due_at": stamp(review_due),
+                "signer": _signer(),
+                "declared_at": stamp(LATE + timedelta(hours=2)),
+            },
+            timedelta(hours=2, minutes=3, seconds=1),
+            True,
+        ),
+        (
+            "unclosable_review",
+            {
+                "review_id": str(uuid.UUID(int=5006)),
+                "declaration_id": str(uuid.UUID(int=5005)),
+                "subject_id": str(SUBJECT),
+                "outcome": "renewed",
+                "review_note": "La alternativa sigue descartada por el trazado de la zona",
+                "new_review_due_at": stamp(review_due + timedelta(days=60, minutes=9)),
+                "reviewer": _signer(),
+                "reviewed_at": stamp(LATE + timedelta(days=30)),
+            },
+            timedelta(days=30, minutes=19, seconds=3),
+            True,
+        ),
+    ]
+    return [
+        TimelineSource(
+            record_id=uuid.UUID(int=6000 + index),
+            chain_sequence=80 + index,
+            record_type=kind,
+            received_at=LATE + offset,
+            document=document,
+            actor_kind="user" if licensed else None,
+            actor_id=SIGNER if licensed else None,
+            actor_role_in_use="coordinator_sst" if licensed else None,
+        )
+        for index, (kind, document, offset, licensed) in enumerate(steps)
+    ]
+
+
+def _at(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def test_details_and_actor_are_exactly_the_chosen_fields_of_each_kind() -> None:
+    """Cada uno de los trece tipos, por igualdad: los campos elegidos y quién (o nadie)."""
+    records = [*cycle(), *extras()]
+    shown = compose(records).milestones
+    coordinator = MilestoneActor(
+        role_in_use="coordinator_sst", display_name="Coordinación SST sintética"
     )
-    evidence = by_kind[MilestoneKind.ACTION_EVIDENCE_ADDED]
-    assert (evidence.performed_by_role, evidence.verification_note) == (
-        "Técnico de mantenimiento",
-        "Anclaje comprobado en la ronda",
+    due = T0 + timedelta(days=2, hours=5)
+    documents = {r.record_id: r.document for r in records}
+    expected: list[tuple[MilestoneKind, MilestoneDetails, MilestoneActor | None]] = [
+        (MilestoneKind.FINDING_RECEIVED, MilestoneDetails(), None),
+        (
+            MilestoneKind.CLASSIFICATION,
+            MilestoneDetails(
+                outcome="confirmed",
+                reason_category="real_coexistence",
+                reason_text="Coexistencia sintética observada en el pasillo de carga de la zona",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ACTION_ASSIGNED,
+            MilestoneDetails(
+                action_type="engineering",
+                description="Instalar un resguardo fijo en el acceso a la zona",
+                expected_outcome="Sin paso peatonal por el frente de la prensa",
+                assignee_display_name="Mantenimiento sintético",
+                due_at=due,
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ACTION_EVIDENCE_ADDED,
+            MilestoneDetails(
+                description="Resguardo fijo instalado y anclado al piso en el acceso",
+                performed_at=T0 + timedelta(days=1),
+                performed_by_role="Técnico de mantenimiento",
+                verification_note="Anclaje comprobado en la ronda",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ACTION_EVIDENCE_ADDED,
+            MilestoneDetails(
+                description="Señalización del pasillo peatonal repintada en la zona",
+                performed_at=T0 + timedelta(days=1, hours=2),
+                performed_by_role="Técnico de mantenimiento",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ACTION_OVERDUE,
+            MilestoneDetails(due_at=due, days_overdue=1, escalation_level="coordinator"),
+            None,
+        ),
+        (
+            MilestoneKind.CLOSURE,
+            MilestoneDetails(
+                action_type="engineering",
+                description="Resguardo verificado y anclado en el acceso de la zona",
+                verification_note="Ronda de cierre sin hallazgos",
+                professional_license="LIC-SINTETICA-01",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ROOT_CAUSE_ANALYSIS,
+            MilestoneDetails(
+                root_cause_category="engineering",
+                root_cause_statement="El trazado mezcla los flujos de carga y de paso",
+                conclusion="Separar físicamente los flujos con un resguardo fijo",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.REOPENING,
+            MilestoneDetails(
+                from_state="closed",
+                reason_text="El resguardo se retiró durante el mantenimiento mayor",
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.ACTION_ASSIGNED,
+            MilestoneDetails(
+                action_type="process",
+                description="Bloquear el retiro del resguardo en el mantenimiento",
+                assignee_display_name="Mantenimiento sintético",
+                due_at=_at(documents[shown[9].record_id]["due_at"]),
+            ),
+            coordinator,
+        ),
+        (MilestoneKind.OTHER, MilestoneDetails(), None),
+        # Un tramo tardío: ni su índice ni su retraso (reconstruirían la hora exacta).
+        (MilestoneKind.LATE_SEGMENT_ATTACHED, MilestoneDetails(), None),
+        (
+            MilestoneKind.REVIEW_RESOLUTION,
+            MilestoneDetails(
+                outcome="review_confirmed",
+                reason_category="real_coexistence",
+                reason_text="Coexistencia sintética confirmada al revisar la detección",
+            ),
+            coordinator,
+        ),
+        # Un adjunto no recuperable: sin su hora de detección.
+        (MilestoneKind.CLOSURE_ATTACHMENT_UNRECOVERABLE, MilestoneDetails(), None),
+        # La declaración: la medida y la revisión, firmada; nunca el nombre del responsable.
+        (
+            MilestoneKind.UNCLOSABLE_STATE_DECLARED,
+            MilestoneDetails(
+                compensatory_measure="Vigilancia peatonal permanente durante la carga",
+                review_due_at=_at(documents[shown[14].record_id]["review_due_at"]),
+            ),
+            coordinator,
+        ),
+        (
+            MilestoneKind.UNCLOSABLE_REVIEW,
+            MilestoneDetails(
+                outcome="renewed",
+                review_note="La alternativa sigue descartada por el trazado de la zona",
+                review_due_at=_at(documents[shown[15].record_id]["new_review_due_at"]),
+            ),
+            coordinator,
+        ),
+    ]
+    assert [(m.kind, m.details, m.actor) for m in shown] == expected
+    body = timeline_view(compose(records)).model_dump(mode="json")
+    assert RESPONSIBLE not in set(_values(body))
+
+
+def _values(value: Any) -> Iterator[Any]:
+    if isinstance(value, Mapping):
+        for item in value.values():
+            yield from _values(item)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            yield from _values(item)
+    else:
+        yield value
+
+
+def test_a_superseded_action_without_closure_has_no_running_deadline() -> None:
+    records = cycle()[:5]
+    later = records[-1].received_at + timedelta(minutes=5)
+    replacement = TimelineSource(
+        record_id=uuid.UUID(int=4300),
+        chain_sequence=records[-1].chain_sequence + 1,
+        record_type="action_assigned",
+        received_at=later,
+        document={
+            "action_id": str(NEW_ACTION),
+            "subject_id": str(SUBJECT),
+            "action_type": "engineering",
+            "action_description": "Reasignar el resguardo a mantenimiento mayor",
+            "assignee_display_name": "Mantenimiento sintético",
+            "due_at": stamp(later + timedelta(days=5)),
+            "supersedes_action_id": str(ACTION),
+            "assigned_by": _user(),
+            "assigned_at": stamp(later),
+        },
     )
-    overdue = by_kind[MilestoneKind.ACTION_OVERDUE]
-    assert (overdue.escalation_level, overdue.days_overdue) == ("coordinator", 1)
-    closure = by_kind[MilestoneKind.CLOSURE]
-    assert closure.professional_license == "LIC-SINTETICA-01"
-    analysis = by_kind[MilestoneKind.ROOT_CAUSE_ANALYSIS]
-    assert (analysis.analysis_state, analysis.root_cause_category) == ("signed", "engineering")
-    assert by_kind[MilestoneKind.REOPENING].from_state == "closed"
-    assert by_kind[MilestoneKind.OTHER] == type(by_kind[MilestoneKind.OTHER])()
+    first, second = [
+        m.deadline
+        for m in compose([*records, replacement]).milestones
+        if m.kind is MilestoneKind.ACTION_ASSIGNED
+    ]
+    assert first is None  # sustituida sin cierre: no queda «en curso» para siempre
+    assert second is not None and second.met is None
+    # Si venció antes de sustituirse, sigue diciendo «fuera de plazo».
+    overdue = cycle()[:6]
+    shifted = replace(replacement, chain_sequence=overdue[-1].chain_sequence + 1)
+    first_overdue = next(
+        m.deadline
+        for m in compose([*overdue, shifted]).milestones
+        if m.kind is MilestoneKind.ACTION_ASSIGNED
+    )
+    assert first_overdue is not None and first_overdue.met is False
 
 
 def _keys(value: Any) -> Iterator[str]:
@@ -976,8 +1235,9 @@ def test_the_reader_rejects_a_malformed_subject_before_reading() -> None:
     for subject in ("no", replace(good, resource="finding"), replace(good, zone_id=str(ZONE))):
         with pytest.raises(LedgerQueryInvalid):
             asyncio.run(reader.subject_history(context, subject, limit=10))  # type: ignore[arg-type]
-    with pytest.raises(LedgerQueryInvalid):
-        asyncio.run(reader.subject_history(context, good, limit=10, preceding_types=("Mal",)))
+    for types in (("Mal",), ("classification",), ("loop_configuration_changed", "closure")):
+        with pytest.raises(LedgerQueryInvalid):
+            asyncio.run(reader.subject_history(context, good, limit=10, preceding_types=types))
 
 
 def test_only_the_first_classification_has_a_deadline_and_it_drives_the_summary() -> None:
