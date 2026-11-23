@@ -5,7 +5,7 @@ con ``--splits=N --group=<grupo>`` y los tiempos de su archivo:
 
 - ``ci.yml``, «backend (pruebas sin integración, grupo N de 4)» (``backend-pruebas``):
   ``-m "not integration"`` sobre todo ``testpaths``, perfil ``ci``, tiempos de ``.test_durations``;
-- ``ci.yml``, «backend (pruebas de integración, grupo N de 4)» (``backend-integracion-grupos``):
+- ``ci.yml``, «backend (pruebas de integración, grupo N de 8)» (``backend-integracion-grupos``):
   ``-m integration --ignore=tests/load`` sobre todo ``testpaths``, perfil ``ci``, tiempos de
   ``.test_durations_integracion`` (``tests/load`` va en «backend (carga ci)»);
 - ``nightly.yml``, «propiedades nightly (tests/properties, grupo N de M)» (``propiedades-suite``):

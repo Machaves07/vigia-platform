@@ -102,7 +102,8 @@ def test_the_ci_workflow_splits_without_excluding_anything() -> None:
 def test_the_ci_integration_groups_split_everything_but_the_load_suite() -> None:
     job = read_job(CI.read_text(encoding="utf-8"), CI_INTEGRATION_SPEC.job_id)
     assert static_problems(job, CI_INTEGRATION_SPEC) == []
-    assert job.groups == (1, 2, 3, 4)
+    assert job.groups == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert job.option("--splits") == "8"
     assert job.option("--ignore") == "tests/load"
     assert job.option("--durations-path") == ".test_durations_integracion"
     # El perfil de la orden es el de la variable del paso; la recolección lo sustituye.
