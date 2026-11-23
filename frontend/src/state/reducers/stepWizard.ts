@@ -8,6 +8,9 @@
  * - «Guardar sin terminar» solo existe con `serverProgressRef` (estado «en curso» del servidor:
  *   causa raíz en U-04, walk-test en U-03); reanudar desde el servidor parte de esa referencia.
  * - Mientras hay un envío o un guardado pendiente, el flujo no cambia hasta su resultado.
+ * - Pasos dinámicos (TASK-581): con `reshape` la pantalla cambia la lista de pasos (p. ej. SCR-11
+ *   muestra los porqués guardados más el siguiente). Cada paso conserva su «completo» por
+ *   identidad, uno nuevo llega incompleto y el flujo nunca queda delante de un paso incompleto.
  *
  * Invariante: todo paso anterior a `position` está completo. El flujo no depende del tiempo.
  */
@@ -36,7 +39,12 @@ export type StepWizardEvent =
   /** Reanudación: el servidor guarda completos los pasos `0 … completedSteps − 1`. */
   | { readonly type: 'resume'; readonly ref: string; readonly completedSteps: number }
   /** Resultado de la operación pendiente. */
-  | { readonly type: 'settled'; readonly ok: boolean };
+  | { readonly type: 'settled'; readonly ok: boolean }
+  /**
+   * La lista de pasos cambió: `from[i]` es el índice anterior del nuevo paso `i`, o `null` si es
+   * nuevo. Un índice que no existía cuenta como nuevo.
+   */
+  | { readonly type: 'reshape'; readonly from: readonly (number | null)[] };
 
 function isRef(ref: string): boolean {
   return ref.trim() !== '';
@@ -102,6 +110,22 @@ function setCompleted(state: StepWizardState, index: number, value: boolean): St
   return { ...state, completed };
 }
 
+function reshaped(state: StepWizardState, from: readonly (number | null)[]): StepWizardState {
+  if (from.length < 1) return state;
+  // Un índice que no existía (negativo, fuera de rango o no entero) no tiene estado: es nuevo.
+  const completed = from.map((old) => old !== null && state.completed[old] === true);
+  const stepCount = completed.length;
+  const kept = from.indexOf(state.position);
+  const target = isSummary(state)
+    ? stepCount
+    : kept >= 0
+      ? kept
+      : Math.min(state.position, stepCount);
+  const firstIncomplete = completed.indexOf(false);
+  const position = firstIncomplete >= 0 ? Math.min(target, firstIncomplete) : target;
+  return { ...state, stepCount, completed, position };
+}
+
 export function stepWizardReducer(state: StepWizardState, event: StepWizardEvent): StepWizardState {
   switch (event.type) {
     case 'complete_step':
@@ -143,5 +167,7 @@ export function stepWizardReducer(state: StepWizardState, event: StepWizardEvent
         pending: null,
         submitted: state.pending === 'submit' && event.ok,
       };
+    case 'reshape':
+      return reshaped(state, event.from);
   }
 }

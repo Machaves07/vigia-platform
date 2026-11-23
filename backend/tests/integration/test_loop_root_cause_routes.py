@@ -10,6 +10,11 @@ Sobre PostgreSQL 16 real como ``vigia_app`` y la aplicación real (``root_cause_
   ``loop_analysis_step_out_of_order`` (409); un paso 0 o 6, ``invalid_request``; el enunciado de
   19 y 1001 caracteres, ``invalid_request``, y de 20 y 1000, aceptado; los dos validadores; una
   categoría fuera de las tres, ``loop_cause_category_not_allowed``. Nada escrito en un rechazo.
+- **O-9 (TASK-581)**: el cuerpo exacto que enviaba la consola el 22-11 para el porqué 3, con el
+  Enter final, es ``invalid_request`` sin ``detail_code`` (la política base trata el salto como
+  carácter de control); el mismo sin el salto, ``200``. Con el 3 en blanco, el 4 es
+  ``loop_analysis_step_out_of_order``; y la categoría elegida después en un porqué guardado se
+  guarda al reescribirlo.
 - **Firma** (BR-LAZ-64, 65): con algo pendiente, ``loop_analysis_information_insufficient`` y la
   fila queda ``pending_information`` con lo que falta (igualdad exacta de la enumeración); sin
   licencia, ``loop_signer_license_missing``; firmada, un registro ``root_cause_analysis`` con el
@@ -258,6 +263,74 @@ def test_steps_advance_in_order_and_an_earlier_one_can_be_edited(
     assert [
         (s["step_index"], s["statement"], s["question_es"]) for s in edited.json()["why_steps"]
     ] == [(1, STATEMENTS[4], QUESTIONS_ES[0]), (2, STATEMENTS[1], QUESTIONS_ES[1])]
+
+
+O9_THIRD_WHY: Final = "causa raíz numero 3 porque esta muy bien definida y no tiene causa"
+"""El porqué 3 del recorrido del 22-11 (O-8): en minúsculas, sin datos de nadie."""
+
+
+def _console_step(statement: str, category: str | None = None) -> dict[str, Any]:
+    """El cuerpo de ``PUT …/steps/{n}`` como lo arma ``Workspace.tsx``: las tres claves."""
+    return {"statement": statement, "evidence_refs": [], "category": category}
+
+
+def test_o9_the_final_line_break_is_the_400_of_the_third_why(
+    stack: RootCauseStack, coordinator: Who
+) -> None:
+    """El 400 del porqué 3 (O-9): un Enter final, no la forma del cuerpo ni la categoría."""
+    analysis_id = stack.with_steps(coordinator, 2)
+    before = _row(stack, analysis_id)
+    rejected = stack.step(coordinator, analysis_id, 3, _console_step(f"{O9_THIRD_WHY}\n"))
+    _error(rejected, 400, None)
+    assert rejected.json()["code"] == ApiErrorCode.INVALID_REQUEST.value
+    assert "rejection" not in rejected.json()
+    assert _row(stack, analysis_id) == before
+    accepted = stack.step(coordinator, analysis_id, 3, _console_step(O9_THIRD_WHY))
+    assert accepted.status_code == 200, accepted.text
+    assert [
+        (s["step_index"], s["statement"], s["category"]) for s in accepted.json()["why_steps"]
+    ] == [
+        (1, STATEMENTS[0], None),
+        (2, STATEMENTS[1], None),
+        (3, O9_THIRD_WHY, None),
+    ]
+    assert [s["statement"] for s in _row(stack, analysis_id)["why_steps"]] == [
+        STATEMENTS[0],
+        STATEMENTS[1],
+        O9_THIRD_WHY,
+    ]
+
+
+def test_o9_with_the_third_why_blank_the_fourth_is_out_of_order(
+    stack: RootCauseStack, coordinator: Who
+) -> None:
+    """Con 2 guardados y el 3 en blanco, guardar el 4 es ``loop_analysis_step_out_of_order``."""
+    analysis_id = stack.with_steps(coordinator, 2)
+    before = _row(stack, analysis_id)
+    _error(
+        stack.step(coordinator, analysis_id, 4, _console_step(STATEMENTS[3])),
+        409,
+        LoopDetailCode.ANALYSIS_STEP_OUT_OF_ORDER,
+    )
+    assert _row(stack, analysis_id) == before
+
+
+def test_o9_a_category_chosen_after_saving_a_why_is_kept_when_it_is_rewritten(
+    stack: RootCauseStack, coordinator: Who
+) -> None:
+    """El porqué 2 guardado sin categoría y reescrito con «engineering» la guarda y la devuelve."""
+    analysis_id = stack.with_steps(coordinator, 2)
+    response = stack.step(coordinator, analysis_id, 2, _console_step(STATEMENTS[1], "engineering"))
+    assert response.status_code == 200, response.text
+    assert [(s["step_index"], s["category"]) for s in response.json()["why_steps"]] == [
+        (1, None),
+        (2, "engineering"),
+    ]
+    # En la fila, la categoría solo aparece si se declaró (``WhyStep.to_json``).
+    assert [s.get("category") for s in _row(stack, analysis_id)["why_steps"]] == [
+        None,
+        "engineering",
+    ]
 
 
 def test_never_more_than_five_whys(stack: RootCauseStack, coordinator: Who) -> None:
