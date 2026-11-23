@@ -8,8 +8,13 @@
  *   causa raíz en U-04, walk-test en U-03); sin él no hay botón.
  * - Con cambios sin enviar (`dirty`), salir de la pantalla pide confirmación (`useLeaveGuard`);
  *   tras enviar, ya no. Exige el enrutador en modo de datos.
+ * - Barra legible (TASK-581, O-5): cada paso en su `<li>`, un separador `aria-hidden` entre pasos
+ *   y «Paso x de n» con sus números en `data-part="progress-current"` y `"progress-total"`.
+ * - Pasos dinámicos (TASK-581): si la pantalla cambia la lista, el reductor la sigue por `id`
+ *   (`reshape`). Un paso con `onNext` deja pulsar «Siguiente» sin estar completo: la pantalla lo
+ *   guarda y el flujo avanza solo si, tras guardarlo, el paso queda completo.
  */
-import { useEffect, useId, useReducer, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import {
@@ -33,6 +38,11 @@ interface WizardStep {
   readonly content: ReactNode;
   /** La pantalla da el paso por respondido. */
   readonly complete: boolean;
+  /**
+   * «Siguiente» con el paso sin completar: la pantalla lo guarda (y muestra sus errores si no
+   * puede). El flujo avanza solo si, al resolverse, el paso ya está completo.
+   */
+  readonly onNext?: (() => Promise<void>) | undefined;
 }
 
 export interface StepWizardProps {
@@ -93,8 +103,28 @@ export function StepWizard({
     createStepWizard(steps.length, serverProgressRef),
   );
   const [outcome, setOutcome] = useState<Outcome>(null);
+  /** «Siguiente» guardando el paso `id`; `saved` cuando la pantalla terminó de guardarlo. */
+  const [advancing, setAdvancing] = useState<{ id: string; saved: boolean } | null>(null);
+  /** El último guardado con «Siguiente» ya resuelto: se atiende una sola vez. */
+  const handled = useRef<object | null>(null);
   const headingId = useId();
   const guard = useLeaveGuard(dirty && !state.submitted);
+
+  // La lista cambió (p. ej. un porqué guardado añade el siguiente): cada paso conserva su estado
+  // por `id`. Antes de pintar, para que la posición y la lista nunca se desfasen en pantalla.
+  const ids = steps.map((step) => step.id);
+  const idsKey = JSON.stringify(ids);
+  const previousIds = useRef(idsKey);
+  useLayoutEffect(() => {
+    if (previousIds.current === idsKey) return;
+    const before = JSON.parse(previousIds.current) as string[];
+    previousIds.current = idsKey;
+    const from = (JSON.parse(idsKey) as string[]).map((id) => {
+      const index = before.indexOf(id);
+      return index >= 0 ? index : null;
+    });
+    dispatch({ type: 'reshape', from });
+  }, [idsKey]);
 
   const { position } = state;
   const current = steps[position];
@@ -111,8 +141,37 @@ export function StepWizard({
     if (serverProgressRef !== null) dispatch({ type: 'server_progress', ref: serverProgressRef });
   }, [serverProgressRef]);
 
+  // Tras guardar con «Siguiente», el paso avanza solo si la pantalla ya lo da por completo.
+  useEffect(() => {
+    if (advancing === null || !advancing.saved || handled.current === advancing) return;
+    handled.current = advancing;
+    if (advancing.id !== current?.id || !currentComplete) return;
+    dispatch({ type: 'complete_step', index: position });
+    onStepCompleted?.(position);
+    dispatch({ type: 'next' });
+  }, [advancing, current?.id, position, currentComplete, onStepCompleted]);
+
+  const saving = advancing !== null && !advancing.saved;
+  const idle = state.pending === null && !state.submitted && !saving;
+  const saveFirst = idle && !canAdvance(state) && current?.onNext !== undefined;
+  const canNext = (idle && canAdvance(state)) || saveFirst;
+
   const next = () => {
-    if (!canAdvance(state)) return;
+    if (saveFirst) {
+      const { id } = current;
+      setOutcome(null);
+      setAdvancing({ id, saved: false });
+      current.onNext().then(
+        () => {
+          setAdvancing({ id, saved: true });
+        },
+        () => {
+          setAdvancing(null);
+        },
+      );
+      return;
+    }
+    if (!canNext) return;
     onStepCompleted?.(position);
     setOutcome(null);
     dispatch({ type: 'next' });
@@ -150,11 +209,19 @@ export function StepWizard({
   };
 
   const summaryShown = isSummary(state);
-  const stepTitle = summaryShown
-    ? text('components_structure.wizard.summary')
-    : `${text('components_structure.wizard.step')} ${String(position + 1)} ${text(
-        'components_structure.wizard.of',
-      )} ${String(steps.length)}: ${current?.title ?? ''}`;
+  const stepTitle = summaryShown ? (
+    text('components_structure.wizard.summary')
+  ) : (
+    <>
+      <span data-part="progress">
+        {text('components_structure.wizard.step')}{' '}
+        <span data-part="progress-current">{String(position + 1)}</span>{' '}
+        {text('components_structure.wizard.of')}{' '}
+        <span data-part="progress-total">{String(steps.length)}</span>
+      </span>
+      {`: ${current?.title ?? ''}`}
+    </>
+  );
   const showSavePartial =
     onSavePartial !== undefined && state.serverProgressRef !== null && !state.submitted;
 
@@ -171,9 +238,15 @@ export function StepWizard({
             return (
               <li
                 key={steps[index]?.id ?? 'summary'}
+                className={styles.stepItem}
                 aria-current={isCurrent ? 'step' : undefined}
                 data-complete={state.completed[index] === true}
               >
+                {index > 0 ? (
+                  <span className={styles.separator} aria-hidden="true" data-part="step-separator">
+                    ›
+                  </span>
+                ) : null}
                 {reachable ? (
                   <button
                     type="button"
@@ -230,8 +303,8 @@ export function StepWizard({
             <button
               type="button"
               className={styles.button}
-              disabled={!canAdvance(state)}
-              aria-describedby={canAdvance(state) ? undefined : `${headingId}-incomplete`}
+              disabled={!canNext}
+              aria-describedby={canNext ? undefined : `${headingId}-incomplete`}
               onClick={next}
             >
               {text('components_structure.wizard.next')}
@@ -251,7 +324,7 @@ export function StepWizard({
               )}
             </button>
           )}
-          {!summaryShown && !canAdvance(state) && (
+          {!summaryShown && !canNext && (
             <p id={`${headingId}-incomplete`} className={styles.hint} data-part="incomplete">
               {text('components_structure.wizard.step_incomplete')}
             </p>

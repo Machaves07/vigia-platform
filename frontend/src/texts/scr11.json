@@ -22,7 +22,7 @@
   "scr11.saving_step": "Guardando el porqué…",
   "scr11.step_saved": "Porqué guardado en el servidor.",
   "scr11.step_unsaved": "Hay cambios sin guardar en este porqué.",
-  "scr11.optional_step": "Si la causa ya está identificada, deje este porqué en blanco y continúe.",
+  "scr11.optional_step": "Si la causa ya está identificada, deje este porqué en blanco y pase a “Causa raíz y conclusión”.",
   "scr11.root_title": "Causa raíz y conclusión",
   "scr11.root_category": "Categoría de la causa raíz",
   "scr11.choose_category": "Elija una categoría",

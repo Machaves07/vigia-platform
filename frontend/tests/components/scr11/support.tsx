@@ -208,7 +208,8 @@ export function fakeLoop({
   const state = {
     startResponse: null as (() => Response) | null,
     inProgressResponse: null as (() => Response) | null,
-    stepResponse: null as ((index: number) => Response | null) | null,
+    /** Una promesa retiene la respuesta; si resuelve a `null`, responde el servidor falso. */
+    stepResponse: null as ((index: number) => Response | Promise<Response | null> | null) | null,
     signatureResponse: null as (() => Response | null) | null,
     assistantResponse: null as (() => Response) | null,
     statusSteps: [] as StatusStep[],
@@ -251,7 +252,7 @@ export function fakeLoop({
             const index = Number(params.index);
             const body = (await request.json()) as Record<string, unknown>;
             calls.steps.push({ index, body });
-            const scripted = state.stepResponse?.(index) ?? null;
+            const scripted = (await state.stepResponse?.(index)) ?? null;
             if (scripted !== null) return scripted;
             if (basePolicyRejects(body.statement, statement))
               return apiError('invalid_request', 400);
