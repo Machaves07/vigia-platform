@@ -5,10 +5,14 @@ planificador de U-02 da a cada una su transacción y su contexto de iteración p
 registro en la raíz es de ``fleet.registration``). En la transacción de la organización, con el
 instante del ``Clock`` inyectado:
 
-1. **retiradas** (``cause = productive``): **todas** las fotos de las zonas cuya compuerta de uso se
-   aprobó con la foto ya guardada (la zona pasó a ``productive``; ver ``episode_photo_queries``);
-2. **vencidas** (``cause = expired``): las de ``expires_at <= now``. Una foto que cumple las dos
-   cuenta como retirada (se borra en el paso 1).
+1. **retiradas** (``cause = productive``): **solo las de puesta en marcha** (``zone_mode =
+   commissioning``) de las zonas cuya compuerta de uso se aprobó con la foto ya guardada (la zona
+   pasó a ``productive``; ver ``episode_photo_queries``). La foto del hallazgo (``zone_mode =
+   productive``, A-128) **nunca** se borra por este paso, aunque la compuerta se apruebe o se
+   vuelva a aprobar después de recibirla;
+2. **vencidas** (``cause = expired``): las de ``expires_at <= now``, de los dos modos. Una foto con
+   ``expires_at`` nulo (la del hallazgo con ``VIGIA_FINDING_PHOTO_RETENTION_DAYS = 0``) nunca
+   vence. Una foto que cumple las dos cuenta como retirada (se borra en el paso 1).
 
 **Por lotes**: ``DELETE`` de a lo sumo ``batch_size`` filas que devuelve solo las que borró, hasta
 que un lote sale corto o se llega a ``max_batches`` por causa y ejecución (lo que quede, en la
@@ -16,8 +20,13 @@ siguiente; la lectura ya no sirve una foto vencida ni retirada, así que la espe
 
 **Idempotente**: una ejecución repetida no encuentra nada; dos solapadas sobre la misma
 organización se serializan en el candado de cada fila y la segunda no borra ni cuenta ninguna. La
-métrica ``episode_photos_purged_total`` suma exactamente las filas borradas, por causa; nunca por
-nodo ni por zona (NFR-GOB-13) y nunca con bytes.
+métrica ``episode_photos_purged_total`` suma exactamente las filas borradas, por causa y
+``zone_mode`` (listas cerradas); nunca por nodo ni por zona (NFR-GOB-13) y nunca con bytes.
+
+**Frente a una ingesta simultánea**: el modo de una fila no cambia nunca (``vigia_app`` no tiene
+``UPDATE``) y cada ``DELETE`` lo filtra en la misma sentencia; una foto que se confirma durante la
+purga queda borrada (si es de puesta en marcha, retirada o vencida) o intacta, y una del hallazgo
+nunca se borra por el paso 1.
 
 **Frente a una lectura simultánea** (MVCC de PostgreSQL): la lectura de la imagen es una sola
 sentencia con su instantánea, que ve la fila entera o no la ve; el ``DELETE`` no espera a las
@@ -37,6 +46,7 @@ from __future__ import annotations
 
 import enum
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -44,6 +54,7 @@ from typing import Final, Protocol
 
 from vigia_platform.fleet.adapters.postgres.episode_photo_queries import (
     PostgresEpisodePhotoQueries,
+    PurgedPhoto,
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.clock import Clock
@@ -94,17 +105,17 @@ class PurgeRepository(Protocol):
 
     async def purge_retired(
         self, transaction: Transaction, now: datetime, *, limit: int
-    ) -> tuple[uuid.UUID, ...]: ...
+    ) -> tuple[PurgedPhoto, ...]: ...
 
     async def purge_expired(
         self, transaction: Transaction, now: datetime, *, limit: int
-    ) -> tuple[uuid.UUID, ...]: ...
+    ) -> tuple[PurgedPhoto, ...]: ...
 
 
 async def _in_batches(
-    delete: Callable[[int], Awaitable[tuple[uuid.UUID, ...]]], batch_size: int, max_batches: int
-) -> tuple[uuid.UUID, ...]:
-    deleted: list[uuid.UUID] = []
+    delete: Callable[[int], Awaitable[tuple[PurgedPhoto, ...]]], batch_size: int, max_batches: int
+) -> tuple[PurgedPhoto, ...]:
+    deleted: list[PurgedPhoto] = []
     for _ in range(max_batches):
         batch = await delete(batch_size)
         deleted.extend(batch)
@@ -157,9 +168,13 @@ class EpisodePhotoPurger:
         )
         counter = self._metrics.episode_photos_purged_total
         for cause, deleted in ((PurgeCause.PRODUCTIVE, retired), (PurgeCause.EXPIRED, expired)):
-            if deleted:
-                counter.add(len(deleted), {"cause": cause.value})
-        return PurgeReport(retired=retired, expired=expired)
+            by_mode = Counter(photo.zone_mode for photo in deleted)
+            for mode in sorted(by_mode):
+                counter.add(by_mode[mode], {"cause": cause.value, "zone_mode": mode.value})
+        return PurgeReport(
+            retired=tuple(photo.photo_id for photo in retired),
+            expired=tuple(photo.photo_id for photo in expired),
+        )
 
 
 def register_purge_episode_photos(

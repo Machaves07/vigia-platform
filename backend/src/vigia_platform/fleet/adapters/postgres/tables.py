@@ -418,7 +418,7 @@ EPISODE_PHOTO: Final = Table(
     _instant("started_at"),
     _instant("ended_at"),
     _instant("received_at"),
-    _instant("expires_at"),
+    _instant("expires_at", nullable=True),
     _uuid("camera_id", nullable=True),
     _instant("frame_at", nullable=True),
     _integer("width", nullable=True),
@@ -430,6 +430,12 @@ EPISODE_PHOTO: Final = Table(
     _text("image_absent_reason", nullable=True),
     _text("canonical_sha256"),
     _uuid("platform_record_id"),
+    _text("zone_mode"),
+    _uuid("record_id", nullable=True),
+    _integer("photo_index"),
+    _text("photo_role"),
 )
-"""Foto del episodio de la sombra (``gob_0042``, TASK-572; A-112): fuera del expediente, con la
-imagen anulable y vencimiento; la purga es de TASK-573."""
+"""Foto del episodio (``gob_0042``, TASK-572; A-112): fuera del expediente, con la imagen anulable
+y vencimiento; la purga es de TASK-573. Desde ``gob_0045`` (TASK-588, A-128) guarda también la foto
+del hallazgo (``zone_mode = productive``, con ``record_id``, ``photo_index`` y ``photo_role``; sin
+vencimiento si ``expires_at`` es nulo)."""

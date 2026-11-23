@@ -947,6 +947,8 @@ RUNTIME_VARIABLES_OUTSIDE_TASKS = {
     "el dueno en el primer despliegue (VIG-203/252), con la clave (TASK-344)",
     "VIGIA_EPISODE_PHOTO_RETENTION_DAYS": "por defecto 30 dias (A-112, TASK-572); la foto del "
     "episodio es de la sombra, que corre en la plataforma de integracion, no en pilot",
+    "VIGIA_FINDING_PHOTO_RETENTION_DAYS": "por defecto 0, sin vencimiento automatico como el clip "
+    "(A-128, TASK-588); la retencion definitiva se fija con R5 antes del piloto",
 }
 """Variables de ``RuntimeConfig`` que ninguna definición de tarea de ``pilot`` lleva, con el
 motivo. Cualquier otra que la raíz lea tiene que estar en una de las dos."""

@@ -5,6 +5,13 @@ con ``commissioning.run`` sobre la zona (en la matriz, solo ``provider_installer
 vigente, A-69). El coordinador, el gerente y el resto no los ven: lo capturado en comisionamiento
 no aparece en ningún panel de gestión (BR-GOB-30, RF-BOR-11, RNF-PRI-04).
 
+**Solo fotos de puesta en marcha** (A-128, TASK-588): la tabla guarda también la foto del hallazgo
+(``zone_mode = productive``). El cursor, el listado y la imagen filtran ``zone_mode =
+'commissioning'`` en su sentencia (``episode_photo_queries``): una foto del hallazgo nunca sale en
+SCR-06, ni aunque la zona vuelva a ``commissioning`` por una regresión; su imagen pedida aquí es
+``not_found`` con ``episode_photo_read`` ``denied``. La lee el coordinador por otra ruta
+(TASK-589).
+
 **Listado** (``EpisodePhotoReader.page``, ``GET /zones/{zone_id}/episode-photos``):
 
 1. la zona en la organización del contexto (RLS) y ``commissioning.run`` sobre ella; si no,

@@ -303,3 +303,74 @@ async def test_removing_a_policy_is_detected(superuser: Any, world: World, polic
         assert (conceded.organization_id, world.other_plant.plant_id) in seen
     else:
         assert (conceded.organization_id, conceded.plant_id) in seen
+
+
+_FINDING_INSERT: Final = (
+    "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id, node_id,"
+    " episode_id, segment_index, classified_as, family, standard_id, standard_version,"
+    " max_confidence, started_at, ended_at, received_at, expires_at, image_absent_reason,"
+    " canonical_sha256, platform_record_id, zone_mode, record_id) VALUES ($1, $2, $3, $4, $5,"
+    " $6, 0, 'finding', 'coexistence', $7, 1, 0.9, $8, $8, $8, NULL, 'frame_unavailable', $9,"
+    " $10, 'productive', $11)"
+)
+"""Una foto del hallazgo (TASK-588): ``productive``, con ``record_id`` y sin vencimiento."""
+
+
+async def _finding(connection: Any, scope: FleetScope) -> uuid.UUID:
+    photo_id = uuid.uuid4()
+    await connection.execute(
+        _FINDING_INSERT,
+        scope.organization_id,
+        photo_id,
+        scope.plant_id,
+        scope.zone_id,
+        scope.node_id,
+        uuid.uuid4(),
+        uuid.uuid4(),
+        BASE_TIME,
+        "cd" * 32,
+        uuid.uuid4(),
+        uuid.uuid4(),
+    )
+    return photo_id
+
+
+async def _sees(
+    connection: Any,
+    organization_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    *,
+    actor_kind: str = "user",
+    concession_id: uuid.UUID | None = None,
+) -> bool:
+    async with connection.transaction():
+        await set_scope(
+            connection, organization_id, actor_kind=actor_kind, concession_id=concession_id
+        )
+        found = await connection.fetchval(
+            "SELECT count(*) FROM fleet.episode_photo WHERE photo_id = $1", photo_id
+        )
+    return bool(found)
+
+
+@pytest.mark.asyncio
+async def test_a_finding_photo_has_the_same_isolation_as_the_shadow_photo(
+    app: Any, superuser: Any, world: World
+) -> None:
+    """TASK-588: la foto del hallazgo vive en la misma tabla con las mismas políticas: su
+    organización la ve; la otra organización y la proveedora sin concesión sobre su planta, no."""
+    conceded = await _finding(superuser, world.conceded)
+    other_plant = await _finding(superuser, world.other_plant)
+    a, b = world.identity.a.organization_id, world.identity.b.organization_id
+    provider = {"actor_kind": PROVIDER, "concession_id": world.concession_id}
+    try:
+        assert await _sees(app, a, conceded) is True
+        assert await _sees(app, b, conceded) is False
+        assert await _sees(app, a, conceded, **provider) is True
+        assert await _sees(app, a, other_plant, **provider) is False
+    finally:
+        # Las demás pruebas cuentan una foto por planta: estas dos se van.
+        await superuser.execute(
+            "DELETE FROM fleet.episode_photo WHERE photo_id = ANY($1::uuid[])",
+            [conceded, other_plant],
+        )

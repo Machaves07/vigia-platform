@@ -126,6 +126,13 @@ Copia diaria por `cron` en el host (retiene 14 días; `VIGIA_BACKUP_DIR` y `VIGI
 
 `backup.sh` escribe cada copia en un temporal propio y la publica solo tras leerla **entera** con `pg_restore --file=/dev/null` (`--list` solo lee el índice y da 0 con una copia truncada por el final); dos copias a la vez no se pisan. `restore.sh` no borra nada hasta haber comprobado la copia nueva y guardado la viva: la lee entera, la restaura de prueba en una base temporal (`vigia_restore_check`), guarda la base viva en `previa-<fecha>-<pid>.dump` (en el mismo directorio, sin borrado automático) y solo entonces para la aplicación, corta las conexiones y usa `pg_restore --create --clean --if-exists` (borra y recrea la base con los permisos de base que dejó `nuc_0001`; con las tablas particionadas, `--clean` sobre la base viva falla). Si esa restauración falla, restaura la copia previa y termina con `error[restore_failed]`. Los roles son del servidor, no de la base: en un servidor nuevo, `up -d --wait` y `docker compose ... run --rm vigia-migrate` los crean antes del primer `restore.sh`. La copia **no** lleva la clave de la autoridad ni los secretos: respáldalos aparte (arriba).
 
+### Fotos del episodio en la base y en las copias (A-112, A-128)
+
+`fleet.episode_photo` guarda dos clases de foto difuminada, por `zone_mode`:
+
+- **`commissioning`** (la sombra, SCR-06): sin cambios respecto de A-112. Vencen a los `VIGIA_EPISODE_PHOTO_RETENTION_DAYS` (30) y la purga diaria (`purge_episode_photos`, 04:00 UTC) borra **todas** las de una zona al aprobarse su compuerta de uso. Para que no queden en disco tras ese paso a `productive` sigue valiendo la receta de A-112 («Precisiones del 13-11»): la purga, `VACUUM` de `fleet.episode_photo` y `CHECKPOINT`; las copias anteriores las conservan hasta su propia retención.
+- **`productive`** (la foto del hallazgo, TASK-588): **no** se purgan al aprobar la compuerta de uso ni al volver a aprobarla. Vencen según `VIGIA_FINDING_PHOTO_RETENTION_DAYS` (0 por defecto = nunca, como el clip del hallazgo; de 0 a 1 825). Las copias diarias las incluyen; la retención de las copias solo borra copias viejas, no estas fotos de la base.
+
 ## Confiar en la raíz del balanceador desde un navegador de planta
 
 El certificado de servidor de `app.` y `nodes.` lo crea una vez `vigia-mtls-edge` (`init-cert`, con los nombres de `VIGIA_DOMAIN` y la IP de `VIGIA_EDGE_BIND`) y persiste en el volumen `borde`. La raíz que firma ese certificado no es la de los nodos: es `edge-ca.pem`, y hay que repartirla a los navegadores y a los nodos:

@@ -239,6 +239,8 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "image_presence": ("present", "absent"),
     # Su purga (TASK-573): la causa del borrado, vencida o zona en productive.
     "cause": ("expired", "productive"),
+    # Y el modo de la foto borrada (TASK-588, A-128): de puesta en marcha o del hallazgo.
+    "zone_mode": ("commissioning", "productive"),
     # U-04 (TASK-349, LC-LAZ-38 a 40): fijas aquí porque varias (``rejected_blocked_vocabulary``,
     # ``email_delivery_events``…) tienen forma de token y ``register`` las rechazaría. Son las
     # dimensiones de ``loop.observability.metrics`` y los atributos del trabajo largo

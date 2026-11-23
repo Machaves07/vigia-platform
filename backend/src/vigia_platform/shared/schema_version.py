@@ -32,8 +32,11 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 43
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0043`` (el ``DELETE`` de
+MINIMUM_SCHEMA_VERSION: Final = 45
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0045`` (``zone_mode``,
+``record_id``, ``photo_index`` y ``photo_role`` de ``fleet.episode_photo``, que la lectura de la
+instaladora y la purga filtran por modo y la ingesta escribe, TASK-588), que incluye ``laz_0044``
+(el índice de los hallazgos cerrados), que incluye ``gob_0043`` (el ``DELETE`` de
 ``vigia_app`` sobre ``fleet.episode_photo`` con el que ``purge_episode_photos`` borra las fotos
 vencidas o de una zona en ``productive``, TASK-573), que incluye ``gob_0042`` (la tabla
 ``fleet.episode_photo`` de la foto del episodio de la sombra, TASK-572), que incluye ``laz_0041``
