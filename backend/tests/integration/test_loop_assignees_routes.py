@@ -35,7 +35,7 @@ from typing import Any, Final
 
 import pytest
 import yaml
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from tests.integration.conftest import PostgresEndpoint
@@ -198,23 +198,45 @@ class Person:
         return roles or None
 
 
-grants = st.builds(
+# Sesgado hacia lo elegible y su frontera (un rol de A-126 sobre otra planta u otra zona, retirado
+# o de alguien inactivo): con la distribución uniforme casi todo salía no elegible y una mutación
+# como «plant_manager de cualquier planta» solo caía con la semilla fija.
+frontier_grants = st.builds(
     Grant,
-    role=st.sampled_from(CLIENT_ROLES),
-    scope=st.sampled_from(SCOPES),
-    removed=st.booleans(),
+    role=st.sampled_from(ASSIGNEE_ROLES),
+    scope=st.sampled_from(("other_plant", "other_zone", "plant", "zone", "organization")),
+    removed=st.sampled_from((False, False, True)),
+)
+grants = st.one_of(
+    frontier_grants,
+    st.builds(
+        Grant,
+        role=st.sampled_from(CLIENT_ROLES),
+        scope=st.sampled_from(SCOPES),
+        removed=st.sampled_from((False, False, True)),
+    ),
 )
 people = st.lists(
     st.builds(
         Person,
-        same_organization=st.booleans(),
-        status=st.sampled_from(("active", "invited", "deactivated")),
+        same_organization=st.sampled_from((True, True, True, False)),
+        status=st.sampled_from(("active", "active", "active", "invited", "deactivated")),
         name=st.sampled_from(NAMES),
-        grants=st.lists(grants, max_size=3).map(tuple),
+        grants=st.lists(grants, min_size=1, max_size=3).map(tuple),
     ),
     min_size=1,
     max_size=5,
 )
+FRONTIER: Final = [
+    # Cada uno solo puede fallar por una cláusula de la sentencia compartida.
+    Person(True, "active", "Alba", (Grant(Role.PLANT_MANAGER, "other_plant", False),)),
+    Person(True, "active", "Bruno", (Grant(Role.LINE_MANAGER, "other_zone", False),)),
+    Person(True, "active", "Celia", (Grant(Role.COORDINATOR_SST, "zone", True),)),
+    Person(True, "active", "Dario", (Grant(Role.ADMINISTRATOR, "organization", False),)),
+    Person(True, "invited", "Elena", (Grant(Role.LINE_MANAGER, "plant", False),)),
+    Person(False, "active", "Fabio", (Grant(Role.PLANT_MANAGER, "organization", False),)),
+    Person(True, "active", "Alba", (Grant(Role.PLANT_MANAGER, "plant", False),)),
+]
 
 
 def _create(stack: ActionsStack, place: Place, person: Person) -> uuid.UUID:
@@ -252,6 +274,7 @@ def _retire(stack: ActionsStack, users: list[uuid.UUID]) -> None:
         stack.deactivate(user)
 
 
+@example(world=FRONTIER)
 @given(world=people)
 def test_the_list_is_exactly_what_assign_accepts_for_every_generated_world(
     stack: ActionsStack, coordinator: Who, place: Place, world: list[Person]
@@ -513,6 +536,46 @@ def test_the_list_is_ordered_by_name_and_id_and_paged_by_key(
             assert _listed(stack, coordinator, place.finding, limit=limit) == whole
     finally:
         _retire(stack, created)
+
+
+def test_a_cursor_of_someone_outside_the_list_answers_exactly_like_a_missing_one(
+    stack: ActionsStack, coordinator: Who, place: Place
+) -> None:
+    """El ancla del cursor se resuelve dentro del conjunto elegible: un cursor de alguien de la
+    organización que no está en la lista no revela entre qué nombres cae el suyo."""
+    world = stack.world
+    authz = world.stack.authz
+    listed = []
+    for name in ("Alba", "Fabio"):  # a los dos lados de «Celia»
+        user = stack.user(world.a, Role.LINE_MANAGER)
+        _rename(stack, user, name)
+        listed.append(user)
+    invited = authz.add_user(world.a.organization_id, status="invited")
+    authz.assign(world.a.organization_id, invited, Role.LINE_MANAGER)
+    deactivated = stack.user(world.a, Role.LINE_MANAGER)
+    outsiders = {
+        "administrator": stack.user(world.a, Role.ADMINISTRATOR),
+        "copasst": stack.user(world.a, Role.COPASST),
+        "other_plant": stack.user(world.a, Role.PLANT_MANAGER, ScopeLevel.PLANT, place.other_plant),
+        "other_zone": stack.user(world.a, Role.LINE_MANAGER, ScopeLevel.ZONE, place.other_zone),
+        "invited": invited,
+        "deactivated": deactivated,
+    }
+    for user in outsiders.values():
+        _rename(stack, user, "Celia")
+    stack.deactivate(deactivated)
+    try:
+        missing = stack.assignees(
+            coordinator, place.finding, {"cursor": encode_assignee_cursor(uuid.uuid4())}
+        )
+        assert _comparable(missing) == (200, {"items": [], "next_cursor": None})
+        for reason, user in outsiders.items():
+            response = stack.assignees(
+                coordinator, place.finding, {"cursor": encode_assignee_cursor(user)}
+            )
+            assert _comparable(response) == _comparable(missing), reason
+    finally:
+        _retire(stack, listed)
 
 
 def test_a_cursor_of_someone_outside_the_organization_gives_an_empty_page(

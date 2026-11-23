@@ -179,22 +179,26 @@ ASSIGNEES: Final = text(
     # propia zona. Solo ``user_id``, ``display_name`` y esos roles (nunca el correo ni otro campo).
     # Una sola sentencia para ``assign`` (``:user_id``) y para la lista (``:user_id`` nulo, por
     # clave sobre ``(display_name, user_id)`` desde ``:after``): no pueden divergir (TASK-583).
-    "SELECT u.user_id, u.display_name, eligible.roles FROM identity.user_account AS u"
+    # El ancla del cursor se resuelve **dentro del mismo conjunto elegible**: un cursor de alguien
+    # que no está en la lista (otro rol, otra planta o zona, inactivo, otra organización) da una
+    # página vacía, igual que uno inexistente, y no revela dónde cae su nombre.
+    "WITH eligible AS NOT MATERIALIZED ("
+    "SELECT u.user_id, u.display_name, covering.roles FROM identity.user_account AS u"
     " CROSS JOIN LATERAL (SELECT array_agg(DISTINCT r.role ORDER BY r.role) AS roles"
     " FROM identity.role_assignment AS r"
     " WHERE r.organization_id = :organization_id AND r.user_id = u.user_id"
     " AND r.removed_at IS NULL AND r.role = ANY(CAST(:roles AS text[]))"
     " AND (r.scope_level = 'organization'"
     " OR (r.scope_level = 'plant' AND r.scope_id = :plant_id)"
-    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))) AS eligible"
+    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))) AS covering"
     " WHERE u.organization_id = :organization_id AND u.status = 'active'"
-    " AND eligible.roles IS NOT NULL"
-    " AND (CAST(:user_id AS uuid) IS NULL OR u.user_id = CAST(:user_id AS uuid))"
-    " AND (CAST(:after AS uuid) IS NULL OR (u.display_name, u.user_id) >"
-    " ((SELECT a.display_name FROM identity.user_account AS a"
-    " WHERE a.organization_id = :organization_id AND a.user_id = CAST(:after AS uuid)),"
+    " AND covering.roles IS NOT NULL)"
+    " SELECT e.user_id, e.display_name, e.roles FROM eligible AS e"
+    " WHERE (CAST(:user_id AS uuid) IS NULL OR e.user_id = CAST(:user_id AS uuid))"
+    " AND (CAST(:after AS uuid) IS NULL OR (e.display_name, e.user_id) >"
+    " ((SELECT a.display_name FROM eligible AS a WHERE a.user_id = CAST(:after AS uuid)),"
     " CAST(:after AS uuid)))"
-    " ORDER BY u.display_name, u.user_id LIMIT :limit"
+    " ORDER BY e.display_name, e.user_id LIMIT :limit"
 )
 _PLANT_TIMEZONE: Final = text(
     "SELECT timezone FROM identity.plant"

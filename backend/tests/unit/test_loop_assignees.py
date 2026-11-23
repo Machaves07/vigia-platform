@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 import pytest
 
 from tests.factories import make_context
 from vigia_platform.loop.adapters.http.assignees_routes import (
+    AssigneeRole,
     decode_assignee_cursor,
     encode_assignee_cursor,
 )
@@ -45,6 +46,10 @@ def _service() -> AssigneeService:
 
 def test_the_roles_of_a_126_are_exactly_three() -> None:
     assert ASSIGNEE_ROLES == (Role.COORDINATOR_SST, Role.LINE_MANAGER, Role.PLANT_MANAGER)
+
+
+def test_the_schema_admits_exactly_the_three_roles_of_a_126() -> None:
+    assert get_args(AssigneeRole) == tuple(role.value for role in ASSIGNEE_ROLES)
 
 
 def test_the_page_limits_are_those_of_br_app_53() -> None:

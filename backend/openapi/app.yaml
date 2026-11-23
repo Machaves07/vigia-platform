@@ -6358,7 +6358,11 @@
           "title": "Display Name"
         "roles":
           "items":
-            "$ref": "#/components/schemas/Role"
+            "type": "string"
+            "enum":
+              - "coordinator_sst"
+              - "line_manager"
+              - "plant_manager"
           "type": "array"
           "title": "Roles"
       "additionalProperties": false

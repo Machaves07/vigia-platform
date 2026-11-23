@@ -18,7 +18,7 @@ import base64
 import binascii
 import re
 import uuid
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
@@ -36,12 +36,12 @@ from vigia_platform.loop.application.assignees import (
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
-from vigia_platform.shared.context import Role
 
 __all__ = [
     "ASSIGNEES_PATH",
     "AssigneeOut",
     "AssigneePageOut",
+    "AssigneeRole",
     "assignees_router",
     "decode_assignee_cursor",
     "encode_assignee_cursor",
@@ -54,6 +54,8 @@ _CURSOR: Final = re.compile(r"[A-Za-z0-9_-]{22}")
 _MANAGE: Final = PermissionKey.ACTIONS_MANAGE.value
 
 Services = Annotated[LoopHttp, Depends(loop_http)]
+AssigneeRole = Literal["coordinator_sst", "line_manager", "plant_manager"]
+"""Los tres roles de A-126 en el esquema (los de ``ASSIGNEE_ROLES``; lo comprueba la unidad)."""
 
 
 class _Strict(BaseModel):
@@ -66,7 +68,7 @@ class AssigneeOut(_Strict):
 
     user_id: uuid.UUID
     display_name: str
-    roles: tuple[Role, ...]
+    roles: tuple[AssigneeRole, ...]
     """Los roles con los que cubre la zona: ``coordinator_sst``, ``line_manager`` o
     ``plant_manager`` (A-126)."""
 
@@ -94,7 +96,11 @@ def decode_assignee_cursor(value: str) -> uuid.UUID:
 
 
 def _view(item: Assignee) -> AssigneeOut:
-    return AssigneeOut(user_id=item.user_id, display_name=item.display_name, roles=item.roles)
+    roles: tuple[AssigneeRole, ...] = tuple(
+        role.value  # type: ignore[misc]  # ASSIGNEE_ROLES son exactamente los tres de AssigneeRole
+        for role in item.roles
+    )
+    return AssigneeOut(user_id=item.user_id, display_name=item.display_name, roles=roles)
 
 
 def page_view(page: AssigneePage) -> AssigneePageOut:

@@ -2891,7 +2891,7 @@ export interface components {
       /** Display Name */
       display_name: string;
       /** Roles */
-      roles: components['schemas']['Role'][];
+      roles: ('coordinator_sst' | 'line_manager' | 'plant_manager')[];
     };
     /** AssigneePageOut */
     AssigneePageOut: {

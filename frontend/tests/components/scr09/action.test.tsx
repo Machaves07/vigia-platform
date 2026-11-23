@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -53,13 +53,17 @@ async function openForm(setup: () => void = () => undefined) {
   return { ...rendered, user, form };
 }
 
-async function fill(user: ReturnType<typeof userEvent.setup>) {
+async function fillFields(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(
     screen.getByRole('combobox', { name: text('scr09.loop.action_type') }),
     'engineering',
   );
   await user.type(screen.getByRole('textbox', { name: DESCRIPTION_NAME }), DESCRIPTION);
   await user.type(screen.getByRole('textbox', { name: EXPECTED_NAME }), EXPECTED);
+}
+
+async function fill(user: ReturnType<typeof userEvent.setup>) {
+  await fillFields(user);
   await user.click(screen.getByRole('button', { name: text('scr09.loop.submit') }));
 }
 
@@ -395,5 +399,29 @@ describe('SCR-09 responsable de la acción (TASK-583)', { timeout: 40_000 }, () 
       expect(bodies).toHaveLength(1);
     }, WAIT);
     expect((bodies[0] as { assignee_user_id: string }).assignee_user_id).toBe(USER);
+  });
+
+  it('Intro en la búsqueda no envía la acción con la coincidencia autoseleccionada', async () => {
+    const bodies: unknown[] = [];
+    const { user } = await openWith(PEOPLE);
+    server.use(created(bodies));
+    await fillFields(user);
+    await user.type(screen.getByRole('searchbox', { name: SEARCH_NAME }), 'elen{Enter}');
+    await act(async () => {
+      await new Promise((done) => {
+        setTimeout(done, 50);
+      });
+    });
+    // La búsqueda eligió a la primera coincidencia, pero nadie la ha enviado.
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: ASSIGNEE_NAME }).value).toBe(
+      ELENA,
+    );
+    expect(bodies).toEqual([]);
+    // El formulario sí se envía con el botón: Intro no era el único obstáculo.
+    await user.click(screen.getByRole('button', { name: text('scr09.loop.submit') }));
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    }, WAIT);
+    expect((bodies[0] as { assignee_user_id: string }).assignee_user_id).toBe(ELENA);
   });
 });

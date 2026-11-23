@@ -6,7 +6,8 @@
  * y la API no tiene búsqueda por persona. Solo aparece con muchas personas (pocos campos).
  *
  * Mientras la lista llega, o si no se puede leer, se ofrece a la persona en sesión, que siempre
- * puede ser responsable de lo que asigna; el servidor decide en `assign`.
+ * puede ser responsable de lo que asigna; el servidor decide en `assign`. Intro en la búsqueda
+ * no envía el formulario.
  */
 import { useEffect, useId, useState } from 'react';
 import { readAssignees, type Assignee } from '@/ports/scr09Closure';
@@ -103,6 +104,12 @@ export function AssigneePicker({
             name="assignee_search"
             value={search}
             aria-describedby={needle !== '' && matches.length === 0 ? `${id}-none` : undefined}
+            // Intro en la búsqueda solo busca: nunca envía el formulario que la contiene (la
+            // acción, la reapertura o la revisión del incerrable) con una coincidencia que nadie
+            // eligió.
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.preventDefault();
+            }}
             onChange={(event) => {
               const next = event.currentTarget.value;
               setSearch(next);
