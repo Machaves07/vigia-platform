@@ -113,7 +113,8 @@ describe('SCR-08 etiquetas', { timeout: 60_000 }, () => {
             next_cursor: { labeled_at: '2026-01-01T12:00:00.000Z', label_id: labelRow(1).label_id },
           });
     env.view();
-    await screen.findByRole('form', { name: text('scr08.labels.filters') }, WAIT);
+    // Los días se cuentan en la hora de la planta: sin la jerarquía cargada serían UTC.
+    await screen.findByRole('option', { name: ZONE_NAME }, WAIT);
     fill('2026-01-01', '2026-01-02');
     submit();
     await screen.findByRole('table', {}, WAIT);

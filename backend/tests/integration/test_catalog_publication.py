@@ -422,6 +422,20 @@ def _zone(site: Site, index: int = 0) -> tuple[uuid.UUID, uuid.UUID]:
     return site.zones()[index]
 
 
+def _keys_and_values(node: object, *, skip: frozenset[str]) -> Iterator[object]:
+    """Claves y valores hoja de un JSON, en profundidad, sin bajar por los valores de ``skip``."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key
+            if key not in skip:
+                yield from _keys_and_values(value, skip=skip)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _keys_and_values(item, skip=skip)
+    else:
+        yield node
+
+
 @pytest.fixture(scope="module")
 def catalogs(postgres_endpoint: PostgresEndpoint) -> Iterator[Catalogs]:
     world = asyncio.run(bootstrapped_world())
@@ -1007,11 +1021,16 @@ def test_nfr_gob_38_the_flag_lives_in_the_row_never_in_the_envelope_or_the_event
         envelope = json.loads(row["envelope"])
         for key in PLATFORM_ONLY:
             assert key not in json.dumps(envelope)
-    for event in catalogs.events(plant, zone):
+    events = catalogs.events(plant, zone)
+    assert events
+    for event in events:
         payload = json.loads(event["payload"])
         assert set(payload) == {"zone_id", "catalog_version", "changed_fields"}
-        assert "aggregation_window_minutes" not in event["payload"]
-        assert "480" not in event["payload"]
+        assert payload["zone_id"] == str(zone)
+        # Por estructura, no por subcadena: el UUID aleatorio de la zona puede contener «480».
+        tokens = list(_keys_and_values(payload, skip=frozenset({"zone_id"})))
+        assert "aggregation_window_minutes" not in tokens
+        assert 480 not in tokens and "480" not in tokens
 
 
 def test_nfr_gob_10_reading_the_stored_envelope_never_signs(faults: Catalogs) -> None:
