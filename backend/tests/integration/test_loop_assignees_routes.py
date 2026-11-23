@@ -121,6 +121,7 @@ def _listed(
     """Toda la lista, página a página (cada página comprobada)."""
     items: list[dict[str, Any]] = []
     cursor: str | None = None
+    cursors: set[str] = set()
     while True:
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
@@ -134,6 +135,9 @@ def _listed(
         cursor = body["next_cursor"]
         if cursor is None:
             return items
+        # Por clave un cursor nunca se repite; si se repite, la página no avanza.
+        assert cursor not in cursors, ("la paginación no avanza", cursor)
+        cursors.add(cursor)
 
 
 def _context(stack: ActionsStack, who: Who) -> ScopeContext:
