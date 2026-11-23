@@ -13,12 +13,25 @@
   font-size: var(--font-size-large);
 }
 
+/* Sin marcadores: en una fila flexible caían en el hueco del paso anterior y se leían pegados
+   («1. Porqué 12. Porqué 2», O-5). El separador visual y «Paso x de n» dan el orden. */
 .steps {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2) var(--space-3);
   margin: 0;
-  padding-inline-start: var(--space-6);
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+}
+
+.stepItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.separator {
   color: var(--color-text-muted);
 }
 

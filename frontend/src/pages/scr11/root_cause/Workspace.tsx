@@ -1,10 +1,12 @@
 /**
  * Área de trabajo de un análisis iniciado (IF-10; BR-APP-34, 43, 45, 47, 49).
  *
- * - UI-15 con seis pasos: los cinco porqués (cada uno se guarda en el servidor con SUP-U05-17) y
- *   la causa raíz con su categoría cerrada, el enunciado y la conclusión (se envían al firmar).
- *   «Guardar sin terminar» existe porque hay `server_progress_ref` (el `analysis_id`) y guarda
- *   los porqués con cambios.
+ * - UI-15 con los porqués guardados más el siguiente (como mucho cinco; cada uno se guarda en el
+ *   servidor con SUP-U05-17) y la causa raíz con su categoría cerrada, el enunciado y la
+ *   conclusión (se envían al firmar). El siguiente porqué en blanco lleva a la causa raíz
+ *   (TASK-581, `whySteps.ts`). «Siguiente» con un porqué sin guardar lo guarda (texto y categoría
+ *   en pantalla) y avanza solo si el servidor lo acepta. «Guardar sin terminar» existe porque hay
+ *   `server_progress_ref` (el `analysis_id`) y guarda los porqués con cambios.
  * - Cada texto es UI-13 con los límites de U-04 (`ROOT_CAUSE_TEXT_LIMITS`): contador, espejo de la
  *   política base antes de enviar y recorte de los extremos (A-126). Con un error local no se
  *   envía nada; el orden de los porqués, los validadores y la licencia los decide el servidor: sus
@@ -50,17 +52,21 @@ import { label } from '@/texts/labels';
 
 import styles from './root_cause.module.css';
 import { PendingInformation, SavedWhys, SignedAnalysis } from './AnalysisViews';
+import {
+  matches,
+  savedStep,
+  synced,
+  visibleWhyCount,
+  WHY_COUNT,
+  whyComplete,
+  whyHasChanges,
+  whyOptional,
+  type WhyDraft,
+} from './whySteps';
 import { ZoneContextPanel } from './ZoneContextPanel';
 
 /** Las tres categorías cerradas de causa (proceso, ingeniería, organización). */
 const CAUSE_CATEGORIES = ['process', 'engineering', 'organization'] as const;
-const WHY_COUNT = 5;
-
-interface WhyDraft {
-  readonly statement: string;
-  /** `''`: sin categoría. */
-  readonly category: string;
-}
 
 interface RootDraft {
   readonly category: string;
@@ -71,19 +77,8 @@ interface RootDraft {
 const EMPTY_ROOT: RootDraft = { category: '', statement: '', conclusion: '' };
 const LOOP_TEXT = { loopText: true } as const;
 
-/**
- * Un porqué posterior al primero puede quedar en blanco mientras no esté guardado: entonces no se
- * guarda. Uno ya guardado no se puede vaciar: en blanco es «obligatorio», anclado al campo.
- */
 function whyOptions(analysis: Analysis, offset: number) {
-  return {
-    loopText: true,
-    optional: offset > 0 && analysis.why_steps.every((step) => step.step_index !== offset + 1),
-  };
-}
-
-function savedStep(analysis: Analysis, index: number) {
-  return analysis.why_steps.find((step) => step.step_index === index);
+  return { loopText: true, optional: whyOptional(analysis, offset) };
 }
 
 function draftsFrom(analysis: Analysis): WhyDraft[] {
@@ -91,19 +86,6 @@ function draftsFrom(analysis: Analysis): WhyDraft[] {
     const saved = savedStep(analysis, offset + 1);
     return { statement: saved?.statement ?? '', category: saved?.category ?? '' };
   });
-}
-
-/** El porqué en pantalla coincide con el guardado: lo que se enviaría, en NFC como el servidor. */
-function matches(saved: ReturnType<typeof savedStep>, draft: WhyDraft | undefined): boolean {
-  if (saved === undefined || draft === undefined) return false;
-  return (
-    saved.statement.normalize('NFC') === submittedText(draft.statement).normalize('NFC') &&
-    (saved.category ?? '') === draft.category
-  );
-}
-
-function synced(analysis: Analysis, drafts: readonly WhyDraft[], offset: number): boolean {
-  return matches(savedStep(analysis, offset + 1), drafts[offset]);
 }
 
 function blank(value: string): boolean {
@@ -144,7 +126,11 @@ function WhyStep({
       <p data-part="question">
         <strong>{text('scr11.question')}:</strong> {question ?? text('scr11.question_pending')}
       </p>
-      {offset > 0 ? <p className={styles.hint}>{text('scr11.optional_step')}</p> : null}
+      {whyOptional(analysis, offset) ? (
+        <p className={styles.hint} data-part="optional-hint" data-text-key="scr11.optional_step">
+          {text('scr11.optional_step')}
+        </p>
+      ) : null}
       <ReasonField
         label={`${text('scr11.statement')} ${String(index)}`}
         name={`why-${String(index)}`}
@@ -393,9 +379,7 @@ export function Workspace({
   /** «Guardar sin terminar»: los porqués con cambios, en orden; el resto ya está en el servidor. */
   const savePartial = async (): Promise<void> => {
     for (let offset = 0; offset < WHY_COUNT; offset += 1) {
-      const draft = whys[offset];
-      if (draft === undefined || synced(analysis, whys, offset)) continue;
-      if (blank(draft.statement) && savedStep(analysis, offset + 1) === undefined) continue;
+      if (!whyHasChanges(analysis, whys, offset)) continue;
       await saveStep(offset);
     }
   };
@@ -442,13 +426,6 @@ export function Workspace({
   // la suya de la última respuesta, menos lo que la firma rechazada sí envió.
   const pendingItems =
     missing ?? (analysis.state === 'pending_information' ? analysis.pending_information : null);
-  const whyComplete = (offset: number) => {
-    const draft = whys[offset];
-    if (draft === undefined) return false;
-    if (synced(analysis, whys, offset)) return true;
-    // Un porqué posterior al primero puede quedar en blanco: el servidor decide el orden.
-    return offset > 0 && blank(draft.statement) && savedStep(analysis, offset + 1) === undefined;
-  };
   const rootComplete = root.category !== '' && !blank(root.statement) && !blank(root.conclusion);
   const dirty =
     !signed &&
@@ -461,11 +438,15 @@ export function Workspace({
   const textNotice =
     signatureNotice !== undefined && textRejection(signatureNotice) ? signatureNotice : undefined;
 
+  // Los porqués guardados más el siguiente: nunca uno que el servidor rechazaría por fuera de orden.
   const steps = [
-    ...whys.map((draft, offset) => ({
+    ...whys.slice(0, visibleWhyCount(analysis)).map((draft, offset) => ({
       id: `why-${String(offset + 1)}`,
       title: `${text('scr11.why_title')} ${String(offset + 1)}`,
-      complete: whyComplete(offset),
+      complete: whyComplete(analysis, whys, offset),
+      // «Siguiente» con cambios sin guardar los guarda (texto y categoría en pantalla) y avanza
+      // solo si el servidor los acepta.
+      onNext: whyHasChanges(analysis, whys, offset) ? () => saveStep(offset) : undefined,
       content: (
         <WhyStep
           analysis={analysis}
