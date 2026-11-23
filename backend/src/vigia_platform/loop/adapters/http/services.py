@@ -30,6 +30,7 @@ from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.history import ClosedFindingsService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
@@ -106,6 +107,8 @@ class LoopHttp:
     ``POST /loop/unclosable/{declaration_id}/reviews`` (LC-LAZ-09, VIG-228)."""
     timeline: FindingTimelineService | None = None
     """``GET /loop/findings/{finding_state_id}/timeline``: la ficha de vida (TASK-585)."""
+    history: ClosedFindingsService | None = None
+    """``GET /loop/closed-findings``: el histórico de lo cerrado (TASK-586)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -291,6 +294,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             actions=actions,
         ),
         timeline=build_timeline(services, detail),
+        history=ClosedFindingsService(database=services.database, authorizer=services.authorizer),
     )
 
 

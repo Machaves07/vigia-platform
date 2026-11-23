@@ -2186,6 +2186,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/loop/closed-findings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Histórico de lo cerrado: hallazgos cerrados y descartados, desde la proyección */
+    get: operations['list_closed_findings_loop_closed_findings_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/accreditation/exports': {
     parameters: {
       query?: never;
@@ -3597,6 +3614,52 @@ export interface components {
     /** CloseStepBody */
     CloseStepBody: {
       correction?: components['schemas']['CorrectionBody'] | null;
+    };
+    /** ClosedFindingOut */
+    ClosedFindingOut: {
+      /**
+       * Finding State Id
+       * Format: uuid
+       */
+      finding_state_id: string;
+      /**
+       * Plant Id
+       * Format: uuid
+       */
+      plant_id: string;
+      /**
+       * Zone Id
+       * Format: uuid
+       */
+      zone_id: string;
+      /** Family */
+      family: string;
+      /** Tier */
+      tier: string;
+      lifecycle_state: components['schemas']['FindingLifecycleState'];
+      /** Classification Outcome */
+      classification_outcome: string | null;
+      /** Reason Category */
+      reason_category: string | null;
+      /** Has Action */
+      has_action: boolean;
+      /** Has Signed Root Cause */
+      has_signed_root_cause: boolean;
+      /** Occurred At */
+      occurred_at: string;
+      /** Time Aggregated */
+      time_aggregated: boolean;
+      /** Aggregation Window Minutes */
+      aggregation_window_minutes: number | null;
+    };
+    /** ClosedFindingsPageOut */
+    ClosedFindingsPageOut: {
+      /** Items */
+      items: components['schemas']['ClosedFindingOut'][];
+      /** Partitions */
+      partitions: components['schemas']['PartitionOut'][];
+      /** Next Cursor */
+      next_cursor: string | null;
     };
     /**
      * ClosureBody
@@ -14465,6 +14528,44 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['FindingTimelineOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  list_closed_findings_loop_closed_findings_get: {
+    parameters: {
+      query?: {
+        zone_id?: string[] | null;
+        family?: components['schemas']['PredicateFamily'] | null;
+        tier?: components['schemas']['EvidenceTier'] | null;
+        lifecycle_state?: string[] | null;
+        from?: string | null;
+        to?: string | null;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ClosedFindingsPageOut'];
         };
       };
       /** @description Error genérico (ApiError) */

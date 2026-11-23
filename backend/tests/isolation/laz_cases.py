@@ -69,6 +69,7 @@ from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.history import ClosedFindingsService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
@@ -229,6 +230,9 @@ def _loop(services: LazServices) -> Mapping[str, object]:
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
             detail=_detail(services),  # TASK-342
             timeline=_timeline(services),  # TASK-585
+            history=ClosedFindingsService(  # TASK-586
+                database=database, authorizer=services.authorizer
+            ),
             review_queue=ReviewQueueService(  # TASK-309
                 database=database,
                 writer=services.writer,
@@ -607,6 +611,15 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
         ),
     ),
+    # TASK-586: el histórico de lo cerrado con una zona de B en la consulta responde igual que
+    # con una inexistente (not_found, nunca forbidden ni una página vacía con filas de B).
+    (
+        ("GET", "/loop/closed-findings"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", "/loop/closed-findings", params={"zone_id": str(i.zone)}),
+        ),
+    ),
     # VIG-232 (TASK-342): el detalle y el historial de un hallazgo de B responden igual que los de
     # uno inexistente (not_found, nunca gate_state_unavailable ni una sección degradada); no se
     # lee el expediente de B ni se pide ninguna URL de sus clips.
@@ -920,7 +933,9 @@ Los demás RESOURCE deben alcanzar 2xx; ningún 404 ni 400 genérico satisface l
 
 
 LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
-    "SUP-U05-01": frozenset({("GET", "/loop/findings")}),
+    # TASK-586: el histórico de lo cerrado es otra lectura de la proyección de la bandeja
+    # (listar_bandeja) con los dos estados que la bandeja no sirve.
+    "SUP-U05-01": frozenset({("GET", "/loop/findings"), ("GET", "/loop/closed-findings")}),
     # TASK-585: la ficha de vida es otra lectura del mismo detalle (ver_detalle_hallazgo).
     "SUP-U05-02": frozenset(
         {
@@ -986,9 +1001,9 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
 """Las 41 operaciones de LC-LAZ §6 y sus rutas.
 
 ``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias, ``SUP-U05-16`` lee además
-el análisis en curso para retomarlo (VIG-363) y ``SUP-U05-02`` también la ficha de vida del mismo
-hallazgo (TASK-585); por eso las 41 operaciones ocupan 44 rutas declaradas y 44 casos de
-aislamiento.
+el análisis en curso para retomarlo (VIG-363), ``SUP-U05-02`` también la ficha de vida del mismo
+hallazgo (TASK-585) y ``SUP-U05-01`` también el histórico de lo cerrado (TASK-586); por eso las
+41 operaciones ocupan 45 rutas declaradas y 45 casos de aislamiento.
 """
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(

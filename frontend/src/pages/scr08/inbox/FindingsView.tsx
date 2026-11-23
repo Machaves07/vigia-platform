@@ -35,7 +35,8 @@ export const FAMILIES = ['coexistence', 'guard_bypass', 'dwell', 'startup_transi
 export const TIERS = ['tier_1', 'tier_2'] as const;
 /**
  * Etiquetas de estado: los nueve de `finding_lifecycle_state`. Cerrado y descartado siguen aquí
- * porque se pintan fuera de la bandeja (detalle, lazos e histórico, TASK-586).
+ * porque se pintan fuera de la bandeja: el histórico de lo cerrado (TASK-586) los etiqueta con
+ * `findingLabel('state', …)`.
  */
 const STATES = [
   'received',
@@ -137,6 +138,12 @@ export function FindingsView({
   const zone = tableZone === null || tableZone === '' ? 'inline' : 'header';
   return (
     <>
+      {/* O-11 (TASK-586): lo cerrado y descartado se ve aparte, en el histórico. */}
+      <p>
+        <Link to="/findings/closed" data-part="closed_link">
+          {text('scr08.history.link')}
+        </Link>
+      </p>
       {/* S3-09 (VIG-365): los avisos de planta y de zona, con su título y lo que significan. */}
       {page.partitions.length > 0 && (
         <section

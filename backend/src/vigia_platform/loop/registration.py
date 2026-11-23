@@ -71,6 +71,7 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.history_routes import closed_findings_router
 from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
@@ -306,6 +307,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     vocabulary_router,  # SUP-U05-36 y 37 (TASK-350)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
     timeline_router,  # la ficha de vida del hallazgo (TASK-585)
+    closed_findings_router,  # el histórico de lo cerrado (TASK-586)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
 

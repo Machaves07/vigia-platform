@@ -25,8 +25,9 @@ describe('relevos de los grupos de rutas', () => {
         (group) => `src/pages/${pageDir(screen.screen_id)}/${group.id}/index.tsx`,
       ),
     );
-    // 48 grupos de U-05, `episodes` de SCR-06 (TASK-574, A-112) y `timeline` de SCR-08 (TASK-585).
-    expect(expected).toHaveLength(50);
+    // 48 grupos de U-05, `episodes` de SCR-06 (TASK-574, A-112), `timeline` (TASK-585) e
+    // `history` (TASK-586) de SCR-08.
+    expect(expected).toHaveLength(51);
     expect(expected.filter((file) => !files.has(file))).toEqual([]);
     const ignored = spawnSync('git', ['check-ignore', '--no-index', ...expected], {
       cwd: root,

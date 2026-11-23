@@ -5047,6 +5047,99 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/closed-findings":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Histórico de lo cerrado: hallazgos cerrados y descartados, desde la proyección"
+      "operationId": "list_closed_findings_loop_closed_findings_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "family"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/PredicateFamily"
+              - "type": "null"
+            "title": "Family"
+        - "name": "tier"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/EvidenceTier"
+              - "type": "null"
+            "title": "Tier"
+        - "name": "lifecycle_state"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+              - "type": "null"
+            "title": "Lifecycle State"
+        - "name": "from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "To"
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClosedFindingsPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -7591,6 +7684,96 @@
       "additionalProperties": false
       "type": "object"
       "title": "CloseStepBody"
+    "ClosedFindingOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "classification_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Classification Outcome"
+        "reason_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Category"
+        "has_action":
+          "type": "boolean"
+          "title": "Has Action"
+        "has_signed_root_cause":
+          "type": "boolean"
+          "title": "Has Signed Root Cause"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "aggregation_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Aggregation Window Minutes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "plant_id"
+        - "zone_id"
+        - "family"
+        - "tier"
+        - "lifecycle_state"
+        - "classification_outcome"
+        - "reason_category"
+        - "has_action"
+        - "has_signed_root_cause"
+        - "occurred_at"
+        - "time_aggregated"
+        - "aggregation_window_minutes"
+      "title": "ClosedFindingOut"
+    "ClosedFindingsPageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/ClosedFindingOut"
+          "type": "array"
+          "title": "Items"
+        "partitions":
+          "items":
+            "$ref": "#/components/schemas/PartitionOut"
+          "type": "array"
+          "title": "Partitions"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "partitions"
+        - "next_cursor"
+      "title": "ClosedFindingsPageOut"
     "ClosureBody":
       "properties":
         "closure_description":

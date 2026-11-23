@@ -66,6 +66,7 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.history_routes import closed_findings_router
 from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
@@ -216,6 +217,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/unclosable/{declaration_id}/reviews"),
                 # TASK-585: la ficha de vida (otra lectura de SUP-U05-02).
                 ("GET", "/loop/findings/{finding_state_id}/timeline"),
+                # TASK-586: el histórico de lo cerrado (otra lectura de SUP-U05-01).
+                ("GET", "/loop/closed-findings"),
             ]
             assert state[LOOP_STATE_KEY].overdue is not None
             assert state[LOOP_STATE_KEY].vocabulary is not None
@@ -231,6 +234,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].review_queue is not None
             assert state[LOOP_STATE_KEY].unclosable is not None
             assert state[LOOP_STATE_KEY].timeline is not None
+            assert state[LOOP_STATE_KEY].history is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -348,6 +352,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         vocabulary_router,  # TASK-350
         unclosable_router,
         timeline_router,  # TASK-585
+        closed_findings_router,  # TASK-586
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).

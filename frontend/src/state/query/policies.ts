@@ -62,6 +62,8 @@ const POLICY_KINDS = {
   'GET /loop/plants/{plant_id}/configuration': 'reference',
   'GET /loop/vocabulary': 'reference',
   'GET /loop/overdue': 'reference',
+  // El histórico de lo cerrado (TASK-586): proyección sin auditoría, a demanda (UI-14).
+  'GET /loop/closed-findings': 'reference',
   'GET /loop/assistant-requests/{request_id}': 'reference',
   'GET /plants/{plant_id}/fleet-thresholds': 'reference',
   'GET /fleet/nodes/{node_id}': 'reference',

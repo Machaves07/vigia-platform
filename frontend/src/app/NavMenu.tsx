@@ -101,14 +101,15 @@ interface SectionSpec {
 /**
  * Menú agrupado por tarea de los roles con muchas pantallas (sistema visual v1, «Estructura»). El
  * inicio del rol va primero aunque no esté aquí; lo que la sesión no puede abrir simplemente no
- * aparece. «Lazos de cierre» (VIG-365) es la bandeja con los estados de lazo vivo.
+ * aparece. «Lazos de cierre» (VIG-365) es la bandeja con los estados de lazo vivo; «Histórico de
+ * lo cerrado» (TASK-586), lo cerrado y descartado, aparte de la cola.
  */
 export const MENU_PROFILES: Readonly<Partial<Record<Role, readonly SectionSpec[]>>> = {
   coordinator_sst: [
     {
       id: 'work',
       title_text: 'navigation.menu.group.work',
-      slots: ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue', 'SCR-08:loops'],
+      slots: ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue', 'SCR-08:loops', 'SCR-08:history'],
     },
     {
       id: 'plant',
@@ -130,7 +131,7 @@ export const MENU_PROFILES: Readonly<Partial<Record<Role, readonly SectionSpec[]
     {
       id: 'tracking',
       title_text: 'navigation.menu.group.tracking',
-      slots: ['SCR-08:inbox', 'SCR-08:loops', 'SCR-10:queue', 'SCR-03:coverage'],
+      slots: ['SCR-08:inbox', 'SCR-08:loops', 'SCR-08:history', 'SCR-10:queue', 'SCR-03:coverage'],
     },
     {
       id: 'providers',

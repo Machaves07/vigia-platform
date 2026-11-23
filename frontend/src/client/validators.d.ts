@@ -86,6 +86,7 @@ export type QueryOperationId =
   | 'get_monthly_package_accreditation_monthly_packages_get'
   | 'list_admissions_plants__plant_id__admissions_get'
   | 'list_audit_entries_audit_entries_get'
+  | 'list_closed_findings_loop_closed_findings_get'
   | 'list_commitments_accreditation_commitments_get'
   | 'list_concessions_concessions_get'
   | 'list_enrollment_attempts_nodes__node_id__enrollment_attempts_get'

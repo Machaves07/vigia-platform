@@ -77,6 +77,7 @@ describe('menú agrupado por tarea (sistema visual v1, «Estructura»)', () => {
           ['navigation.menu.findings', '/findings'],
           ['navigation.menu.review_queue', '/review-queue'],
           ['navigation.menu.loops', '/findings/loops'],
+          ['navigation.menu.history', '/findings/closed'],
         ],
       ],
       [
