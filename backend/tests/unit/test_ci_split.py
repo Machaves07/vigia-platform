@@ -1,20 +1,22 @@
-"""La integración de ``ci.yml`` en 4 grupos por tiempos medidos (2026-10-19).
+"""La integración de ``ci.yml`` en 8 grupos por tiempos medidos (2026-11-23; 4 desde el 2026-10-19).
 
 Antes iba en dos mitades por directorio (retro 23 C, 2026-10-07): 32 y 37 min, el camino crítico
-del CI. Ahora es una matriz de 4 grupos de pytest-split, como las pruebas sin integración:
+del CI. Luego, una matriz de 4 grupos de 23 a 35 min; ahora de 8 grupos de pytest-split, como las
+pruebas sin integración:
 
-- **Matriz** (``backend-integracion-grupos``, «backend (pruebas de integración, grupo N de 4)»):
+- **Matriz** (``backend-integracion-grupos``, «backend (pruebas de integración, grupo N de 8)»):
   ``-m integration --ignore=tests/load`` sobre toda la suite (sin rutas), con
-  ``--splits=4 --group="$GRUPO" --durations-path=.test_durations_integracion``, cobertura y un
+  ``--splits=8 --group="$GRUPO" --durations-path=.test_durations_integracion``, cobertura y un
   artefacto ``cobertura-integracion-N`` por grupo. ``tests/load`` corre en «backend (carga ci)».
 - **Agregadores**: «backend (pruebas de integración)» y «backend (pruebas de integración, segunda
-  mitad)» conservan su nombre porque la sesión de control los exige; dependen de la matriz, corren
-  siempre (``always()``: un check omitido cuenta como superado) y fallan si no terminó en verde.
+  mitad)» conservan su nombre porque la sesión de control los exige; los dos agregan los 8 grupos:
+  dependen de la matriz, corren siempre (``always()``: un check omitido cuenta como superado) y
+  fallan si no terminó en verde.
 - ``cobertura`` espera a la matriz y a los 4 grupos sin integración.
-- Perfil de Hypothesis: los 8 grupos usan ``pr`` en los pull_request y ``ci`` en main; la carga
+- Perfil de Hypothesis: los 12 grupos usan ``pr`` en los pull_request y ``ci`` en main; la carga
   sigue con ``ci``. El perfil ``pr`` existe en ``tests/conftest.py`` con 50 ejemplos.
 
-Que la unión de los 4 grupos sea la colección completa lo comprueba ``tools/check_test_split.py
+Que la unión de los 8 grupos sea la colección completa lo comprueba ``tools/check_test_split.py
 --collect`` en «backend (lint y tipos)». Aquí se lee ``ci.yml`` y se exige que cada directorio de
 ``tests/`` con pruebas ``integration`` corra exactamente una vez. Cada regla se prueba también en
 negativo con un flujo sintético que la incumple.
@@ -47,7 +49,7 @@ CI = REPOSITORY / ".github" / "workflows" / "ci.yml"
 TESTS = REPOSITORY / "backend" / "tests"
 
 MATRIX = "backend-integracion-grupos"
-MATRIX_NAME = "backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)"
+MATRIX_NAME = "backend (pruebas de integración, grupo ${{ matrix.grupo }} de 8)"
 UNIT_MATRIX = "backend-pruebas"
 AGGREGATORS = {
     "backend-integracion": "backend (pruebas de integración)",
@@ -58,7 +60,8 @@ LOAD = "backend-carga"
 LOAD_DIRECTORY = "tests/load"
 DURATIONS = ".test_durations_integracion"
 PROFILE_EXPRESSION = "${{ github.event_name == 'pull_request' && 'pr' || 'ci' }}"
-GROUPS = [1, 2, 3, 4]
+GROUPS = [1, 2, 3, 4, 5, 6, 7, 8]
+SPLITS = str(len(GROUPS))
 
 _INTEGRATION_MARK = re.compile(r"mark\.integration\b")
 _OPTIONS_WITH_VALUE = frozenset({"-m", "-p", "-k", "--ignore", "--deselect"})
@@ -155,7 +158,7 @@ def _matrix_problems(jobs: dict[Any, Any]) -> list[str]:
     if call.paths:
         problems.append(f"{MATRIX} corre toda la suite: sin rutas ({call.paths})")
     expected = {
-        "--splits": "4",
+        "--splits": SPLITS,
         "--group": "$GRUPO",
         "--splitting-algorithm": "least_duration",
         "--durations-path": DURATIONS,
@@ -306,7 +309,7 @@ def test_the_ci_profiles_use_the_fixed_and_the_session_seed(profile: str) -> Non
 
 _MATRIX_COMMAND = (
     'uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile="$PERFIL" '
-    '-m integration --ignore=tests/load --splits=4 --group="$GRUPO" '
+    f'-m integration --ignore=tests/load --splits={SPLITS} --group="$GRUPO" '
     f"--splitting-algorithm=least_duration --durations-path={DURATIONS}"
 )
 _AGGREGATOR_RUN = 'test "$GRUPOS" = success'
@@ -315,7 +318,7 @@ _AGGREGATOR_RUN = 'test "$GRUPOS" = success'
 def _workflow(
     command: str = _MATRIX_COMMAND,
     name: str = MATRIX_NAME,
-    groups: str = "[1, 2, 3, 4]",
+    groups: str = str(GROUPS),
     fail_fast: str = "false",
     profile: str = PROFILE_EXPRESSION,
     artifact: str = "cobertura-integracion-${{ matrix.grupo }}",
@@ -396,8 +399,8 @@ def test_the_synthetic_split_passes(tests_root: Path) -> None:
             f"{MATRIX} debe correr -m integration",
         ),
         (
-            {"command": _MATRIX_COMMAND.replace("--splits=4", "--splits=2")},
-            f"{MATRIX} debe pasar --splits=4",
+            {"command": _MATRIX_COMMAND.replace(f"--splits={SPLITS}", "--splits=2")},
+            f"{MATRIX} debe pasar --splits={SPLITS}",
         ),
         (
             {"command": _MATRIX_COMMAND.replace('--group="$GRUPO"', "--group=1")},
