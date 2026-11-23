@@ -278,6 +278,38 @@ describe('SCR-09 cierre y navegación de adjuntos', { timeout: 40_000 }, () => {
       expect(result.live).toEqual([]);
     });
 
+    /**
+     * TASK-586 (menores 1 y 2 de la revisión de TASK-582): el cierre firmado no reescribe la fila
+     * de la acción (VIG-233). Con el hallazgo cerrado, una acción que quedó `overdue` ya no cuenta
+     * como vencida y una `assigned` no anuncia un plazo; con el lazo suspendido, tampoco.
+     */
+    it.each([
+      ['closed', 'overdue', true],
+      ['closed', 'assigned', true],
+      ['suspended_by_reclassification', 'assigned', true],
+      ['suspended_by_reclassification', 'overdue', false],
+    ] as const)(
+      'con el hallazgo %s, una acción %s no cuenta ni anuncia plazo',
+      async (lifecycle, state, counts) => {
+        const [action] = detail.actions;
+        if (action === undefined) throw new Error('Falta la acción sintética.');
+        await renderClosure('closure', {
+          detail: {
+            ...detail,
+            lifecycle_state: lifecycle,
+            actions: [
+              { ...action, state, counts_as_overdue: counts, due_at: '2026-10-01T15:00:00.000Z' },
+            ],
+          },
+        });
+        await load();
+        const region = screen.getByRole('region', { name: text('scr09.overdue.title') });
+        expect(region.querySelector('[data-part="overdue_count"]')?.textContent).toBe(count(0));
+        expect(region.querySelectorAll('[data-part="overdue_action"]')).toHaveLength(0);
+        expect(region.querySelectorAll('[data-part="live_action"]')).toHaveLength(0);
+      },
+    );
+
     it('un solo reloj: con el plazo pasado y la acción aún assigned, el contador es 0', async () => {
       expect(
         await overdueOf({

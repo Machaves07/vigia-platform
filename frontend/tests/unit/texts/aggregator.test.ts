@@ -117,6 +117,7 @@ describe('textos por ruta (VIG-364)', () => {
     expect(screenTextFiles(['SCR-08'])).toEqual([
       './scr08.json',
       './scr08_detail.json',
+      './scr08_history.json',
       './scr08_home.json',
       './scr08_next_step.json',
       './scr08_timeline.json',

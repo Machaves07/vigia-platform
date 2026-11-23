@@ -2728,6 +2728,23 @@
       }
     },
     {
+      "operationId": "list_closed_findings_loop_closed_findings_get",
+      "method": "get",
+      "path": "/loop/closed-findings",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/ClosedFindingsPageOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "request_export_accreditation_exports_post",
       "method": "post",
       "path": "/accreditation/exports",
@@ -5495,6 +5512,123 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "ClosedFindingOut": {
+      "properties": {
+        "finding_state_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "plant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "zone_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "family": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "lifecycle_state": {
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        },
+        "classification_outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_action": {
+          "type": "boolean"
+        },
+        "has_signed_root_cause": {
+          "type": "boolean"
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "time_aggregated": {
+          "type": "boolean"
+        },
+        "aggregation_window_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "finding_state_id",
+        "plant_id",
+        "zone_id",
+        "family",
+        "tier",
+        "lifecycle_state",
+        "classification_outcome",
+        "reason_category",
+        "has_action",
+        "has_signed_root_cause",
+        "occurred_at",
+        "time_aggregated",
+        "aggregation_window_minutes"
+      ]
+    },
+    "ClosedFindingsPageOut": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ClosedFindingOut"
+          },
+          "type": "array"
+        },
+        "partitions": {
+          "items": {
+            "$ref": "#/components/schemas/PartitionOut"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "items",
+        "partitions",
+        "next_cursor"
+      ]
     },
     "ClosureBody": {
       "properties": {

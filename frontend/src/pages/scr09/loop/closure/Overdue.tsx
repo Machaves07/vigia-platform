@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { shownActionState } from '@/pages/shared/actionState';
 import {
   closurePort,
   recordContent,
@@ -88,11 +89,20 @@ export function Overdue({
   // BR-LAZ-46) y que cuenta para los vencimientos (`counts_as_overdue`, falso con el lazo
   // suspendido, BR-LAZ-24). `counts_as_overdue` solo no significa «vencida», y `due_at` nunca se
   // compara con el reloj del navegador: las vigencias tienen un solo reloj.
+  // TASK-586 (revisión de TASK-582): el cierre no reescribe la fila de la acción (VIG-233), así que
+  // se mira el estado que se muestra (`shownActionState`): con el hallazgo cerrado, la acción
+  // vigente está cerrada con él y ni cuenta como vencida ni tiene un plazo que corra.
+  const shown = (action: Detail['actions'][number]) =>
+    shownActionState(action.state, detail.lifecycle_state);
   const local = detail.actions.filter(
-    (action) => action.state === 'overdue' && action.counts_as_overdue,
+    (action) => shown(action) === 'overdue' && action.counts_as_overdue,
   );
-  // La acción vigente se muestra con su plazo, no como vencida.
-  const live = detail.actions.filter((action) => action.state === 'assigned');
+  // La acción vigente se muestra con su plazo, no como vencida; con el lazo suspendido por
+  // reclasificación (BR-LAZ-24) su plazo no corre y no se anuncia «Vence el …».
+  const live = detail.actions.filter(
+    (action) =>
+      shown(action) === 'assigned' && detail.lifecycle_state !== 'suspended_by_reclassification',
+  );
   const zoneNames = Object.fromEntries(
     context.plants.flatMap((plant) => plant.zones.map((zone) => [zone.zone_id, zone.name])),
   );

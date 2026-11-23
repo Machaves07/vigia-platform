@@ -7,6 +7,8 @@
  * «Inicio del coordinador» (solo el suyo) y «Bandeja de hallazgos», cada una con el nombre de su
  * página. `timeline` (TASK-585) es la ficha de vida de un hallazgo: va por `finding_state_id`, así
  * que no tiene entrada de menú (el menú solo elige zona o planta); se llega desde el detalle.
+ * `history` (TASK-586, O-11) es el histórico de lo cerrado: los hallazgos cerrados y descartados,
+ * aparte de la bandeja; tiene entrada de menú y se llega también desde la bandeja.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -43,6 +45,14 @@ export const descriptor: ScreenDescriptor = {
       load: () => import('./loops'),
     },
     {
+      id: 'history',
+      paths: ['/findings/closed'],
+      access: 'permission',
+      required_permissions: ['findings.read'],
+      menu: { title_text: 'navigation.menu.history' },
+      load: () => import('./history'),
+    },
+    {
       id: 'labels',
       paths: ['/findings/labels'],
       access: 'permission',
@@ -75,6 +85,7 @@ export const descriptor: ScreenDescriptor = {
     { id: 'coverage_at', group: 'detail', required_permissions: ['coverage.read'] },
     { id: 'labels', group: 'labels', required_permissions: ['labels.read'] },
     { id: 'timeline', group: 'timeline', required_permissions: ['findings.read'] },
+    { id: 'history', group: 'history', required_permissions: ['findings.read'] },
   ],
   expected_roles: ['coordinator_sst'],
   backend_unit: 'U-04',

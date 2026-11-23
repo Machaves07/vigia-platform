@@ -1,12 +1,12 @@
 """PR-LAZ-62: el catálogo de las 41 operaciones de U-04 no deja rutas sin aislar.
 
 LC-LAZ §6 define 41 operaciones, aunque ``SUP-U05-35`` usa dos verbos sobre el mismo recurso de
-preferencias, ``SUP-U05-16`` lee además el análisis en curso para retomarlo (VIG-363) y
-``SUP-U05-07`` lista los responsables posibles de la acción (TASK-583) y ``SUP-U05-02`` lee
-también la ficha de vida del mismo hallazgo (TASK-585). Por ello hay 45 rutas y 45 casos de
-aislamiento. Esta metapropiedad mantiene ambas
-fronteras sincronizadas: una ruta nueva, una operación sin caso, una ruta pública o una clave de
-instalador del proveedor rompe la prueba antes de llegar a producción.
+preferencias, ``SUP-U05-16`` lee además el análisis en curso para retomarlo (VIG-363),
+``SUP-U05-07`` lista los responsables posibles de la acción (TASK-583), ``SUP-U05-02`` lee
+también la ficha de vida del mismo hallazgo (TASK-585) y ``SUP-U05-01`` también el histórico de
+lo cerrado (TASK-586). Por ello hay 46 rutas y 46 casos de aislamiento. Esta metapropiedad
+mantiene ambas fronteras sincronizadas: una ruta nueva, una operación sin caso, una ruta pública
+o una clave de instalador del proveedor rompe la prueba antes de llegar a producción.
 """
 
 from __future__ import annotations
@@ -102,8 +102,9 @@ def test_pr_laz_62_every_operation_has_a_private_declared_route_and_case() -> No
     assert set(case_by_key) == set(routes)
     # SUP-U05-35 tiene GET y PUT; SUP-U05-16, POST y la lectura del análisis en curso (VIG-363);
     # SUP-U05-07, POST y la lista de responsables posibles (TASK-583).
-    # SUP-U05-02, el detalle y la ficha de vida del hallazgo (TASK-585).
-    assert len(case_by_key) == 45
+    # SUP-U05-02, el detalle y la ficha de vida del hallazgo (TASK-585); SUP-U05-01, la bandeja y
+    # el histórico de lo cerrado (TASK-586).
+    assert len(case_by_key) == 46
     assert uncovered_operation_cases(routes) == []
     # La barrera CSRF por cada ruta (incluidos cuerpos y verbos) se ejecuta en PR-NUC-53:
     # tests/properties/test_csrf_barrier.py, no mediante pertenencia a una constante global.

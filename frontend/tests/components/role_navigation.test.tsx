@@ -103,6 +103,7 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
         ['navigation.menu.coordinator_home', '/home'],
         ['navigation.menu.findings', '/findings'],
         ['navigation.menu.loops', '/findings/loops'],
+        ['navigation.menu.history', '/findings/closed'],
       ],
     ],
     [
@@ -110,6 +111,7 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
       [
         ['navigation.menu.findings', '/findings'],
         ['navigation.menu.loops', '/findings/loops'],
+        ['navigation.menu.history', '/findings/closed'],
       ],
     ],
     ['administrator', []],
@@ -338,7 +340,7 @@ describe('menú agrupado por rol con la tabla real (VIG-365)', () => {
     expect(sectionsOf('coordinator_sst')).toEqual([
       [
         'navigation.menu.group.work',
-        ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue', 'SCR-08:loops'],
+        ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue', 'SCR-08:loops', 'SCR-08:history'],
       ],
       [
         'navigation.menu.group.plant',
@@ -381,7 +383,7 @@ describe('menú agrupado por rol con la tabla real (VIG-365)', () => {
     const sections = sectionsOf('plant_manager');
     expect(sections.find(([title]) => title === 'navigation.menu.group.tracking')).toEqual([
       'navigation.menu.group.tracking',
-      ['SCR-08:inbox', 'SCR-08:loops', 'SCR-10:queue', 'SCR-03:coverage'],
+      ['SCR-08:inbox', 'SCR-08:loops', 'SCR-08:history', 'SCR-10:queue', 'SCR-03:coverage'],
     ]);
   });
 });

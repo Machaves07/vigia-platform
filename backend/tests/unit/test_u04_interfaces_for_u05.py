@@ -425,6 +425,27 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             ),
         ),
     ),
+    ("GET", "/loop/closed-findings"): (
+        "SUP-U05-01",
+        Difference(
+            design="SUP-U05-01 solo con GET /loop/findings (los siete estados activos)",
+            code=(
+                "GET /loop/findings y GET /loop/closed-findings (closed y discarded), misma clave, "
+                "alcance y filtros de BR-LAZ-02"
+            ),
+            reason=(
+                "TASK-586 (O-11): la bandeja es la cola de trabajo y no sirve lo cerrado; el "
+                "histórico lo lista aparte, desde la proyección y sin auditoría de consulta; "
+                "PR-LAZ-62 lo cuenta como otra lectura de SUP-U05-01"
+            ),
+            note=(
+                "**Histórico de lo cerrado** (SCR-08): además de `SUP-U05-01`, U-04 sirve "
+                "`GET /loop/closed-findings` (`findings.read`, zona), con los hallazgos `closed` y "
+                "`discarded` del alcance por páginas de clave y cada fila enlazada a su ficha de "
+                "vida."
+            ),
+        ),
+    ),
 }
 
 SCOPES: Final = frozenset({"zona", "planta", "organización", "propias", "zona o planta"})
@@ -619,13 +640,23 @@ def test_the_scope_of_each_addition_is_the_one_of_its_operation(
 ) -> None:
     for (method, path), (operation_id, _) in ROUTE_ADDITIONS.items():
         scope = DOCUMENTED_OPERATIONS[operation_id].scope
-        assert not SCOPE_PARAMETERS & set(_parameters(app_yaml, method, path))
+        parameters = _parameters(app_yaml, method, path)
         if scope == "propias":
+            assert not SCOPE_PARAMETERS & set(parameters)
             assert _KINDS[(method, path)] is Kind.OWN
-        else:
+        elif "{finding_state_id}" in path:
             # VIG-363: la zona del sujeto, que la ruta nombra por su identificador.
             assert scope == "zona"
-            assert "{finding_state_id}" in path
+            assert not SCOPE_PARAMETERS & set(parameters)
+            assert _KINDS[(method, path)] is Kind.RESOURCE
+        else:
+            # TASK-586: el histórico de lo cerrado filtra por zona como la bandeja (SUP-U05-01):
+            # ``zone_id`` opcional y ningún otro parámetro de alcance, igual que su operación.
+            assert scope == "zona"
+            documented = _parameters(app_yaml, *_key(operation_id))
+            assert SCOPE_PARAMETERS & set(parameters) == SCOPE_PARAMETERS & set(documented)
+            assert SCOPE_PARAMETERS & set(parameters) == {"zone_id"}
+            assert parameters["zone_id"] is False
             assert _KINDS[(method, path)] is Kind.RESOURCE
 
 
