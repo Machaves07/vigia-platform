@@ -116,11 +116,9 @@ function reshaped(state: StepWizardState, from: readonly (number | null)[]): Ste
   const completed = from.map((old) => old !== null && state.completed[old] === true);
   const stepCount = completed.length;
   const kept = from.indexOf(state.position);
-  const target = isSummary(state)
-    ? stepCount
-    : kept >= 0
-      ? kept
-      : Math.min(state.position, stepCount);
+  // Desde el resumen, `position` ya es el número de pasos anterior: sigue en el resumen si la lista
+  // no crece; si crece, los pasos nuevos llegan incompletos y el flujo vuelve al primero de ellos.
+  const target = kept >= 0 ? kept : Math.min(state.position, stepCount);
   const firstIncomplete = completed.indexOf(false);
   const position = firstIncomplete >= 0 ? Math.min(target, firstIncomplete) : target;
   return { ...state, stepCount, completed, position };

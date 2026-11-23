@@ -19,6 +19,7 @@ import {
   WHY_COUNT,
   whyComplete,
   whyHasChanges,
+  whyOptional,
   type WhyDraft,
 } from '@/pages/scr11/root_cause/whySteps';
 import type { Analysis } from '@/ports/scr11RootCause';
@@ -115,12 +116,10 @@ describe('PR-APP-13 · flujo por pasos', () => {
                 expect(state).toBe(before);
               } else {
                 expect(state.stepCount).toBe(applied.from.length);
-                // El paso en pantalla se sigue por identidad, y el resumen sigue siendo el resumen,
-                // mientras ningún paso anterior quede incompleto.
+                // El paso en pantalla se sigue por identidad mientras ningún paso anterior quede
+                // incompleto.
                 const kept = applied.from.indexOf(before.position);
-                if (isSummary(before) && state.completed.every(Boolean)) {
-                  expect(isSummary(state)).toBe(true);
-                } else if (!isSummary(before) && kept >= 0 && allCompleteBefore(state, kept)) {
+                if (!isSummary(before) && kept >= 0 && allCompleteBefore(state, kept)) {
                   expect(state.position).toBe(kept);
                 }
                 state.completed.forEach((done, i) => {
@@ -480,5 +479,9 @@ describe('PR-APP-13 · SCR-11 con los porqués guardados más el siguiente', () 
     expect(whyComplete(saved, recategorized, 0)).toBe(false);
     expect(whyHasChanges(saved, recategorized, 0)).toBe(true);
     expect(visibleWhyCount(emptyAnalysis())).toBe(1);
+    // El primer porqué nunca es opcional: en blanco no está completo.
+    const none: WhyDraft[] = [{ statement: '', category: '' }];
+    expect(whyOptional(emptyAnalysis(), 0)).toBe(false);
+    expect(whyComplete(emptyAnalysis(), none, 0)).toBe(false);
   });
 });
