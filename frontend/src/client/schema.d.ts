@@ -5338,6 +5338,18 @@ export interface components {
       finding_state_id: string;
       /** Subject Kind */
       subject_kind: string;
+      /**
+       * Plant Id
+       * Format: uuid
+       */
+      plant_id: string;
+      /**
+       * Zone Id
+       * Format: uuid
+       */
+      zone_id: string;
+      /** Family */
+      family: string;
       lifecycle_state: components['schemas']['FindingLifecycleState'];
       /** Time Aggregated */
       time_aggregated: boolean;

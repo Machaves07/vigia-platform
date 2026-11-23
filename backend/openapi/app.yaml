@@ -10664,6 +10664,17 @@
         "subject_kind":
           "type": "string"
           "title": "Subject Kind"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
         "lifecycle_state":
           "$ref": "#/components/schemas/FindingLifecycleState"
         "time_aggregated":
@@ -10689,6 +10700,9 @@
       "required":
         - "finding_state_id"
         - "subject_kind"
+        - "plant_id"
+        - "zone_id"
+        - "family"
         - "lifecycle_state"
         - "time_aggregated"
         - "aggregation_window_minutes"

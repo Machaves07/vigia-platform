@@ -727,6 +727,12 @@ export function DetailView({
 }) {
   return (
     <>
+      {/* La ficha de vida (TASK-585): el ciclo completo con sus tiempos y plazos, en una página. */}
+      <p data-part="timeline_link_paragraph">
+        <Link to={`/findings/${detail.finding_state_id}/timeline`} data-part="timeline_link">
+          {text('scr08.timeline.link')}
+        </Link>
+      </p>
       <Notices detail={detail} timeZone={timeZone} />
       <Summary detail={detail} timeZone={timeZone} zone={zone} />
       <Observability

@@ -124,6 +124,10 @@ class TimelineSummaryOut(_Strict):
 class FindingTimelineOut(_Strict):
     finding_state_id: uuid.UUID
     subject_kind: str
+    plant_id: uuid.UUID
+    """La planta del hallazgo: su zona horaria para mostrar las horas (UI-25)."""
+    zone_id: uuid.UUID
+    family: str
     lifecycle_state: FindingLifecycleState
     time_aggregated: bool
     aggregation_window_minutes: int | None
@@ -201,6 +205,9 @@ def timeline_view(timeline: FindingTimeline) -> FindingTimelineOut:
     return FindingTimelineOut(
         finding_state_id=timeline.finding_state_id,
         subject_kind=timeline.subject_kind,
+        plant_id=timeline.plant_id,
+        zone_id=timeline.zone_id,
+        family=timeline.family,
         lifecycle_state=timeline.lifecycle_state,
         time_aggregated=timeline.time_aggregated,
         aggregation_window_minutes=timeline.aggregation_window_minutes,

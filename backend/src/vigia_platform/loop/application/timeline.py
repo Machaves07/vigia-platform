@@ -211,6 +211,9 @@ class TimelineSummary:
 class FindingTimeline:
     finding_state_id: uuid.UUID
     subject_kind: str
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    family: str
     lifecycle_state: FindingLifecycleState
     time_aggregated: bool
     aggregation_window_minutes: int | None
@@ -575,6 +578,9 @@ def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
     return FindingTimeline(
         finding_state_id=uuid.UUID(str(subject["finding_state_id"])),
         subject_kind=str(subject["subject_kind"]),
+        plant_id=uuid.UUID(str(subject["plant_id"])),
+        zone_id=uuid.UUID(str(subject["zone_id"])),
+        family=str(subject["family"]),
         lifecycle_state=state,
         time_aggregated=shown.single,
         aggregation_window_minutes=shown.window if shown.single else None,

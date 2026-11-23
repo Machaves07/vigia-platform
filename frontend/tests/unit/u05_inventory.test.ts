@@ -137,8 +137,8 @@ describe('hito U-05: pantallas', () => {
         (group) => `src/pages/scr${screen.screen_id.slice('SCR-'.length)}/${group.id}/index.tsx`,
       ),
     );
-    // 48 grupos de U-05 y `episodes` de SCR-06 (TASK-574, A-112).
-    expect(groups).toHaveLength(49);
+    // 48 grupos de U-05, `episodes` de SCR-06 (TASK-574, A-112) y `timeline` de SCR-08 (TASK-585).
+    expect(groups).toHaveLength(50);
     const relays = groups.filter((file) => {
       const source = read(file);
       return /\bRelayPage\b/.test(source) || /\brelevo de VIG-290\b/.test(source);

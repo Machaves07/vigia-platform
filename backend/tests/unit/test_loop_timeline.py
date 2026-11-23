@@ -203,6 +203,9 @@ def subject_row(
     return {
         "finding_state_id": str(uuid.UUID(int=1000)),
         "subject_kind": kind,
+        "plant_id": str(PLANT),
+        "zone_id": str(ZONE),
+        "family": "coexistence",
         "lifecycle_state": state,
         "single_occupancy_zone": single,
         "aggregation_window_minutes": window,
