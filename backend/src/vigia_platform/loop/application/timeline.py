@@ -502,9 +502,10 @@ class _Walk:
         self.milestones.append(milestone)
 
 
-def _summary(
-    inputs: TimelineInputs, walk: _Walk, rule: _Rule, state: FindingLifecycleState
-) -> TimelineSummary:
+def _summary(walk: _Walk, rule: _Rule, state: FindingLifecycleState) -> TimelineSummary:
+    """El resumen: el último cierre si sigue cerrado, sus días hábiles con el calendario de la
+    recepción, la primera clasificación y la acción vigente (la última asignada: la que un cierre
+    cita, o la que sigue abierta)."""
     milestones = walk.milestones
     received = next((m.at for m in milestones if m.kind is MilestoneKind.FINDING_RECEIVED), None)
     closures = [m for m in milestones if m.kind is MilestoneKind.CLOSURE]
@@ -514,31 +515,16 @@ def _summary(
         days = _business_days(
             local_date(received, rule.timezone), local_date(closed.at, rule.timezone), rule.rule
         )
-    actions = {
-        str(item.document.get("action_id")): m
-        for item, m in zip(inputs.records, milestones, strict=True)
-        if m.kind is MilestoneKind.ACTION_ASSIGNED
-    }
-    cited = None
-    if closed is not None:
-        cited = actions.get(str(_closure_action(inputs.records, closed.record_id)))
-    elif actions:
-        cited = list(actions.values())[-1]
+    actions = [m for m in milestones if m.kind is MilestoneKind.ACTION_ASSIGNED]
+    current = actions[-1].deadline if actions else None
     first = walk.first_classification
     return TimelineSummary(
         received_at=received,
         closed_at=None if closed is None else closed.at,
         business_days_to_close=days,
         classification_met=None if first is None or first.deadline is None else first.deadline.met,
-        action_met=None if cited is None or cited.deadline is None else cited.deadline.met,
+        action_met=None if current is None else current.met,
     )
-
-
-def _closure_action(records: Sequence[TimelineSource], record_id: uuid.UUID) -> str | None:
-    for item in records:
-        if item.record_id == record_id:
-            return _text(item.document, "action_id")
-    return None
 
 
 def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
@@ -565,7 +551,7 @@ def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
         time_aggregated=shown.single,
         aggregation_window_minutes=shown.window if shown.single else None,
         truncated=inputs.truncated,
-        summary=_summary(inputs, walk, rule, state),
+        summary=_summary(walk, rule, state),
         milestones=tuple(walk.milestones),
     )
 

@@ -676,6 +676,18 @@ def test_the_action_deadline_is_met_only_when_closed_before_its_frozen_due_date(
     assert action_deadlines(on_due) == [False, None]
     # Abierta y en plazo: aún no se sabe.
     assert action_deadlines(cycle()[:5]) == [None]
+    # Abierta con el vencimiento declarado: fuera de plazo aunque aún no se cierre (BR-LAZ-46).
+    assert action_deadlines(cycle()[:6]) == [False]
+    # Un vencimiento que llega después del cierre no cambia lo cerrado a tiempo.
+    in_time = closed_cycle(close_offset=timedelta(days=1, hours=5))
+    late_notice = TimelineSource(
+        record_id=uuid.UUID(int=4100),
+        chain_sequence=in_time[-1].chain_sequence + 1,
+        record_type="action_overdue",
+        received_at=in_time[-1].received_at + timedelta(days=3),
+        document={"action_id": str(ACTION), "subject_id": str(SUBJECT), "days_overdue": 1},
+    )
+    assert action_deadlines([*in_time, late_notice]) == [True]
 
 
 def test_the_summary_says_received_closed_business_days_and_both_deadlines() -> None:
@@ -966,3 +978,35 @@ def test_the_reader_rejects_a_malformed_subject_before_reading() -> None:
             asyncio.run(reader.subject_history(context, subject, limit=10))  # type: ignore[arg-type]
     with pytest.raises(LedgerQueryInvalid):
         asyncio.run(reader.subject_history(context, good, limit=10, preceding_types=("Mal",)))
+
+
+def test_only_the_first_classification_has_a_deadline_and_it_drives_the_summary() -> None:
+    late = T0 + timedelta(days=9)
+    records = [
+        *cycle()[:2],
+        TimelineSource(
+            record_id=uuid.UUID(int=4200),
+            chain_sequence=99,
+            record_type="classification",
+            received_at=late,
+            document=classification_document(late, 2),
+        ),
+    ]
+    timeline = compose(records)
+    first, again = [m for m in timeline.milestones if m.kind is MilestoneKind.CLASSIFICATION]
+    assert first.deadline is not None and first.deadline.met is True
+    assert again.deadline is None
+    assert timeline.summary.classification_met is True
+
+
+def test_a_snapshot_without_a_name_has_no_actor() -> None:
+    records = cycle()
+    classification = records[1]
+    document = dict(classification.document)
+    document["signer"] = {"user_id": str(SIGNER), "role_in_use": "coordinator_sst"}
+    (shown,) = [
+        m.actor
+        for m in compose([records[0], replace(classification, document=document)]).milestones
+        if m.kind is MilestoneKind.CLASSIFICATION
+    ]
+    assert shown is None
