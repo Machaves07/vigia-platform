@@ -26,9 +26,13 @@ sus pasos:
    amonestarla, sancionarla, evaluarla…: ``person_directed``) es ``action_on_person_forbidden``
    (F16 de §4.2). Los dos validadores de U-04 los aplica el escritor antes del hash
    (``blocked_vocabulary_term``, ``person_attribution_detected``).
-5. **Responsable** (BR-LAZ-38): un usuario **activo** de la organización con alguna asignación de
-   rol vigente que cubra la zona (la organización, la planta de la zona o la zona); si no,
-   ``not_found`` (BR-NUC-09, nunca ``forbidden``). ``assignee_display_name`` es la instantánea.
+5. **Responsable** (BR-LAZ-38, precisada por A-126): un usuario **activo** de la organización con
+   una asignación vigente de ``coordinator_sst``, ``line_manager`` o ``plant_manager``
+   (``ASSIGNEE_ROLES``) que cubra la zona (la organización, la planta de la zona o la zona); si no,
+   ``not_found`` (BR-NUC-09, nunca ``forbidden``). ``assignee_display_name`` es la instantánea. La
+   sentencia (``ASSIGNEES``) y sus parámetros (``assignee_parameters``) son los mismos que usa la
+   lista de personas asignables (``loop.application.assignees``, TASK-583): la lista y ``assign``
+   no pueden divergir.
 6. **Plazo** (BR-LAZ-39): ``deadline_days`` (por defecto ``action_deadline_default_days``) dentro
    de ``[action_deadline_min_days, action_deadline_max_days]`` de la configuración **vigente** de
    la planta (``settings_in``, TASK-304); fuera, ``deadline_out_of_range``. ``due_at`` es el fin
@@ -98,7 +102,7 @@ from vigia_platform.loop.projection.store import LoopProjectionStore
 from vigia_platform.loop.validators.folding import fold_text
 from vigia_platform.shared.api.errors import ApiErrorCode, ExternalDependencyDown
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent
@@ -106,6 +110,8 @@ from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 
 __all__ = [
     "ACTION_ASSIGNED",
+    "ASSIGNEES",
+    "ASSIGNEE_ROLES",
     "DESCRIPTION_FIELD",
     "DESCRIPTION_MAX_CHARS",
     "DESCRIPTION_MIN_CHARS",
@@ -124,6 +130,8 @@ __all__ = [
     "action_rows",
     "action_text",
     "actor_snapshot",
+    "assignee_parameters",
+    "authorized_finding",
     "finding_from",
     "parse_action_type",
     "person_directed",
@@ -159,16 +167,34 @@ _FINDING_BY_ID: Final = text(
     " single_occupancy_zone, aggregation_window_minutes FROM loop.finding_state"
     " WHERE organization_id = :organization_id AND finding_state_id = :finding_state_id"
 )
-_ASSIGNEE: Final = text(
-    # Un usuario activo de la organización con un rol vigente sobre la organización, la planta de
-    # la zona o la propia zona (el patrón de A-58): nunca un listado ni otros campos.
-    "SELECT u.user_id, u.display_name FROM identity.user_account AS u"
-    " WHERE u.organization_id = :organization_id AND u.user_id = :user_id"
-    " AND u.status = 'active' AND EXISTS (SELECT 1 FROM identity.role_assignment AS r"
+ASSIGNEE_ROLES: Final[tuple[Role, ...]] = (
+    Role.COORDINATOR_SST,
+    Role.LINE_MANAGER,
+    Role.PLANT_MANAGER,
+)
+"""Los roles que pueden ser responsables de una acción (A-126, Q15; precisa BR-LAZ-38)."""
+ASSIGNEES: Final = text(
+    # A-126 (precisa BR-LAZ-38) con el patrón de A-58: un usuario **activo** de la organización con
+    # una asignación vigente de ASSIGNEE_ROLES sobre la organización, la planta de la zona o la
+    # propia zona. Solo ``user_id``, ``display_name`` y esos roles (nunca el correo ni otro campo).
+    # Una sola sentencia para ``assign`` (``:user_id``) y para la lista (``:user_id`` nulo, por
+    # clave sobre ``(display_name, user_id)`` desde ``:after``): no pueden divergir (TASK-583).
+    "SELECT u.user_id, u.display_name, eligible.roles FROM identity.user_account AS u"
+    " CROSS JOIN LATERAL (SELECT array_agg(DISTINCT r.role ORDER BY r.role) AS roles"
+    " FROM identity.role_assignment AS r"
     " WHERE r.organization_id = :organization_id AND r.user_id = u.user_id"
-    " AND r.removed_at IS NULL AND (r.scope_level = 'organization'"
+    " AND r.removed_at IS NULL AND r.role = ANY(CAST(:roles AS text[]))"
+    " AND (r.scope_level = 'organization'"
     " OR (r.scope_level = 'plant' AND r.scope_id = :plant_id)"
-    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id)))"
+    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))) AS eligible"
+    " WHERE u.organization_id = :organization_id AND u.status = 'active'"
+    " AND eligible.roles IS NOT NULL"
+    " AND (CAST(:user_id AS uuid) IS NULL OR u.user_id = CAST(:user_id AS uuid))"
+    " AND (CAST(:after AS uuid) IS NULL OR (u.display_name, u.user_id) >"
+    " ((SELECT a.display_name FROM identity.user_account AS a"
+    " WHERE a.organization_id = :organization_id AND a.user_id = CAST(:after AS uuid)),"
+    " CAST(:after AS uuid)))"
+    " ORDER BY u.display_name, u.user_id LIMIT :limit"
 )
 _PLANT_TIMEZONE: Final = text(
     "SELECT timezone FROM identity.plant"
@@ -466,6 +492,53 @@ def finding_from(row: Any) -> LoopFinding:
         single_occupancy_zone=bool(data["single_occupancy_zone"]),
         aggregation_window_minutes=int(data["aggregation_window_minutes"]),
     )
+
+
+def assignee_parameters(
+    finding: LoopFinding,
+    *,
+    user_id: uuid.UUID | None = None,
+    after: uuid.UUID | None = None,
+    limit: int = 1,
+) -> dict[str, Any]:
+    """Los parámetros de ``ASSIGNEES`` sobre la zona de ``finding``: con ``user_id``, ese usuario
+    si puede ser responsable (``assign``); sin él, la página desde ``after`` (la lista)."""
+    return {
+        "organization_id": finding.organization_id,
+        "plant_id": finding.plant_id,
+        "zone_id": finding.zone_id,
+        "roles": [role.value for role in ASSIGNEE_ROLES],
+        "user_id": user_id,
+        "after": after,
+        "limit": limit,
+    }
+
+
+async def authorized_finding(
+    database: LedgerDatabase,
+    authorizer: Authorizer,
+    context: ScopeContext,
+    finding_state_id: uuid.UUID,
+) -> tuple[ScopeContext, LoopFinding]:
+    """La fila del hallazgo de la organización y ``actions.manage`` sobre **su zona**.
+
+    Inexistente, de otra organización, fuera de alcance o bajo concesión de proveedor:
+    ``ResourceNotFound`` (``not_found``). Lo comparten ``assign`` y la lista de responsables."""
+    if not isinstance(context, ScopeContext) or type(finding_state_id) is not uuid.UUID:
+        raise ResourceNotFound()
+    rows = await database.read(
+        context,
+        _FINDING_BY_ID,
+        {"organization_id": context.organization_id, "finding_state_id": finding_state_id},
+    )
+    if not rows:
+        raise ResourceNotFound()
+    place = finding_from(rows[0])
+    resource = place.resource()
+    authorized = await authorizer.authorize(context, PermissionKey.ACTIONS_MANAGE, resource)
+    if authorized.concession_id is not None:  # pragma: no cover - la matriz ya lo deniega
+        await authorizer.deny(authorized, PermissionKey.ACTIONS_MANAGE, resource)
+    return authorized, place
 
 
 async def read_finding(transaction: Transaction, finding_state_id: uuid.UUID) -> LoopFinding | None:
@@ -802,23 +875,7 @@ class ActionService:
         self, context: ScopeContext, finding_state_id: uuid.UUID
     ) -> tuple[ScopeContext, LoopFinding]:
         """Paso 1: la fila de la organización y ``actions.manage`` sobre su zona."""
-        if not isinstance(context, ScopeContext) or type(finding_state_id) is not uuid.UUID:
-            raise ResourceNotFound()
-        rows = await self._database.read(
-            context,
-            _FINDING_BY_ID,
-            {"organization_id": context.organization_id, "finding_state_id": finding_state_id},
-        )
-        if not rows:
-            raise ResourceNotFound()
-        place = finding_from(rows[0])
-        resource = place.resource()
-        authorized = await self._authorizer.authorize(
-            context, PermissionKey.ACTIONS_MANAGE, resource
-        )
-        if authorized.concession_id is not None:  # pragma: no cover - la matriz ya lo deniega
-            await self._authorizer.deny(authorized, PermissionKey.ACTIONS_MANAGE, resource)
-        return authorized, place
+        return await authorized_finding(self._database, self._authorizer, context, finding_state_id)
 
     @staticmethod
     def _superseded(
@@ -862,19 +919,12 @@ class ActionService:
     async def _assignee(
         transaction: Transaction, current: LoopFinding, value: object
     ) -> tuple[uuid.UUID, str]:
-        """Paso 5: usuario activo de la organización con alcance sobre la zona; si no, 404."""
+        """Paso 5: usuario activo de la organización con uno de ``ASSIGNEE_ROLES`` sobre la zona
+        (A-126); si no, 404. La misma sentencia que la lista de responsables (TASK-583)."""
         if type(value) is not uuid.UUID:
             raise ActionRequestInvalid("assignee_user_id es un UUID")
         row = (
-            await transaction.execute(
-                _ASSIGNEE,
-                {
-                    "organization_id": current.organization_id,
-                    "user_id": value,
-                    "plant_id": current.plant_id,
-                    "zone_id": current.zone_id,
-                },
-            )
+            await transaction.execute(ASSIGNEES, assignee_parameters(current, user_id=value))
         ).first()
         if row is None:
             raise ResourceNotFound()

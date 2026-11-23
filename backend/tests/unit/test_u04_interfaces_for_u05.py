@@ -384,6 +384,25 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             ),
         ),
     ),
+    ("GET", "/loop/findings/{finding_state_id}/assignees"): (
+        "SUP-U05-07",
+        Difference(
+            design="SUP-U05-07 solo con POST /loop/findings/{finding_state_id}/actions",
+            code=("POST …/actions y GET …/assignees, misma clave y alcance (zona del hallazgo)"),
+            reason=(
+                "TASK-583 (O-3 del recorrido SST, A-126): la consola solo podía ofrecer como "
+                "responsable a quien estaba en sesión porque `GET /users` exige `users.manage`; "
+                "PR-LAZ-62 la cuenta como segundo verbo de SUP-U05-07 (41 operaciones, 44 rutas)"
+            ),
+            note=(
+                "**Responsable de la acción** (SCR-09): además de `SUP-U05-07` (`POST`), U-04 "
+                "sirve `GET /loop/findings/{finding_state_id}/assignees` (`actions.manage`, "
+                "zona), que lista por clave las personas que `assign` acepta (usuario activo con "
+                "`coordinator_sst`, `line_manager` o `plant_manager` sobre la zona, A-126) con "
+                "solo `user_id`, `display_name` y `roles`, sin búsqueda por persona."
+            ),
+        ),
+    ),
 }
 
 SCOPES: Final = frozenset({"zona", "planta", "organización", "propias", "zona o planta"})

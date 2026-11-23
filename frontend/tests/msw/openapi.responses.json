@@ -2694,6 +2694,23 @@
       }
     },
     {
+      "operationId": "list_assignees_loop_findings__finding_state_id__assignees_get",
+      "method": "get",
+      "path": "/loop/findings/{finding_state_id}/assignees",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/AssigneePageOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "request_export_accreditation_exports_post",
       "method": "post",
       "path": "/accreditation/exports",
@@ -3877,6 +3894,56 @@
         "role",
         "scope_level",
         "scope_id"
+      ]
+    },
+    "AssigneeOut": {
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "user_id",
+        "display_name",
+        "roles"
+      ]
+    },
+    "AssigneePageOut": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/AssigneeOut"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
       ]
     },
     "AssignmentBody": {
