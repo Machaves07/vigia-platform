@@ -6,24 +6,11 @@
  */
 import type { ReactNode } from 'react';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { ACTION_STATES, shownActionState } from '@/pages/shared/actionState';
 import type { ActionItem, FindingDetail } from '@/ports/scr09Classify';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { ClassificationHistory } from '../classify/History';
-
-const ACTION_STATES: readonly string[] = ['assigned', 'overdue', 'closed', 'superseded'];
-/** Estados de la fila de la acción vigente (no sustituida) mientras el lazo sigue abierto. */
-const LIVE_ACTION_STATES: readonly string[] = ['assigned', 'overdue'];
-
-/**
- * El estado que se muestra de la acción. El cierre firmado (T09) cita la acción vigente y no
- * reescribe su fila, que sigue `assigned` u `overdue` (U-04, VIG-233; diagnóstico de VIG-363): con
- * el hallazgo `closed`, la acción vigente se presenta cerrada con el hallazgo.
- */
-function shownActionState(action: ActionItem, lifecycleState: string): string {
-  if (lifecycleState === 'closed' && LIVE_ACTION_STATES.includes(action.state)) return 'closed';
-  return action.state;
-}
 
 function actionState(state: string): string {
   // El servidor declara el vencimiento; counts_as_overdue solo indica si entra en su cómputo.
@@ -42,7 +29,8 @@ function ActionEntry({
   readonly lifecycleState: string;
   readonly timeZone: string;
 }) {
-  const shown = shownActionState(action, lifecycleState);
+  // El estado que se muestra: la acción vigente de un hallazgo cerrado, cerrada con él.
+  const shown = shownActionState(action.state, lifecycleState);
   return (
     <li data-part="action">
       <p>

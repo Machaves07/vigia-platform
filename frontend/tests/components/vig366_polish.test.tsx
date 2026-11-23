@@ -63,6 +63,7 @@ function renderDetail(value: FindingDetail) {
       records={{ kind: 'ready', records: [] }}
       clock={null}
       canViewClips={false}
+      rootCauseHref={null}
     />,
   );
 }
