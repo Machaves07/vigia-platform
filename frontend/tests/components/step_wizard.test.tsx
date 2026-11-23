@@ -4,7 +4,7 @@
  * al abandonar con cambios (`useLeaveGuard`, enrutador en memoria en modo de datos). `axe` sin
  * violaciones serias. Se comparan textos del catálogo y nombres accesibles exactos.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { createMemoryRouter, Link, RouterProvider } from 'react-router';
@@ -152,6 +152,26 @@ describe('UI-15 StepWizard', { timeout: 30_000 }, () => {
       t('components_structure.wizard.submitted'),
     );
     expect(calls.submits).toBe(1);
+  });
+
+  it('la barra se expone como lista con un elemento por paso más el resumen (role="list" para Safari)', () => {
+    renderWizard();
+    const bar = screen.getByRole('list', { name: t('components_structure.wizard.steps_label') });
+    expect(bar.tagName).toBe('OL');
+    // `list-style: none` le quita la semántica en Safari y VoiceOver: el rol va explícito.
+    expect(bar.getAttribute('role')).toBe('list');
+    const items = within(bar).getAllByRole('listitem');
+    expect(items.map((item) => item.parentElement)).toEqual([bar, bar, bar]);
+    expect(
+      items.map((item) =>
+        [...item.childNodes]
+          .filter(
+            (node) => !(node instanceof HTMLElement && node.dataset.part === 'step-separator'),
+          )
+          .map((node) => node.textContent)
+          .join(''),
+      ),
+    ).toEqual(['Primer porqué', 'Categoría', t('components_structure.wizard.summary')]);
   });
 
   it('volver a un paso y dejarlo sin responder vuelve a bloquear el avance', async () => {
