@@ -160,12 +160,24 @@ _REVIEW_RESOLUTIONS: Final = text(
     " ORDER BY resolved_at, resolution_id"
 )
 _ACTIONS: Final = text(
-    "SELECT action_id, record_id, action_type, action_description, expected_outcome, state,"
-    " assigned_at, due_at, counts_as_overdue, root_cause_analysis_id"
-    " FROM loop.corrective_action WHERE organization_id = :organization_id"
-    " AND plant_id = :plant_id AND zone_id = :zone_id AND subject_id = :subject_id"
-    " ORDER BY assigned_at, action_id"
+    # O-16 (A-126): el nombre visible del responsable sale del directorio de la organización en la
+    # misma lectura; solo el nombre, nunca su ``user_id`` ni otro campo de la cuenta.
+    "SELECT a.action_id, a.record_id, a.action_type, a.action_description, a.expected_outcome,"
+    " a.state, a.assigned_at, a.due_at, a.counts_as_overdue, a.root_cause_analysis_id,"
+    " u.display_name AS assignee_display_name"
+    " FROM loop.corrective_action AS a"
+    " LEFT JOIN identity.user_account AS u"
+    " ON u.organization_id = a.organization_id AND u.user_id = a.assignee_user_id"
+    " WHERE a.organization_id = :organization_id"
+    " AND a.plant_id = :plant_id AND a.zone_id = :zone_id AND a.subject_id = :subject_id"
+    " ORDER BY a.assigned_at, a.action_id"
 )
+"""Las acciones del sujeto con el nombre visible de su responsable (O-16).
+
+La unión es ``LEFT JOIN`` y **sin** filtro de estado: un responsable desactivado conserva su
+nombre (``identity.user_account`` no borra filas; la desactivación solo cambia ``status``), y la
+acción sigue mostrando a quién se asignó. Solo si la fila no es visible (la seguridad a nivel de
+fila no la deja ver) el nombre es ``None`` y la consola dice «Responsable no disponible»."""
 _ANALYSES: Final = text(
     "SELECT analysis_id, record_id, state, root_cause_category, root_cause_statement, conclusion,"
     " signed_at, created_at"
@@ -367,6 +379,9 @@ class ActionView:
     due_at: datetime
     counts_as_overdue: bool
     root_cause_analysis_id: uuid.UUID | None
+    assignee_display_name: str | None
+    """El nombre visible del responsable (un usuario de la plataforma, BR-LAZ-38), nunca su
+    identificador; ``None`` si su cuenta no es visible (O-16)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -463,6 +478,10 @@ def _uuid(value: Any) -> uuid.UUID:
 
 def _optional_uuid(value: Any) -> uuid.UUID | None:
     return None if value is None else _uuid(value)
+
+
+def _optional_text(value: Any) -> str | None:
+    return None if value is None else str(value)
 
 
 def _instant(value: Any) -> datetime:
@@ -683,6 +702,7 @@ def _action(row: Mapping[str, Any], shown: _Presenter) -> ActionView:
         due_at=shown(row["due_at"]),
         counts_as_overdue=bool(row["counts_as_overdue"]),
         root_cause_analysis_id=_optional_uuid(row["root_cause_analysis_id"]),
+        assignee_display_name=_optional_text(row["assignee_display_name"]),
     )
 
 

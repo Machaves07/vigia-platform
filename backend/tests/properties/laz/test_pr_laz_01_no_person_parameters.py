@@ -166,6 +166,12 @@ SIGNER_FIELDS: Final = frozenset(
         # A-126); ninguno es una persona observada.
         ("GET", "/loop/findings/{finding_state_id}/timeline", "response", "display_name"),
         ("GET", "/loop/findings/{finding_state_id}/timeline", "response", "assignee_display_name"),
+        # El responsable de cada acción del detalle y del lazo (``ActionOut``) y de cada vencida
+        # del panel (``OverdueItemOut``) (O-16 del recorrido de cierre M10, A-126): solo su nombre
+        # visible, el mismo usuario de la plataforma que ya identifica ``assignee_user_id`` (DE
+        # §2.2); nunca una persona observada. Sin parámetro de persona.
+        ("GET", "/loop/findings/{finding_state_id}", "response", "assignee_display_name"),
+        ("GET", "/loop/overdue", "response", "assignee_display_name"),
         # La declaración de privacidad de un adjunto de evidencia (VIG-223, TASK-310): afirma que
         # **ninguna** persona identificable aparece; es la guarda de P3, no un dato de persona.
         ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),

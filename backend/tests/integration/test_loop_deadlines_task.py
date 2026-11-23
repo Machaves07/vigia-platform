@@ -600,11 +600,24 @@ def _overdue_world(
     organization = stack.actions.world.organization()
     stack.set_highlight_days(organization, 3)
     coordinator, assignee = _people(stack, organization)
+    _name(stack, assignee, _ASSIGNEE_NAME)
     built = [
         stack.with_action(organization, coordinator, assignee, deadline_days=days)
         for days in (1, 2, 3)
     ]
     return organization, built
+
+
+_ASSIGNEE_NAME: Final = "Persona de prueba (line_manager)"
+"""Nombre sintético del responsable (O-16): el que el panel debe devolver, literal."""
+
+
+def _name(stack: DeadlinesStack, user_id: uuid.UUID, display_name: str) -> None:
+    stack.actions.execute(
+        "UPDATE identity.user_account SET display_name = $2 WHERE user_id = $1",
+        user_id,
+        display_name,
+    )
 
 
 def test_the_panel_lists_by_due_at_highlights_and_pages_by_key(stack: DeadlinesStack) -> None:
@@ -651,6 +664,7 @@ def test_the_panel_lists_by_due_at_highlights_and_pages_by_key(stack: DeadlinesS
             "action_type": "engineering",
             "assignee_user_id": item["assignee_user_id"],
             "assignee_inactive": False,
+            "assignee_display_name": _ASSIGNEE_NAME,
             "due_at": format_timestamp(due),
             "overdue_since": format_timestamp(due),
             "overdue_days": days,
@@ -694,6 +708,38 @@ def test_the_panel_lists_by_due_at_highlights_and_pages_by_key(stack: DeadlinesS
         **{"from": format_timestamp(dues[1]), "to": format_timestamp(dues[1] + SECOND)},
     )
     assert [i["due_at"] for i in period["items"]] == [format_timestamp(dues[1])]
+
+
+def test_the_panel_names_each_assignee_and_keeps_the_name_once_deactivated(
+    stack: DeadlinesStack,
+) -> None:
+    """O-16: cada fila nombra a **su** responsable (dos personas, dos nombres, en el orden de las
+    filas) y solo con el nombre visible; desactivado, sigue nombrado."""
+    organization = stack.actions.world.organization()
+    coordinator = stack.actions.member(organization)
+    first = stack.actions.user(organization, Role.LINE_MANAGER)
+    second = stack.actions.user(organization, Role.PLANT_MANAGER)
+    _name(stack, first, "Persona de prueba (line_manager)")
+    _name(stack, second, "Persona de prueba (plant_manager)")
+    built = [
+        stack.with_action(organization, coordinator, who, deadline_days=days)
+        for who, days in ((first, 1), (second, 2))
+    ]
+    stack.tick_to(max(due for _, _, due in built) + DAY)
+    manager = stack.manager(organization)
+    status, page = _panel(stack, manager, plant_id=str(organization.plant_id))
+    assert status == 200
+    assert [(i["assignee_user_id"], i["assignee_display_name"]) for i in page["items"]] == [
+        (str(first), "Persona de prueba (line_manager)"),
+        (str(second), "Persona de prueba (plant_manager)"),
+    ]
+    stack.actions.deactivate(first)
+    status, after = _panel(stack, manager, plant_id=str(organization.plant_id))
+    assert status == 200
+    assert [i["assignee_display_name"] for i in after["items"]] == [
+        "Persona de prueba (line_manager)",
+        "Persona de prueba (plant_manager)",
+    ]
 
 
 def test_a_reassigned_overdue_finding_stays_in_the_panel_counted_from_its_first_deadline(

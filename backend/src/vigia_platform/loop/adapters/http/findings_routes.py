@@ -400,6 +400,9 @@ class ActionOut(_Strict):
     due_at: str
     counts_as_overdue: bool
     root_cause_analysis_id: uuid.UUID | None
+    assignee_display_name: str | None
+    """El nombre visible del responsable (un usuario de la plataforma, nunca una persona
+    observada), sin su identificador; ``null`` si su cuenta no es visible (O-16)."""
 
 
 class AnalysisOut(_Strict):
@@ -626,6 +629,7 @@ def detail_view(detail: FindingDetail) -> FindingDetailOut:
                 due_at=format_timestamp(action.due_at),
                 counts_as_overdue=action.counts_as_overdue,
                 root_cause_analysis_id=action.root_cause_analysis_id,
+                assignee_display_name=action.assignee_display_name,
             )
             for action in detail.actions
         ),
