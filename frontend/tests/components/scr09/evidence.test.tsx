@@ -97,7 +97,7 @@ describe('SCR-09 evidencia', { timeout: 40_000 }, () => {
     }
     expect(connection.canRead('platform')).toBe(true);
     await user.click(screen.getByRole('button', { name: text('scr09.closure.submit_evidence') }));
-    await screen.findByText(text('scr09.closure.saved'), {}, WAIT);
+    await screen.findByText(text('scr09.closure.evidence_registered'), {}, WAIT);
     expect(bodies).toEqual([
       {
         description: DESCRIPTION,

@@ -253,8 +253,8 @@ function RouterBridgeLayout(): ReactNode {
   useEffect(() => {
     services.attachRouter({
       route: () => route.current,
-      navigate: (to) => {
-        void navigate(to);
+      navigate: (to, options) => {
+        void navigate(to, { replace: options?.replace === true });
       },
     });
     return () => {

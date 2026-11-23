@@ -93,7 +93,7 @@ describe('SCR-09 cierre y navegación de adjuntos', { timeout: 40_000 }, () => {
       DESCRIPTION,
     );
     await user.click(screen.getByRole('button', { name: text('components_forms.signature.sign') }));
-    await screen.findByText(text('scr09.closure.saved'), {}, WAIT);
+    await screen.findByText(text('scr09.closure.ended.just_closed'), {}, WAIT);
     expect(bodies).toEqual([
       { closure_description: DESCRIPTION, verification_note: null, professional_license: LICENSE },
     ]);

@@ -65,6 +65,18 @@ describe('SCR-09 reapertura', { timeout: 40_000 }, () => {
         deadline_days: null,
       },
     ]);
+    // O-17: registrada, el formulario queda vacío y el acuse, con la vuelta al lazo, tiene el foco.
+    const receipt = form.querySelector('[data-part="reopening_receipt"]');
+    expect({
+      reason: within(form).getByRole<HTMLTextAreaElement>('textbox', {
+        name: reasonName('scr09.reopening.reason'),
+      }).value,
+      action: within(form).getByRole<HTMLTextAreaElement>('textbox', {
+        name: reasonName('scr09.reopening.action_description'),
+      }).value,
+      focused: document.activeElement === receipt,
+      back: receipt?.querySelector('a')?.getAttribute('href'),
+    }).toEqual({ reason: '', action: '', focused: true, back: `/findings/${FINDING}/loop` });
     // También después de refrescar la proyección: el historial viene del expediente, no del estado.
     await user.click(screen.getByRole('button', { name: text('scr09.closure.load') }));
     await waitFor(() => {

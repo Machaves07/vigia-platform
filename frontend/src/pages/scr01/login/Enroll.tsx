@@ -9,7 +9,6 @@
  * o al salir de la ruta (la página se desmonta).
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
 
 import {
   sessionFailure,
@@ -35,7 +34,6 @@ type Start =
 
 export function Enroll(): ReactNode {
   const session = useSession();
-  const navigate = useNavigate();
   const id = useId();
   const throttle = useThrottle();
   const [start, setStart] = useState<Start>({ kind: 'loading' });
@@ -88,7 +86,7 @@ export function Enroll(): ReactNode {
     setCode('');
     setStart({ kind: 'confirmed' });
     try {
-      await completeSignIn(session, navigate);
+      await completeSignIn(session);
     } catch (error) {
       setFailure(sessionFailure(error));
     } finally {

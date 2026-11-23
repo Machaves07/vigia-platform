@@ -34,7 +34,7 @@ import {
 import type { PreferencesStorage } from '@/state/scope/preferences';
 import { createActivityGate, createSessionStore } from '@/state/session';
 import type { ActivityGate } from '@/state/session/activity';
-import type { SessionStore } from '@/state/session/store';
+import type { NavigateOptions, SessionStore } from '@/state/session/store';
 
 import { createGlobalErrors, failureCorrelation, type GlobalErrors } from './GlobalErrorHandler';
 import { appVersion, type AppVersion } from './version';
@@ -45,7 +45,7 @@ const PROVIDER_PANEL = '/provider/concessions';
 /** Lo que los servicios usan del enrutador montado: dónde está y cómo navegar. */
 interface RouterBridge {
   readonly route: () => string;
-  readonly navigate: (route: string) => void;
+  readonly navigate: (route: string, options?: NavigateOptions) => void;
 }
 
 export interface AppServices {
@@ -135,12 +135,19 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
   let bridge: RouterBridge | null = null;
   // Navegación pedida que el enrutador aún no alcanzó. Si entretanto se reconstruye (otro
   // `Principal`, como al cerrar sesión), el enrutador nuevo arranca en la ruta anterior y la
-  // completa al registrarse: el cierre de sesión acaba en `/login`.
-  let pending: string | null = null;
+  // completa al registrarse: el cierre de sesión acaba en `/login` y la entrada, en la ruta
+  // guardada o el inicio (O-13).
+  let pending: { readonly route: string; readonly options: NavigateOptions } | null = null;
   const currentRoute = (): string => bridge?.route() ?? locationRoute();
-  const navigate = (route: string): void => {
-    pending = route;
-    bridge?.navigate(route);
+  const navigate = (route: string, options: NavigateOptions = {}): void => {
+    // Ya en esa ruta: no hay nada que completar. Si quedara pendiente (el enrutador no avisa de
+    // un cambio que no ocurre), la siguiente reconstrucción devolvería a esta ruta (PR 335).
+    if (bridge !== null && bridge.route() === route) {
+      pending = null;
+      return;
+    }
+    pending = { route, options };
+    bridge?.navigate(route, options);
   };
 
   // La sesión y la concesión se necesitan una a otra; la concesión lee la sesión en cada llamada.
@@ -219,10 +226,11 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
     transport,
     attachRouter(next) {
       bridge = next;
-      if (next !== null && pending !== null && next.route() !== pending) next.navigate(pending);
+      if (next !== null && pending !== null && next.route() !== pending.route)
+        next.navigate(pending.route, pending.options);
     },
     routeChanged(route) {
-      if (route === pending) pending = null;
+      if (route === pending?.route) pending = null;
     },
     currentRoute,
     loadHierarchy,

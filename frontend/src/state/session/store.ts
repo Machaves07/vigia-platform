@@ -35,6 +35,11 @@ import {
 
 export const LOGIN_ROUTE = '/login';
 
+/** `replace`: la ruta nueva sustituye a la actual en el historial. */
+export interface NavigateOptions {
+  readonly replace?: boolean;
+}
+
 /** Lo que el almacén usa del puerto de sesión (`sessionPort`). */
 interface SessionPortLike {
   readonly me: { read(params?: undefined, signal?: AbortSignal): Promise<MeResponse> };
@@ -50,8 +55,11 @@ export interface SessionStoreOptions {
   readonly clearPreferences: () => void;
   /** Ruta actual (`pathname` y `search`). */
   readonly currentRoute: () => string;
-  /** Navegación del enrutador. */
-  readonly navigate: (route: string) => void;
+  /**
+   * Navegación del enrutador montado en cada momento: si entretanto se reconstruye (llega otro
+   * `Principal`), la completa el nuevo (`AppServices.attachRouter`).
+   */
+  readonly navigate: (route: string, options?: NavigateOptions) => void;
   /** Almacenamiento del navegador que el cierre deja vacío; por omisión el de `window`. */
   readonly storages?: readonly Pick<Storage, 'clear'>[];
   /** Avisos de vencimiento (UI-05, VIG-320): cada uno llega una sola vez por ventana. */
@@ -83,6 +91,12 @@ export interface SessionStore {
   secondFactorRequired(enrollmentRequired: boolean): void;
   /** La ruta guardada, que deja de estarlo; `null` si no hay. */
   takeReturnRoute(): string | null;
+  /**
+   * Navega con el enrutador que esté montado, no con el de la pantalla que lo pide: al entrar,
+   * `load()` cambia el `Principal`, `AppRouter` construye un enrutador nuevo en la ruta del
+   * anterior y un `navigate` de `useNavigate` llegaría al descartado (O-13).
+   */
+  navigate(route: string, options?: NavigateOptions): void;
   /** Una pantalla que se desmonta deja su borrador; solo se guarda con la sesión perdida. */
   keepDraft(draft: FormDraft): void;
   /**
@@ -185,6 +199,9 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
       const route = session.return_route;
       if (route !== null) dispatch({ type: 'return_route_consumed' });
       return route;
+    },
+    navigate(route, navigateOptions) {
+      options.navigate(route, navigateOptions);
     },
     keepDraft(draft) {
       // Con la sesión en uso el borrador es de la pantalla; sin sesión no hay nada que conservar.

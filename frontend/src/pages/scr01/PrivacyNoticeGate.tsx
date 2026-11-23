@@ -5,7 +5,6 @@
  * la ruta guardada. Ni enlaces ni navegación: nada más es alcanzable hasta aceptar.
  */
 import { useId, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
 
 import { sessionFailure, sessionScreenPort, type SessionFailure } from '@/ports/scr01Session';
 import { useSession, useUiSession } from '@/state/session';
@@ -18,7 +17,6 @@ import { FailureNotice, returnRoute } from './session';
 export function PrivacyNoticeGate(): ReactNode {
   const session = useSession();
   const { principal } = useUiSession();
-  const navigate = useNavigate();
   const id = useId();
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<SessionFailure | null>(null);
@@ -33,7 +31,7 @@ export function PrivacyNoticeGate(): ReactNode {
     try {
       await sessionScreenPort.acceptNotice.write({ body: { notice_version: version } });
       await session.load();
-      await navigate(returnRoute(session), { replace: true });
+      session.navigate(returnRoute(session), { replace: true });
     } catch (error) {
       setFailure(sessionFailure(error));
     } finally {

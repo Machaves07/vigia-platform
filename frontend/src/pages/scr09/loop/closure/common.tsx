@@ -66,18 +66,23 @@ export function Failure({
   return error === null ? null : <p role="alert">{text('screen_state.unavailable')}</p>;
 }
 
+interface ClosureScreenProps {
+  context: ClosureContext;
+  detail: Detail;
+  timeZone: string;
+  records: Awaited<ReturnType<typeof readHistory>>;
+  onWritten: () => void;
+}
+
 export function ClosureScreen({
   title,
+  header,
   children,
 }: {
   readonly title: string;
-  readonly children: (props: {
-    context: ClosureContext;
-    detail: Detail;
-    timeZone: string;
-    records: Awaited<ReturnType<typeof readHistory>>;
-    onWritten: () => void;
-  }) => ReactNode;
+  /** Lo que va arriba, antes del historial: cómo terminó el lazo (O-18). */
+  readonly header?: (props: ClosureScreenProps) => ReactNode;
+  readonly children: (props: ClosureScreenProps) => ReactNode;
 }) {
   const context = useClosureContext();
   const [requested, setRequested] = useState(false);
@@ -141,6 +146,14 @@ export function ClosureScreen({
           {data !== undefined && (
             <>
               <Failure error={records.error} />
+              {timeZone !== undefined &&
+                header?.({
+                  context,
+                  detail: data,
+                  timeZone,
+                  records: records.data ?? [],
+                  onWritten: load,
+                })}
               <ClosureHistory
                 records={records.data ?? []}
                 organizationId={context.organizationId}

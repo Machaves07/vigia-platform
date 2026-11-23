@@ -24,3 +24,23 @@
 .page li {
   margin-bottom: 0.75rem;
 }
+
+/* Acuses y avisos que confirman el efecto de una acción (O-17, O-18). */
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.notice dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.notice dd {
+  margin: 0;
+}

@@ -4,8 +4,6 @@
  * texto** para cualquier causa (BR-APP-10) y el cierre del inicio de sesión (IF-01, paso 5).
  */
 import { useEffect, useReducer, useState, type ReactNode } from 'react';
-import type { NavigateFunction } from 'react-router';
-
 import { sessionClock, sessionFailure, type SessionFailure } from '@/ports/scr01Session';
 import {
   countdownReducer,
@@ -47,18 +45,19 @@ export function returnRoute(session: SessionStore): string {
  * Sesión completa en el servidor: carga `GET /me` y vuelve a la ruta guardada. Si falta aceptar el
  * aviso, el transporte ya pasó la sesión a `privacy_notice_pending` (`transportHooks`) y la puerta
  * del aviso ocupa la pantalla: no se navega, la ruta guardada la usa la aceptación.
+ *
+ * Navega con `session.navigate` y no con el `useNavigate` de la pantalla: el `Principal` nuevo
+ * reconstruye el enrutador y la navegación del anterior no llegaba nunca (O-13: la tarjeta del
+ * código seguía en el centro con el menú ya a la vista).
  */
-export async function completeSignIn(
-  session: SessionStore,
-  navigate: NavigateFunction,
-): Promise<void> {
+export async function completeSignIn(session: SessionStore): Promise<void> {
   try {
     await session.load();
   } catch (error) {
     if (sessionFailure(error).kind === 'privacy_notice_required') return;
     throw error;
   }
-  await navigate(returnRoute(session), { replace: true });
+  session.navigate(returnRoute(session), { replace: true });
 }
 
 /**

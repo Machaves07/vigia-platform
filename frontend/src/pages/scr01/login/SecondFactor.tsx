@@ -5,7 +5,6 @@
  * «Volver» cierra la sesión pendiente en el servidor y vuelve a `/login` (BR-APP-17).
  */
 import { useId, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
 
 import { sessionFailure, sessionScreenPort, type SessionFailure } from '@/ports/scr01Session';
 import { useSession } from '@/state/session';
@@ -17,7 +16,6 @@ import { completeSignIn, FailureNotice, isSecondFactorCode, useThrottle } from '
 
 export function SecondFactor(): ReactNode {
   const session = useSession();
-  const navigate = useNavigate();
   const id = useId();
   const throttle = useThrottle();
   const [code, setCode] = useState('');
@@ -36,7 +34,7 @@ export function SecondFactor(): ReactNode {
     try {
       await sessionScreenPort.secondFactor.write({ body: { code: code.trim() } });
       setCode('');
-      await completeSignIn(session, navigate);
+      await completeSignIn(session);
     } catch (error) {
       const classified = sessionFailure(error);
       if (classified.kind === 'throttled') throttle.start(classified.retryAfterSeconds);
