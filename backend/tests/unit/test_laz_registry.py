@@ -57,6 +57,7 @@ from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
 from vigia_platform.loop.adapters.http.actions_routes import actions_router
+from vigia_platform.loop.adapters.http.assignees_routes import assignees_router
 from vigia_platform.loop.adapters.http.assistant_routes import assistant_router
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
@@ -214,9 +215,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 # TASK-312: SUP-U05-12 y 13 (el estado incerrable y su revisión).
                 ("POST", "/loop/findings/{finding_state_id}/unclosable"),
                 ("POST", "/loop/unclosable/{declaration_id}/reviews"),
+                # TASK-583: los responsables posibles (segundo verbo de SUP-U05-07, A-126).
+                ("GET", "/loop/findings/{finding_state_id}/assignees"),
                 # TASK-585: la ficha de vida (otra lectura de SUP-U05-02).
                 ("GET", "/loop/findings/{finding_state_id}/timeline"),
             ]
+            assert state[LOOP_STATE_KEY].assignees is not None
             assert state[LOOP_STATE_KEY].overdue is not None
             assert state[LOOP_STATE_KEY].vocabulary is not None
             assert state[LOOP_STATE_KEY].classification is not None
@@ -347,6 +351,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         overdue_router,
         vocabulary_router,  # TASK-350
         unclosable_router,
+        assignees_router,  # TASK-583
         timeline_router,  # TASK-585
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS

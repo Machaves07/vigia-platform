@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 155 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 156 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -382,6 +382,10 @@ export const OPERATIONS = {
   review_loop_unclosable__declaration_id__reviews_post: {
     method: 'post',
     path: '/loop/unclosable/{declaration_id}/reviews',
+  },
+  list_assignees_loop_findings__finding_state_id__assignees_get: {
+    method: 'get',
+    path: '/loop/findings/{finding_state_id}/assignees',
   },
   get_timeline_loop_findings__finding_state_id__timeline_get: {
     method: 'get',

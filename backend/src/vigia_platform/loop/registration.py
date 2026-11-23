@@ -62,6 +62,7 @@ from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.http.actions_routes import actions_router
+from vigia_platform.loop.adapters.http.assignees_routes import assignees_router
 from vigia_platform.loop.adapters.http.assistant_routes import assistant_router
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
@@ -305,6 +306,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     overdue_router,  # SUP-U05-15 (TASK-313)
     vocabulary_router,  # SUP-U05-36 y 37 (TASK-350)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
+    assignees_router,  # SUP-U05-07: responsables posibles (A-126, TASK-583)
     timeline_router,  # la ficha de vida del hallazgo (TASK-585)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""

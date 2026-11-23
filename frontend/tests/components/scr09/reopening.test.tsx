@@ -1,8 +1,10 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { text } from '@/texts';
+import type { Assignee } from '@/ports/scr09Closure';
+import { label } from '@/texts/labels';
 import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import {
@@ -14,6 +16,7 @@ import {
   load,
   reasonName,
   renderClosure,
+  SESSION_ASSIGNEE,
 } from './closure_support';
 
 describe('SCR-09 reapertura', { timeout: 40_000 }, () => {
@@ -100,5 +103,115 @@ describe('SCR-09 reapertura', { timeout: 40_000 }, () => {
       }).value,
     ).toBe(DESCRIPTION);
     expect(writes).toBe(1);
+  });
+
+  it('la acción nueva se asigna a quien la ejecuta, elegido de la lista que acepta assign (TASK-583)', async () => {
+    const line: Assignee = {
+      user_id: '0190a1b2-4444-7000-8000-000000000007',
+      display_name: 'Marta Prueba',
+      roles: ['line_manager'],
+    };
+    const { container } = await renderClosure('reopening', { assignees: [line, SESSION_ASSIGNEE] });
+    const user = await load();
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(`http://localhost/loop/findings/${FINDING}/reopening`, async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(
+          { ...(exampleFor('reopen_loop_findings__finding_state_id__reopening_post') as object) },
+          { status: 201 },
+        );
+      }),
+    );
+    const form = screen.getByRole('form', { name: text('scr09.reopening.title') });
+    const picker = within(form).getByRole<HTMLSelectElement>('combobox', {
+      name: text('scr09.reopening.assignee'),
+    });
+    await waitFor(() => {
+      expect([...picker.options].map((option) => option.textContent)).toEqual([
+        `Persona sintética (${text('scr09.assignee.you')}) · ${label('role', 'coordinator_sst')}`,
+        `Marta Prueba · ${label('role', 'line_manager')}`,
+      ]);
+    }, WAIT);
+    expect(picker.value).toBe(USER);
+    fireEvent.change(
+      within(form).getByRole('textbox', { name: reasonName('scr09.reopening.reason') }),
+      { target: { value: DESCRIPTION } },
+    );
+    fireEvent.change(
+      within(form).getByRole('textbox', { name: reasonName('scr09.reopening.action_description') }),
+      { target: { value: DESCRIPTION } },
+    );
+    await user.selectOptions(
+      within(form).getByLabelText(text('scr09.reopening.action_type')),
+      'engineering',
+    );
+    await user.selectOptions(picker, line.user_id);
+    await user.click(within(form).getByRole('button', { name: text('scr09.reopening.submit') }));
+    await within(form).findByText(text('scr09.closure.saved'), {}, WAIT);
+    expect(bodies).toEqual([
+      {
+        reason_text: DESCRIPTION,
+        action_type: 'engineering',
+        action_description: DESCRIPTION,
+        expected_outcome: null,
+        assignee_user_id: line.user_id,
+        deadline_days: null,
+      },
+    ]);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('Intro en la búsqueda de responsable no envía la reapertura (TASK-583)', async () => {
+    const people: Assignee[] = [
+      SESSION_ASSIGNEE,
+      ...['Alba', 'Bruno', 'Celia', 'Dario', 'Marta'].map((name, index) => ({
+        user_id: `0190a1b2-4444-7000-8000-00000000010${String(index)}`,
+        display_name: `${name} Prueba`,
+        roles: ['line_manager' as const],
+      })),
+    ];
+    await renderClosure('reopening', { assignees: people });
+    const user = await load();
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(`http://localhost/loop/findings/${FINDING}/reopening`, async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(
+          { ...(exampleFor('reopen_loop_findings__finding_state_id__reopening_post') as object) },
+          { status: 201 },
+        );
+      }),
+    );
+    const form = screen.getByRole('form', { name: text('scr09.reopening.title') });
+    fireEvent.change(
+      within(form).getByRole('textbox', { name: reasonName('scr09.reopening.reason') }),
+      { target: { value: DESCRIPTION } },
+    );
+    fireEvent.change(
+      within(form).getByRole('textbox', { name: reasonName('scr09.reopening.action_description') }),
+      { target: { value: DESCRIPTION } },
+    );
+    await user.selectOptions(
+      within(form).getByLabelText(text('scr09.reopening.action_type')),
+      'engineering',
+    );
+    const search = await within(form).findByRole(
+      'searchbox',
+      { name: text('scr09.assignee.search') },
+      WAIT,
+    );
+    await user.type(search, 'mar{Enter}');
+    await act(async () => {
+      await new Promise((done) => {
+        setTimeout(done, 50);
+      });
+    });
+    expect(bodies).toEqual([]);
+    await user.click(within(form).getByRole('button', { name: text('scr09.reopening.submit') }));
+    await within(form).findByText(text('scr09.closure.saved'), {}, WAIT);
+    expect((bodies as { assignee_user_id: string }[]).map((body) => body.assignee_user_id)).toEqual(
+      ['0190a1b2-4444-7000-8000-000000000104'],
+    );
   });
 });

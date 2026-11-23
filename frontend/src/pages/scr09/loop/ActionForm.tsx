@@ -2,7 +2,8 @@
  * Acción correctiva sobre la zona (IF-09 pasos 1 y 2; SUP-U05-07; H-24): tipo de la lista
  * cerrada, descripción, resultado esperado, responsable y plazo por defecto de la planta. No hay
  * ningún campo de persona observada ni «persona causante» (BR-APP-33): el responsable es el
- * usuario que se compromete a ejecutarla. Un rechazo (`409 loop_transition_not_allowed`,
+ * usuario que se compromete a ejecutarla, elegido de la lista que `assign` acepta (A-126,
+ * `AssigneePicker`), con la persona en sesión como sugerencia. Un rechazo (`409 loop_transition_not_allowed`,
  * diferencia 4 del PR #197) se ancla al formulario y conserva lo escrito.
  */
 import { useId, useState } from 'react';
@@ -29,6 +30,7 @@ import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import type { LoopContext } from '../classify/common';
+import { AssigneePicker } from './AssigneePicker';
 
 const ACTION_FIELDS: Readonly<Record<string, string>> = {
   loop_action_type_not_allowed: 'action_type',
@@ -180,18 +182,14 @@ export function ActionForm({
         notice={at('expected_outcome')}
         onChange={edit(setExpected)}
       />
-      <label>
-        {text('scr09.loop.assignee')}
-        <select
-          name="assignee_user_id"
-          value={assignee}
-          onChange={(event) => {
-            edit(setAssignee)(event.currentTarget.value);
-          }}
-        >
-          {context.user !== null && <option value={context.user.id}>{context.user.name}</option>}
-        </select>
-      </label>
+      <AssigneePicker
+        context={context}
+        sessionUser={context.user}
+        caption={text('scr09.loop.assignee')}
+        value={assignee}
+        onChange={edit(setAssignee)}
+        invalid={showErrors}
+      />
       <label>
         {/* Una sola línea de etiqueta encima del campo (sistema visual v1, VIG-366). */}
         <span>

@@ -156,6 +156,10 @@ SIGNER_FIELDS: Final = frozenset(
         # VIG-232): el usuario de la plataforma que clasificó (P8), nunca la persona observada.
         ("GET", "/loop/findings/{finding_state_id}", "response", "display_name"),
         ("GET", "/loop/findings/{finding_state_id}/classifications", "response", "display_name"),
+        # El responsable posible de la acción (``AssigneeOut``, TASK-583, A-126): un usuario de la
+        # plataforma que se compromete a ejecutarla (BR-APP-33, DE §2.2 ``assignee_user_id``), con
+        # lo mínimo para elegirlo; nunca una persona observada. Sin parámetro de persona.
+        ("GET", "/loop/findings/{finding_state_id}/assignees", "response", "display_name"),
         # La ficha de vida (TASK-585): quien hizo cada paso (``TimelineActorOut``, el usuario de la
         # plataforma que clasificó, asignó, firmó o reabrió, P8) y la instantánea del responsable
         # de la acción al asignarla (``assignee_display_name``, un usuario activo de la planta,
@@ -233,9 +237,9 @@ REGISTERED_U04: Final = tuple(
     if isinstance(declared.route, APIRoute)
     and declared.path.startswith(("/loop", "/accreditation", "/notifications"))
 )
-"""Las 44 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
-causa raíz, POST y la lectura del análisis en curso, VIG-363; el detalle, también la ficha de vida,
-TASK-585)."""
+"""Las 45 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
+causa raíz, POST y la lectura del análisis en curso, VIG-363; asignar la acción, POST y la lista de
+responsables posibles, TASK-583; el detalle, también la ficha de vida, TASK-585)."""
 
 
 def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field() -> None:
@@ -257,7 +261,7 @@ def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field(
 
 def test_pr_laz_01_no_u04_operation_has_a_person_parameter_or_field() -> None:
     """La misma ausencia estructural se mantiene en la acreditación y las notificaciones."""
-    assert len(REGISTERED_U04) == 44
+    assert len(REGISTERED_U04) == 45
     assert violations(REGISTERED_U04, ("/loop", "/accreditation", "/notifications")) == []
 
 

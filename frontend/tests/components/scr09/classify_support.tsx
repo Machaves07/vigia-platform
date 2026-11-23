@@ -7,6 +7,7 @@ import { afterEach } from 'vitest';
 import Classify from '@/pages/scr09/classify';
 import Loop from '@/pages/scr09/loop';
 import { createTransport, createPortConnection, installTransport } from '@/ports/base';
+import type { Assignee } from '@/ports/scr09Closure';
 import type {
   ClassificationHistory,
   ClassificationItem,
@@ -26,6 +27,34 @@ const ZONE = '0190a1b2-1111-7000-8000-000000000001';
 export const USER = '0190a1b2-4444-7000-8000-000000000001';
 export const INSTANT = '2026-01-01T12:00:00.000Z';
 export const WAIT = { timeout: 10_000 };
+/** La persona en sesión tal como la lista la devuelve (`meResponse`: «Persona sintética»). */
+export const SESSION_ASSIGNEE: Assignee = {
+  user_id: USER,
+  display_name: 'Persona sintética',
+  roles: ['coordinator_sst'],
+};
+
+/**
+ * `GET /loop/findings/{id}/assignees` con `people` en páginas de `pageSize` (cursor = índice), y
+ * las peticiones recibidas (`URL`), para comprobar que la búsqueda local no pide nada (TASK-583).
+ */
+export function assigneesHandler(people: readonly Assignee[], pageSize = 200) {
+  const requests: URL[] = [];
+  const handler = http.get(
+    'http://localhost/loop/findings/:finding_state_id/assignees',
+    ({ request }) => {
+      const url = new URL(request.url);
+      requests.push(url);
+      const start = Number(url.searchParams.get('cursor') ?? '0');
+      const end = start + pageSize;
+      return HttpResponse.json({
+        items: people.slice(start, end),
+        next_cursor: end < people.length ? String(end).padStart(22, '0') : null,
+      });
+    },
+  );
+  return { handler, requests };
+}
 
 export function classification(sequence: number, outcome = 'confirmed'): ClassificationItem {
   return {
@@ -166,6 +195,8 @@ export async function renderScreen(
     http.get('http://localhost/loop/plants/:plant_id/configuration', () =>
       HttpResponse.json(configuration()),
     ),
+    // Por defecto, solo la persona en sesión puede ser responsable (TASK-583).
+    assigneesHandler([SESSION_ASSIGNEE]).handler,
   );
   disposers.push(() => {
     session.dispose();
