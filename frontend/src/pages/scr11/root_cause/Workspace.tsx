@@ -5,8 +5,8 @@
  *   servidor con SUP-U05-17) y la causa raíz con su categoría cerrada, el enunciado y la
  *   conclusión (se envían al firmar). El siguiente porqué en blanco lleva a la causa raíz
  *   (TASK-581, `whySteps.ts`). «Siguiente» con un porqué sin guardar lo guarda (texto y categoría
- *   en pantalla) y avanza solo si el servidor lo acepta; con «Guardar porqué» en vuelo, espera ese
- *   mismo guardado en vez de enviar otro. «Guardar sin terminar» existe porque hay
+ *   en pantalla) y avanza solo si el servidor lo acepta. Nunca hay dos PUT del mismo porqué a
+ *   la vez: lo mismo que ya va en vuelo espera ese guardado; algo distinto sale cuando termine. «Guardar sin terminar» existe porque hay
  *   `server_progress_ref` (el `analysis_id`) y guarda los porqués con cambios.
  * - Cada texto es UI-13 con los límites de U-04 (`ROOT_CAUSE_TEXT_LIMITS`): contador, espejo de la
  *   política base antes de enviar y recorte de los extremos (A-126). Con un error local no se
@@ -76,6 +76,19 @@ interface RootDraft {
 }
 
 const EMPTY_ROOT: RootDraft = { category: '', statement: '', conclusion: '' };
+const EMPTY_WHY: WhyDraft = { statement: '', category: '' };
+
+/** Un guardado de un porqué en vuelo: qué pide, su promesa y el análisis que deja (o `null`). */
+interface StepSave {
+  readonly key: string;
+  readonly run: Promise<void>;
+  readonly settled: Promise<Analysis | null>;
+}
+
+/** Lo que pide guardar un porqué: el texto que se enviaría (recortado, en NFC) y su categoría. */
+function requestKey(draft: WhyDraft): string {
+  return JSON.stringify([submittedText(draft.statement).normalize('NFC'), draft.category]);
+}
 const LOOP_TEXT = { loopText: true } as const;
 
 function whyOptions(analysis: Analysis, offset: number) {
@@ -300,8 +313,8 @@ export function Workspace({
   const [whyErrors, setWhyErrors] = useState<readonly number[]>([]);
   const [rootErrors, setRootErrors] = useState(false);
   const signing = useRef<Promise<void> | null>(null);
-  /** El guardado en vuelo de cada porqué, por `offset`. */
-  const inFlight = useRef(new Map<number, Promise<void>>());
+  /** El último guardado pedido de cada porqué mientras sigue en vuelo, por `offset`. */
+  const inFlight = useRef(new Map<number, StepSave>());
   const analysisId = initial.analysis_id;
 
   const scope = principal?.organization.organization_id ?? 'none';
@@ -343,14 +356,14 @@ export function Workspace({
     ]);
   };
 
-  const writeStep = async (offset: number): Promise<void> => {
+  /** Un PUT del porqué `offset` con `draft`, sobre `base`; devuelve el análisis que queda. */
+  const writeStep = async (offset: number, base: Analysis, draft: WhyDraft): Promise<Analysis> => {
     const index = offset + 1;
     const field = `why-${String(index)}`;
-    const draft = whys[offset] ?? { statement: '', category: '' };
     const verdict = reasonVerdict(
       draft.statement,
       ROOT_CAUSE_TEXT_LIMITS.why_statement,
-      whyOptions(analysis, offset),
+      whyOptions(base, offset),
     );
     setNotice(field, null);
     // Con un error local no hay petición: el error queda en el campo (A-126). Un porqué opcional
@@ -359,18 +372,19 @@ export function Workspace({
       setWhyErrors((current) => (current.includes(offset) ? current : [...current, offset]));
       throw new Error('El porqué no pasa la validación local.');
     }
-    if (verdict.sent === null) return;
+    if (verdict.sent === null) return base;
     setSaving(offset);
     try {
       const updated = await putStep.run({
         index,
         body: {
           statement: verdict.sent,
-          evidence_refs: savedStep(analysis, index)?.evidence_refs ?? [],
+          evidence_refs: savedStep(base, index)?.evidence_refs ?? [],
           category: draft.category === '' ? null : draft.category,
         },
       });
       setAnalysis(updated);
+      return updated;
     } catch (error) {
       setNotice(field, notice(field, error));
       throw error;
@@ -380,17 +394,35 @@ export function Workspace({
   };
 
   /**
-   * Guarda el porqué `offset`. Si ya hay un guardado suyo en vuelo («Guardar porqué», «Siguiente»
-   * o «Guardar sin terminar»), devuelve esa misma promesa: nunca sale un segundo PUT del paso.
+   * Guarda el porqué `offset` con lo que hay en pantalla («Guardar porqué», «Siguiente» o «Guardar
+   * sin terminar»). Nunca hay dos PUT del mismo paso a la vez: si ya va uno en vuelo con el mismo
+   * texto recortado y la misma categoría, devuelve esa promesa; si lo pedido es distinto, lo envía
+   * cuando aquel termine (acepte o rechace), sobre el análisis que deje, para que quede lo último.
    */
   const saveStep = (offset: number): Promise<void> => {
+    const draft = whys[offset] ?? EMPTY_WHY;
+    const key = requestKey(draft);
     const pending = inFlight.current.get(offset);
-    if (pending !== undefined) return pending;
-    const run = writeStep(offset).finally(() => {
-      inFlight.current.delete(offset);
-    });
-    inFlight.current.set(offset, run);
-    return run;
+    if (pending?.key === key) return pending.run;
+    const written =
+      pending === undefined
+        ? writeStep(offset, analysis, draft)
+        : pending.settled.then((base) => writeStep(offset, base ?? analysis, draft));
+    const entry: StepSave = {
+      key,
+      run: written
+        .then(() => undefined)
+        .finally(() => {
+          // Solo se borra a sí mismo: si detrás ya va otro guardado del paso, ese sigue en vuelo.
+          if (inFlight.current.get(offset) === entry) inFlight.current.delete(offset);
+        }),
+      settled: written.then(
+        (updated) => updated,
+        () => null,
+      ),
+    };
+    inFlight.current.set(offset, entry);
+    return entry.run;
   };
 
   /** «Guardar sin terminar»: los porqués con cambios, en orden; el resto ya está en el servidor. */

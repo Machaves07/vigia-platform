@@ -1141,6 +1141,185 @@ describe('SCR-11 TASK-581: causa raíz que se puede completar', { timeout: 60_00
     expect(progress()).toEqual({ current: 2, total: 3 });
   });
 
+  const OLD = 'Primer porqué sintético de la zona.';
+  const NEW = 'Primer porqué sintético cambiado aquí.';
+
+  /** Retiene cada PUT hasta soltarlo: `release(n)` deja responder al servidor falso el n-ésimo. */
+  function holdSteps(loop: ReturnType<typeof fakeLoop>) {
+    const held: ((value: null) => void)[] = [];
+    loop.state.stepResponse = () =>
+      new Promise<null>((done) => {
+        held.push(done);
+      });
+    return {
+      async release(position: number) {
+        await act(async () => {
+          held[position]?.(null);
+          await Promise.resolve();
+        });
+      },
+    };
+  }
+
+  function sent(index: number, statement: string, category: string | null = null) {
+    return { index, body: { statement, evidence_refs: [], category } };
+  }
+
+  function savePartialButton() {
+    return screen.getByRole('button', { name: text('components_structure.wizard.save_partial') });
+  }
+
+  function stepSync(index: number): string | null | undefined {
+    return whyPart(index).querySelector('[data-part="step-sync"]')?.textContent;
+  }
+
+  async function steps(loop: ReturnType<typeof fakeLoop>, count: number) {
+    await waitFor(() => {
+      expect(loop.calls.steps).toHaveLength(count);
+    }, WAIT);
+  }
+
+  it('«Guardar sin terminar» tras editar con «Guardar porqué» en vuelo envía lo nuevo después y el servidor queda con ello', async () => {
+    const { loop } = await setup();
+    await start();
+    const held = holdSteps(loop);
+    fireEvent.change(statement(1), { target: { value: OLD } });
+    fireEvent.click(saveButton());
+    await steps(loop, 1);
+    fireEvent.change(statement(1), { target: { value: NEW } });
+    fireEvent.click(savePartialButton());
+    await settle();
+    // Nunca dos PUT del mismo porqué a la vez: el nuevo espera a que termine el que está en vuelo.
+    expect(loop.calls.steps).toEqual([sent(1, OLD)]);
+    await held.release(0);
+    await steps(loop, 2);
+    await held.release(1);
+    await screen.findByText(
+      text('components_structure.wizard.saved_partial'),
+      { selector: '[data-part="outcome"]' },
+      WAIT,
+    );
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD), sent(1, NEW)]);
+    expect(loop.analysis.why_steps.map((step) => step.statement)).toEqual([NEW]);
+    expect(stepSync(1)).toBe(text('scr11.step_saved'));
+  });
+
+  it('«Siguiente» tras editar con «Guardar porqué» en vuelo guarda lo nuevo cuando termine y avanza', async () => {
+    const { loop } = await setup();
+    await start();
+    const held = holdSteps(loop);
+    fireEvent.change(statement(1), { target: { value: OLD } });
+    fireEvent.click(saveButton());
+    await steps(loop, 1);
+    fireEvent.change(statement(1), { target: { value: NEW } });
+    next();
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD)]);
+    await held.release(0);
+    await steps(loop, 2);
+    // Con lo nuevo aún en vuelo, el flujo espera en el porqué 1.
+    expect(title()).toBe(whyLabel(1));
+    await held.release(1);
+    await waitFor(() => {
+      expect(title()).toBe(whyLabel(2));
+    }, WAIT);
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD), sent(1, NEW)]);
+    expect(loop.analysis.why_steps.map((step) => step.statement)).toEqual([NEW]);
+    expect(progress()).toEqual({ current: 2, total: 3 });
+  });
+
+  it('el guardado en vuelo es el de su porqué: con el 2 en vuelo, «Siguiente» en el 2 lo espera', async () => {
+    const { loop } = await resumedWithTwo();
+    next();
+    const held = holdSteps(loop);
+    const edited = 'Segundo porqué sintético corregido en pantalla.';
+    fireEvent.change(statement(2), { target: { value: edited } });
+    fireEvent.click(saveButton());
+    await steps(loop, 1);
+    next();
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(2, edited)]);
+    await held.release(0);
+    await waitFor(() => {
+      expect(title()).toBe(whyLabel(3));
+    }, WAIT);
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(2, edited)]);
+    expect(loop.analysis.why_steps.map((step) => step.statement)).toEqual([SAVED[0], edited]);
+  });
+
+  it('«Guardar sin terminar» con «Guardar porqué» en vuelo y lo mismo en pantalla espera ese guardado', async () => {
+    const { loop } = await setup();
+    await start();
+    const held = holdSteps(loop);
+    fireEvent.change(statement(1), { target: { value: OLD } });
+    fireEvent.click(saveButton());
+    await steps(loop, 1);
+    fireEvent.click(savePartialButton());
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD)]);
+    await held.release(0);
+    await screen.findByText(
+      text('components_structure.wizard.saved_partial'),
+      { selector: '[data-part="outcome"]' },
+      WAIT,
+    );
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD)]);
+    expect(stepSync(1)).toBe(text('scr11.step_saved'));
+  });
+
+  it('tras un rechazo del servidor, volver a pulsar «Guardar porqué» vuelve a enviar', async () => {
+    const { loop } = await setup();
+    await start();
+    let rejected = false;
+    loop.state.stepResponse = () => {
+      if (rejected) return null;
+      rejected = true;
+      return apiError('invalid_request', 400);
+    };
+    fireEvent.change(statement(1), { target: { value: OLD } });
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(anchoredTo(statement(1))).not.toBeNull();
+    }, WAIT);
+    await settle();
+    fireEvent.click(saveButton());
+    await screen.findByText(
+      text('scr11.step_saved'),
+      { selector: '[data-part="step-sync"]' },
+      WAIT,
+    );
+    expect(loop.calls.steps).toEqual([sent(1, OLD), sent(1, OLD)]);
+    expect(loop.analysis.why_steps.map((step) => step.statement)).toEqual([OLD]);
+  });
+
+  it('el guardado que espera detrás de otro sigue en vuelo cuando el primero termina', async () => {
+    const { loop } = await setup();
+    await start();
+    const held = holdSteps(loop);
+    fireEvent.change(statement(1), { target: { value: OLD } });
+    fireEvent.click(saveButton());
+    await steps(loop, 1);
+    fireEvent.change(statement(1), { target: { value: NEW } });
+    next();
+    await held.release(0);
+    await steps(loop, 2);
+    // Lo nuevo va en vuelo: «Guardar sin terminar» con lo mismo en pantalla lo espera.
+    fireEvent.click(savePartialButton());
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD), sent(1, NEW)]);
+    await held.release(1);
+    await held.release(2);
+    await waitFor(() => {
+      expect(title()).toBe(whyLabel(2));
+    }, WAIT);
+    await settle();
+    expect(loop.calls.steps).toEqual([sent(1, OLD), sent(1, NEW)]);
+  });
+
   it('«Siguiente» con un porqué guardado y vaciado dice que es obligatorio y no envía', async () => {
     const { loop } = await resumedWithTwo();
     next();
