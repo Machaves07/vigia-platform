@@ -25,6 +25,7 @@ from vigia_platform.ledger.application.evidence_read import (
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
+from vigia_platform.loop.application.assignees import AssigneeService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
@@ -82,6 +83,8 @@ class LoopHttp:
     """Las tres rutas del análisis de causa raíz guiado (LC-LAZ-12, VIG-214)."""
     actions: ActionService | None = None
     """``POST /loop/findings/{finding_state_id}/actions`` (LC-LAZ-09, VIG-223)."""
+    assignees: AssigneeService | None = None
+    """``GET /loop/findings/{finding_state_id}/assignees`` (A-126, TASK-583)."""
     evidence: EvidenceService | None = None
     """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
     verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
@@ -217,6 +220,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         actions=actions,
+        assignees=AssigneeService(database=services.database, authorizer=services.authorizer),
         evidence=EvidenceService(
             database=services.database,
             writer=services.writer,

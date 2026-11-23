@@ -12,6 +12,7 @@ import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import type { ClosureContext } from '../closure/common';
+import { AssigneePicker } from '../AssigneePicker';
 
 export type ActionDraft = Omit<ReopeningBody, 'reason_text'>;
 
@@ -121,20 +122,20 @@ export function ActionFields({
         loopText
         showErrors={invalid}
       />
-      <label>
-        {text('scr09.reopening.assignee')}
-        <select
-          name="assignee_user_id"
-          value={value.assignee_user_id}
-          onChange={(e) => {
-            onChange({ ...value, assignee_user_id: e.target.value });
-          }}
-        >
-          {context.principal !== null && (
-            <option value={context.principal.user_id}>{context.principal.display_name}</option>
-          )}
-        </select>
-      </label>
+      <AssigneePicker
+        context={context}
+        sessionUser={
+          context.principal === null
+            ? null
+            : { id: context.principal.user_id, name: context.principal.display_name }
+        }
+        caption={text('scr09.reopening.assignee')}
+        value={value.assignee_user_id}
+        onChange={(assignee_user_id) => {
+          onChange({ ...value, assignee_user_id });
+        }}
+        invalid={invalid}
+      />
       <label>
         {text('scr09.reopening.deadline')}
         <input

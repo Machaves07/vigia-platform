@@ -1,4 +1,7 @@
-/** Frontera propia de evidencia, cierre, incerrable y reapertura (SUP-U05-08 a 15). */
+/**
+ * Frontera propia de evidencia, cierre, incerrable y reapertura (SUP-U05-08 a 15) y de la lista de
+ * responsables posibles de una acción (SUP-U05-07, TASK-583), que usan la acción y la reapertura.
+ */
 import loop from '../../../backend/resources/labels.loop.es.json';
 import type { components } from '@/client/schema';
 import type { Notice } from '@/components/NoticeStack/notice';
@@ -13,6 +16,7 @@ export type ReviewBody = components['schemas']['UnclosableReviewBody'];
 export type ReopeningBody = components['schemas']['ReopeningBody'];
 export type LedgerRecord = components['schemas']['LedgerRecordOut'];
 export type OverduePage = components['schemas']['OverduePageOut'];
+export type Assignee = components['schemas']['AssigneeOut'];
 
 export const closurePort = defineScreenPort('SCR-09', {
   hierarchy: {
@@ -95,7 +99,41 @@ export const closurePort = defineScreenPort('SCR-09', {
     operationId: 'list_overdue_loop_overdue_get',
     permission: 'executive_summary.read',
   },
+  assignees: {
+    kind: 'read',
+    status: 'fixed',
+    operationId: 'list_assignees_loop_findings__finding_state_id__assignees_get',
+    permission: 'actions.manage',
+  },
 });
+
+/** Página máxima de la lista de responsables (BR-APP-53). */
+const ASSIGNEES_PAGE = 200;
+
+/**
+ * Todas las personas que pueden ser responsables de la acción del hallazgo (A-126), página a
+ * página por clave. La búsqueda por nombre es local sobre esta lista: la API no la tiene
+ * (BR-APP-21) y no se pide nada por tecla (BR-APP-57).
+ */
+export async function readAssignees(
+  findingId: string,
+  signal: AbortSignal,
+): Promise<readonly Assignee[]> {
+  const people: Assignee[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await closurePort.assignees.read(
+      {
+        path: { finding_state_id: findingId },
+        query: { limit: ASSIGNEES_PAGE, ...(cursor === null ? {} : { cursor }) },
+      },
+      signal,
+    );
+    people.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor !== null);
+  return people;
+}
 
 export const ACTION_TYPES = Object.keys(loop.action_type);
 export const REVIEW_OUTCOMES = Object.keys(loop.unclosable_review_outcome);

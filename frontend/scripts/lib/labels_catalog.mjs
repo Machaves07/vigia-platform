@@ -128,7 +128,11 @@ const TECHNICAL = new Set([
   'clip_upload_request_content_type',
   'video_clip_content_type',
 ]);
-const ALIASES = new Map([['grant_body_scope_level', 'scope_level']]);
+const ALIASES = new Map([
+  ['grant_body_scope_level', 'scope_level'],
+  // TASK-583: los tres roles de A-126 en AssigneeOut son valores de la lista de roles.
+  ['assignee_out_roles_items', 'role'],
+]);
 
 /** @param {Enumeration[]} enumerations @param {Labels} labels @returns {string[]} */
 export function missingLabels(enumerations, labels) {

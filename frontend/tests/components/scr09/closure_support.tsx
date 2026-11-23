@@ -8,7 +8,7 @@ import Closure from '@/pages/scr09/loop/closure';
 import Unclosable from '@/pages/scr09/loop/unclosable';
 import Reopening from '@/pages/scr09/loop/reopening';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
-import type { Detail, LedgerRecord } from '@/ports/scr09Closure';
+import type { Assignee, Detail, LedgerRecord } from '@/ports/scr09Closure';
 import { createScreenQueryCache, ScreenQueryProvider } from '@/state/query';
 import { createSessionStore, SessionProvider } from '@/state/session';
 import { text } from '@/texts';
@@ -16,9 +16,16 @@ import { exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { FakeClock } from '../../support/fakeClock';
 import { meResponse } from '../../support/session';
-import { detail as baseDetail, FINDING, USER, WAIT } from './classify_support';
+import {
+  assigneesHandler,
+  detail as baseDetail,
+  FINDING,
+  SESSION_ASSIGNEE,
+  USER,
+  WAIT,
+} from './classify_support';
 
-export { FINDING, USER, WAIT };
+export { FINDING, SESSION_ASSIGNEE, USER, WAIT };
 export const START = Date.parse('2026-10-25T02:00:00.000Z'); // En Bogotá aún es 24 de octubre.
 export const INSTANT = '2026-10-25T02:00:00.000Z';
 export const ACTION = '0190a1b2-7777-7000-8000-000000000001';
@@ -91,6 +98,7 @@ export async function renderClosure(
     license = LICENSE,
     entryState = null,
     detail: shown = detail,
+    assignees = [SESSION_ASSIGNEE],
   }: {
     permissions?: string[];
     records?: LedgerRecord[];
@@ -100,6 +108,8 @@ export async function renderClosure(
     entryState?: unknown;
     /** El detalle que sirve el servidor (TASK-582: acciones vigentes y vencidas). */
     detail?: Detail;
+    /** Las personas que pueden ser responsables (TASK-583). */
+    assignees?: readonly Assignee[];
   } = {},
 ) {
   const clock = new FakeClock(now);
@@ -186,6 +196,8 @@ export async function renderClosure(
         signed_by_display_name: 'Firmante sintético',
       }),
     ),
+    // Por defecto, solo la persona en sesión puede ser responsable (TASK-583).
+    assigneesHandler(assignees).handler,
   );
   const router = createMemoryRouter(
     [

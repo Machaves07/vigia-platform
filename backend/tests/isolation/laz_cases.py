@@ -63,6 +63,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STAT
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
+from vigia_platform.loop.application.assignees import AssigneeService
 from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
@@ -184,6 +185,9 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 clock=services.clock,
             ),
             actions=actions,
+            assignees=AssigneeService(  # TASK-583
+                database=database, authorizer=services.authorizer
+            ),
             evidence=EvidenceService(  # TASK-311
                 database=database,
                 writer=services.writer,
@@ -498,6 +502,15 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "assignee_user_id": str(i.user),
                 },
             ),
+        ),
+    ),
+    # TASK-583 (A-126): la lista de responsables posibles de un hallazgo de B responde igual que
+    # la de uno inexistente (not_found); nunca muestra un usuario de B.
+    (
+        ("GET", "/loop/findings/{finding_state_id}/assignees"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", f"/loop/findings/{i.finding}/assignees"),
         ),
     ),
     (
@@ -947,7 +960,13 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
     "SUP-U05-04": frozenset({("GET", "/loop/findings/{finding_state_id}/classifications")}),
     "SUP-U05-05": frozenset({("GET", "/loop/review-queue")}),
     "SUP-U05-06": frozenset({("POST", "/loop/review-queue/{detection_id}/resolution")}),
-    "SUP-U05-07": frozenset({("POST", "/loop/findings/{finding_state_id}/actions")}),
+    # TASK-583 (A-126): elegir el responsable es el segundo verbo de asignar la acción.
+    "SUP-U05-07": frozenset(
+        {
+            ("POST", "/loop/findings/{finding_state_id}/actions"),
+            ("GET", "/loop/findings/{finding_state_id}/assignees"),
+        }
+    ),
     "SUP-U05-08": frozenset({("POST", "/loop/actions/{action_id}/evidence")}),
     "SUP-U05-09": frozenset({("POST", "/loop/actions/{action_id}/attachments/upload-grant")}),
     "SUP-U05-10": frozenset({("POST", "/loop/attachments/{attachment_id}/read-url")}),
@@ -1000,10 +1019,11 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
 }
 """Las 41 operaciones de LC-LAZ §6 y sus rutas.
 
-``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias, ``SUP-U05-16`` lee además
-el análisis en curso para retomarlo (VIG-363), ``SUP-U05-02`` también la ficha de vida del mismo
-hallazgo (TASK-585) y ``SUP-U05-01`` también el histórico de lo cerrado (TASK-586); por eso las
-41 operaciones ocupan 45 rutas declaradas y 45 casos de aislamiento.
+``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias, ``SUP-U05-16`` lee
+además el análisis en curso para retomarlo (VIG-363), ``SUP-U05-07`` lista además los
+responsables posibles de la acción (TASK-583), ``SUP-U05-02`` también la ficha de vida del
+mismo hallazgo (TASK-585) y ``SUP-U05-01`` también el histórico de lo cerrado (TASK-586); por
+eso las 41 operaciones ocupan 46 rutas declaradas y 46 casos de aislamiento.
 """
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(

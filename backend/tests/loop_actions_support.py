@@ -52,10 +52,12 @@ from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.attachments.rules import attachment_storage_key
 from vigia_platform.loop.adapters.http.actions_routes import ACTIONS_PATH, EVIDENCE_PATH
+from vigia_platform.loop.adapters.http.assignees_routes import ASSIGNEES_PATH
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.closure_routes import CLOSURE_PATH, REOPENING_PATH
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.actions import ActionService
+from vigia_platform.loop.application.assignees import AssigneeService
 from vigia_platform.loop.application.attachments import (
     ClosureAttachmentService,
     build_attachment_service,
@@ -297,6 +299,22 @@ class ActionsStack:
             headers[CONCESSION_HEADER] = str(concession)
         response: httpx.Response = self.run(self.client.post(path, json=body, headers=headers))
         return response
+
+    def get(self, who: Who, path: str, params: Any = None) -> httpx.Response:
+        self.tick()
+        cookie, concession = who
+        headers = {**SAME_ORIGIN, "Cookie": f"{SESSION_COOKIE_NAME}={cookie.value}"}
+        if concession is not None:
+            headers[CONCESSION_HEADER] = str(concession)
+        response: httpx.Response = self.run(self.client.get(path, params=params, headers=headers))
+        return response
+
+    def assignees(
+        self, who: Who, subject: IngestedSubject | uuid.UUID, params: Any = None
+    ) -> httpx.Response:
+        """``GET /loop/findings/{id}/assignees`` (TASK-583)."""
+        fsid = subject if isinstance(subject, uuid.UUID) else self.finding_state_id(subject)
+        return self.get(who, ASSIGNEES_PATH.format(finding_state_id=fsid), params)
 
     def action_body(self, assignee: uuid.UUID, **changes: Any) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -623,6 +641,7 @@ def actions_stack(
                         configuration=configuration,
                         classification=classification,
                         actions=actions,
+                        assignees=AssigneeService(database=database, authorizer=authz.authorizer),
                         evidence=evidence,
                         closure=closure,
                         reopening=reopening,

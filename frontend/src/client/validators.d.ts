@@ -85,6 +85,7 @@ export type QueryOperationId =
   | 'get_exposure_accreditation_exposure_get'
   | 'get_monthly_package_accreditation_monthly_packages_get'
   | 'list_admissions_plants__plant_id__admissions_get'
+  | 'list_assignees_loop_findings__finding_state_id__assignees_get'
   | 'list_audit_entries_audit_entries_get'
   | 'list_closed_findings_loop_closed_findings_get'
   | 'list_commitments_accreditation_commitments_get'

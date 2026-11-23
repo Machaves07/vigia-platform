@@ -5020,6 +5020,51 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/assignees":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Personas que pueden ser responsables de la acción del hallazgo"
+      "operationId": "list_assignees_loop_findings__finding_state_id__assignees_get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 22
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AssigneePageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/timeline":
     "get":
       "tags":
@@ -6422,6 +6467,50 @@
         - "scope_level"
         - "scope_id"
       "title": "AssignedView"
+    "AssigneeOut":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "roles":
+          "items":
+            "type": "string"
+            "enum":
+              - "coordinator_sst"
+              - "line_manager"
+              - "plant_manager"
+          "type": "array"
+          "title": "Roles"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "roles"
+      "title": "AssigneeOut"
+      "description": "Una persona que puede ser responsable: un usuario de la plataforma, nunca una persona\nobservada (BR-APP-33). Solo lo necesario para elegirla."
+    "AssigneePageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/AssigneeOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "AssigneePageOut"
     "AssignmentBody":
       "properties":
         "role":
