@@ -4,7 +4,8 @@
  * servidor**: en una zona unipersonal `read_at` ya llega agregado a la ventana (BR-LAZ-06) y se
  * dice. La consola no recalcula ni redondea la hora. Sin `read_at`, su ausencia.
  *
- * Compartido: lo usa la clasificación (SCR-09) y lo adopta el detalle (SCR-08) en TASK-584.
+ * Compartido: lo usan la clasificación (SCR-09) y el detalle (SCR-08, TASK-584); sus textos van en
+ * `signal_readings.json`, del armazón, para que ninguna de las dos cargue los de la otra.
  * Selección explícita de campos (BR-APP-40): nada del objeto recibido se serializa.
  */
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
@@ -24,18 +25,18 @@ function ReadAt({
   if (readAt === null) {
     return (
       <span data-part="signal_read_at_unavailable">
-        {text('scr09.classify.signal_read_at_unavailable')}
+        {text('signal_readings.read_at_unavailable')}
       </span>
     );
   }
   return (
     <span data-part="signal_read_at">
-      {text('scr09.classify.signal_read_at')}:{' '}
+      {text('signal_readings.read_at')}:{' '}
       <TimestampWithOffset instant={readAt} timeZone={timeZone} />
       {aggregated && (
         <>
           {' '}
-          (<span data-part="signal_aggregated">{text('scr09.classify.aggregated')}</span>)
+          (<span data-part="signal_aggregated">{text('signal_readings.aggregated')}</span>)
         </>
       )}
     </span>
@@ -56,7 +57,7 @@ export function SignalReadings({
   readonly aggregated: boolean;
 }) {
   if (signals.length === 0) {
-    return <p data-part="no_signals">{text('scr09.classify.signals_record_none')}</p>;
+    return <p data-part="no_signals">{text('signal_readings.none')}</p>;
   }
   return (
     <ul aria-label={name} data-part="signal_readings">
@@ -71,7 +72,7 @@ export function SignalReadings({
           {!signal.valid && (
             <>
               {' '}
-              (<span data-part="signal_invalid">{text('scr09.classify.signal_invalid')}</span>)
+              (<span data-part="signal_invalid">{text('signal_readings.invalid')}</span>)
             </>
           )}
           {' · '}

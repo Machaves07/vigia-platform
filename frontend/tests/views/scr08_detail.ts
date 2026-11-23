@@ -29,6 +29,7 @@ export default {
         // construcción» coincide por azar con los fragmentos `constructor` que genera fast-check.
         clock: null,
         canViewClips: false,
+        rootCauseHref: null,
       }),
     allowedFields: [
       'notices',
@@ -65,6 +66,23 @@ export default {
       'role',
       'value',
       'valid',
+      'read_at',
+      // TASK-584: el porqué del instante, las acciones y los análisis del propio detalle.
+      'coverage_at_event',
+      'causes',
+      'actions',
+      'action_type',
+      'action_description',
+      'expected_outcome',
+      'state',
+      'assigned_at',
+      'due_at',
+      'counts_as_overdue',
+      'analyses',
+      'root_cause_category',
+      'root_cause_statement',
+      'conclusion',
+      'signed_at',
     ],
   },
   findingClassifications: {
