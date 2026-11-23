@@ -49,6 +49,11 @@ function saved() {
   });
 }
 
+/** Nombre accesible de un campo obligatorio de la causa raíz (UI-13, TASK-580). */
+function rootName(key: string): string {
+  return `${text(key)} (${text('components_forms.reason.required')})`;
+}
+
 function next() {
   fireEvent.click(screen.getByRole('button', { name: text('components_structure.wizard.next') }));
 }
@@ -66,10 +71,10 @@ async function signedView() {
   fireEvent.change(screen.getByRole('combobox', { name: text('scr11.root_category') }), {
     target: { value: ROOT.category },
   });
-  fireEvent.change(screen.getByRole('textbox', { name: text('scr11.root_statement') }), {
+  fireEvent.change(screen.getByRole('textbox', { name: rootName('scr11.root_statement') }), {
     target: { value: ROOT.statement },
   });
-  fireEvent.change(screen.getByRole('textbox', { name: text('scr11.conclusion') }), {
+  fireEvent.change(screen.getByRole('textbox', { name: rootName('scr11.conclusion') }), {
     target: { value: ROOT.conclusion },
   });
   next();
