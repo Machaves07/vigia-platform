@@ -27,8 +27,18 @@ píxeles: la verificación del difuminado es la del dueño, a ojo (A-112, punto 
 vigente en la ventana del tramo (``schema_invalid`` en ``standard``) y la cámara del cuadro, si la
 hay, está declarada en una de las versiones que lo citan (``schema_invalid`` en ``camera_id``).
 
-**Vencimiento**: ``expires_at = received_at + VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` (30 por
-defecto, de 1 a 90; QF5), con el reloj inyectado.
+**Régimen por modo** (A-128, TASK-588): la misma tabla guarda la foto de la sombra
+(``commissioning``, A-112) y la foto del hallazgo (``productive``, con el ``record_id`` del
+registro que la cita, su ``photo_index`` de 0 a 20 y su ``photo_role``: ``peak`` el 0, ``burst`` los
+demás). Una presentación que no declara el modo (contrato v1.5.0) es de ``commissioning``.
+
+**Vencimiento**, con el reloj inyectado:
+
+- ``commissioning``: ``expires_at = received_at + VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` (30 por
+  defecto, de 1 a 90; QF5);
+- ``productive``: ``VIGIA_FINDING_PHOTO_RETENTION_DAYS`` (0 a 1 825; 0 por defecto = **sin
+  vencimiento automático**, ``expires_at`` nulo, el régimen del clip del hallazgo, BR-NUC-65 y Q2
+  de M11).
 
 Dominio puro: sin base ni reloj.
 """
@@ -52,18 +62,26 @@ from vigia_platform.fleet.domain.clock_tolerance import Window
 from vigia_platform.fleet.domain.ingest_order import CatalogVersionView
 
 __all__ = [
+    "DEFAULT_FINDING_RETENTION_DAYS",
     "DEFAULT_RETENTION_DAYS",
+    "MAX_FINDING_RETENTION_DAYS",
     "MAX_IMAGE_BYTES",
+    "MAX_PHOTO_INDEX",
     "MAX_RETENTION_DAYS",
+    "MIN_FINDING_RETENTION_DAYS",
     "MIN_RETENTION_DAYS",
     "STEP_CODES",
     "EpisodePhotoRow",
     "EpisodePhotoStep",
     "ImageViolation",
+    "PhotoRole",
+    "ZoneMode",
     "catalog_violation",
+    "check_finding_retention_days",
     "check_retention_days",
     "decode_image",
     "expires_at",
+    "finding_expires_at",
     "image_violation",
     "photo_row",
 ]
@@ -72,6 +90,15 @@ MIN_RETENTION_DAYS: Final = 1
 MAX_RETENTION_DAYS: Final = 90
 DEFAULT_RETENTION_DAYS: Final = 30
 """``VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` (QF5): días que vive la foto en la plataforma."""
+
+MIN_FINDING_RETENTION_DAYS: Final = 0
+MAX_FINDING_RETENTION_DAYS: Final = 1825
+DEFAULT_FINDING_RETENTION_DAYS: Final = 0
+"""``VIGIA_FINDING_PHOTO_RETENTION_DAYS`` (A-128, Q2 de M11): días que vive la foto del hallazgo;
+0 = sin vencimiento automático (como el clip del hallazgo, BR-NUC-65)."""
+
+MAX_PHOTO_INDEX: Final = 20
+"""Índice máximo de una foto en su tramo (ráfaga de la fase 2, A-128 §3)."""
 
 MAX_IMAGE_BYTES: Final = 204_800
 """Tamaño máximo del JPEG (A-112, punto 2)."""
@@ -82,6 +109,20 @@ _NOT_ANONYMIZED: Final = frozenset(
     {JpegDefectCode.FORBIDDEN_APP_SEGMENT, JpegDefectCode.TRAILING_DATA}
 )
 """Defectos de ``jpeg_facts`` que son falta de anonimización (metadatos, miniaturas, cola)."""
+
+
+class ZoneMode(enum.StrEnum):
+    """``zone_mode`` de la foto: decide su régimen (A-128)."""
+
+    COMMISSIONING = "commissioning"
+    PRODUCTIVE = "productive"
+
+
+class PhotoRole(enum.StrEnum):
+    """``photo_role``: ``peak`` es el índice 0 (el cuadro de mayor confianza); ``burst``, 1 a 20."""
+
+    PEAK = "peak"
+    BURST = "burst"
 
 
 class EpisodePhotoStep(enum.IntEnum):
@@ -145,6 +186,26 @@ def expires_at(received_at: datetime, days: int) -> datetime:
     if received_at.utcoffset() is None:
         raise ValueError("received_at lleva zona horaria")
     return received_at + timedelta(days=check_retention_days(days))
+
+
+def check_finding_retention_days(days: object) -> int:
+    """``days`` si es un entero de 0 a 1 825; ``ValueError`` si no (el proceso no arranca)."""
+    if (
+        type(days) is not int
+        or not MIN_FINDING_RETENTION_DAYS <= days <= MAX_FINDING_RETENTION_DAYS
+    ):
+        raise ValueError("VIGIA_FINDING_PHOTO_RETENTION_DAYS va de 0 a 1825 días")
+    return days
+
+
+def finding_expires_at(received_at: datetime, days: int) -> datetime | None:
+    """El vencimiento de una foto del hallazgo: ``None`` con 0 días (sin vencimiento automático);
+    si no, exactamente ``days`` después de ``received_at``."""
+    if received_at.utcoffset() is None:
+        raise ValueError("received_at lleva zona horaria")
+    if check_finding_retention_days(days) == 0:
+        return None
+    return received_at + timedelta(days=days)
 
 
 # --- Paso 6: la imagen en línea ----------------------------------------------------------------
@@ -230,7 +291,7 @@ def catalog_violation(
 
 @dataclass(frozen=True, slots=True)
 class EpisodePhotoRow:
-    """Una fila de ``fleet.episode_photo`` (``gob_0042``)."""
+    """Una fila de ``fleet.episode_photo`` (``gob_0042`` y ``gob_0045``)."""
 
     organization_id: uuid.UUID
     photo_id: uuid.UUID
@@ -247,7 +308,7 @@ class EpisodePhotoRow:
     started_at: datetime
     ended_at: datetime
     received_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None
     camera_id: uuid.UUID | None
     frame_at: datetime | None
     width: int | None
@@ -259,6 +320,10 @@ class EpisodePhotoRow:
     image_absent_reason: str | None
     canonical_sha256: str
     platform_record_id: uuid.UUID
+    zone_mode: ZoneMode = ZoneMode.COMMISSIONING
+    record_id: uuid.UUID | None = None
+    photo_index: int = 0
+    photo_role: PhotoRole = PhotoRole.PEAK
 
     def __repr__(self) -> str:
         # Nunca los bytes de la imagen (NFR-GOB-25).
@@ -277,9 +342,23 @@ def photo_row(
     retention_days: int,
     canonical_sha256: str,
     platform_record_id: uuid.UUID,
+    finding_retention_days: int = DEFAULT_FINDING_RETENTION_DAYS,
 ) -> EpisodePhotoRow:
-    """La fila de la presentación ``submission`` ya validada con el modelo estricto."""
+    """La fila de la presentación ``submission`` ya validada con el modelo estricto.
+
+    Sin ``zone_mode`` (contrato v1.5.0), la foto es de ``commissioning``, índice 0 y ``peak``. El
+    vencimiento sale del modo: ``retention_days`` en ``commissioning`` y
+    ``finding_retention_days`` en ``productive`` (0 = sin vencimiento).
+    """
     image = submission.get("image")
+    mode = ZoneMode(str(submission.get("zone_mode", ZoneMode.COMMISSIONING.value)))
+    record = submission.get("record_id")
+    index = int(submission.get("photo_index", 0))
+    role = PhotoRole(str(submission.get("photo_role", PhotoRole.PEAK.value)))
+    if mode is ZoneMode.PRODUCTIVE:
+        expiry = finding_expires_at(received_at, finding_retention_days)
+    else:
+        expiry = expires_at(received_at, retention_days)
     camera, frame = submission.get("camera_id"), submission.get("frame_at")
     standard = submission["standard"]
     episode = submission["episode"]
@@ -300,7 +379,7 @@ def photo_row(
         started_at=_instant(node_time["started_at"]),
         ended_at=_instant(node_time["ended_at"]),
         received_at=received_at,
-        expires_at=expires_at(received_at, retention_days),
+        expires_at=expiry,
         camera_id=None if camera is None else uuid.UUID(str(camera)),
         frame_at=None if frame is None else _instant(frame),
         width=None if image is None else int(image["width"]),
@@ -312,4 +391,8 @@ def photo_row(
         image_absent_reason=submission.get("image_absent_reason"),
         canonical_sha256=canonical_sha256,
         platform_record_id=platform_record_id,
+        zone_mode=mode,
+        record_id=None if record is None else uuid.UUID(str(record)),
+        photo_index=index,
+        photo_role=role,
     )

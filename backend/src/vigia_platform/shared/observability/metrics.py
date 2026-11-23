@@ -274,9 +274,10 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "Fotos del episodio de la sombra por resultado y si traen imagen.", "A-112",
           "result", "rejection_code", "image_presence"),
     # Purga de la foto del episodio (TASK-573, A-112): filas borradas por causa (vencida o zona en
-    # productive); nunca por nodo ni por zona.
+    # productive) y por modo de la foto (TASK-588, A-128); nunca por nodo ni por zona.
     _spec(_N.EPISODE_PHOTOS_PURGED_TOTAL, _C, "{record}",
-          "Fotos del episodio de la sombra borradas por la purga, por causa.", "A-112", "cause"),
+          "Fotos del episodio borradas por la purga, por causa y modo.", "A-112",
+          "cause", "zone_mode"),
     # Concesiones de clip (NFR-GOB-55, LC-GOB-13): emitidas, usadas y huérfanas por nodo. Solo
     # contadores y solo node_id (NFR-GOB-13: sin histogramas por nodo ni etiqueta de zona).
     _spec(_N.CLIP_GRANTS_ISSUED_TOTAL, _C, "{grant}", "Concesiones de clip emitidas por nodo.",

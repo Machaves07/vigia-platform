@@ -47,9 +47,10 @@ _INSERT: Final = (
     " episode_id, segment_index, classified_as, family, standard_id, standard_version,"
     " max_confidence, started_at, ended_at, received_at, expires_at, camera_id, frame_at, width,"
     " height, size_bytes, sha256, blur_params_version, image, image_absent_reason,"
-    " canonical_sha256, platform_record_id) VALUES ($1, $2, $3, $4, $5, $6, 0, 'finding',"
+    " canonical_sha256, platform_record_id, zone_mode, record_id, photo_index, photo_role)"
+    " VALUES ($1, $2, $3, $4, $5, $6, 0, 'finding',"
     " 'coexistence', $7, 1, 0.91, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,"
-    " $21, $22)"
+    " $21, $22, $23, $24, 0, 'peak')"
 )
 
 
@@ -64,7 +65,8 @@ class Stored:
     data: bytes | None
     started_at: dt.datetime
     received_at: dt.datetime
-    expires_at: dt.datetime
+    expires_at: dt.datetime | None
+    zone_mode: str = "commissioning"
 
     @property
     def image_path(self) -> str:
@@ -93,12 +95,20 @@ def stored(
     expires_at: dt.datetime | None = None,
     reason: str | None = None,
     padding: int = 0,
+    zone_mode: str = "commissioning",
+    no_expiry: bool = False,
 ) -> Stored:
-    """Una foto en ``zone_id`` recibida en ``received_at`` (por defecto, ahora)."""
+    """Una foto en ``zone_id`` recibida en ``received_at`` (por defecto, ahora).
+
+    ``zone_mode = "productive"`` siembra una foto del hallazgo (TASK-588) con su ``record_id``;
+    ``no_expiry`` la deja sin vencimiento (``expires_at`` nulo)."""
     photo_id = uuid.uuid4()
     received = received_at if received_at is not None else stack.authz.now()
     started = started_at if started_at is not None else received - dt.timedelta(seconds=30)
-    expires = expires_at if expires_at is not None else received + RETENTION
+    expires: dt.datetime | None = expires_at if expires_at is not None else received + RETENTION
+    if no_expiry:
+        expires = None
+    record_id = uuid.uuid4() if zone_mode == "productive" else None
     data = None if reason is not None else photo_bytes(photo_id, padding=padding)
     stack.execute(
         _INSERT,
@@ -124,8 +134,12 @@ def stored(
         reason,
         hashlib.sha256(photo_id.bytes).hexdigest(),
         uuid.uuid4(),
+        zone_mode,
+        record_id,
     )
-    return Stored(photo_id, organization_id, plant_id, zone_id, data, started, received, expires)
+    return Stored(
+        photo_id, organization_id, plant_id, zone_id, data, started, received, expires, zone_mode
+    )
 
 
 def usage(

@@ -34,7 +34,10 @@ from vigia_platform.fleet.application.episode_photos import (
     EpisodePhotoDependencies,
     EpisodePhotoService,
 )
-from vigia_platform.fleet.domain.episode_photo import DEFAULT_RETENTION_DAYS
+from vigia_platform.fleet.domain.episode_photo import (
+    DEFAULT_FINDING_RETENTION_DAYS,
+    DEFAULT_RETENTION_DAYS,
+)
 from vigia_platform.identity.authz.context import NodeScope
 from vigia_platform.node_api.observability import NodeResult
 from vigia_platform.node_api.rejections import NodeRejection, translate
@@ -165,12 +168,16 @@ def episode_photo_route(services: UnitServices) -> NodeOperation:
     vencimiento de ``VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` (30 días sin configuración)."""
     config = services.config
     retention = DEFAULT_RETENTION_DAYS if config is None else config.episode_photo_retention_days
+    finding_retention = (
+        DEFAULT_FINDING_RETENTION_DAYS if config is None else config.finding_photo_retention_days
+    )
     service = EpisodePhotoService(
         EpisodePhotoDependencies(
             database=services.database,
             clock=services.clock,
             store=PostgresEpisodePhotoStore(services.database),
             retention_days=retention,
+            finding_retention_days=finding_retention,
         )
     )
     return episode_photo_operation(service, metrics=services.metrics)

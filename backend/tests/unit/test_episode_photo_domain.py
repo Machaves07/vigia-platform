@@ -45,11 +45,16 @@ from vigia_platform.fleet.domain.episode_photo import (
     STEP_CODES,
     EpisodePhotoRow,
     EpisodePhotoStep,
+    PhotoRole,
+    ZoneMode,
     catalog_violation,
+    check_finding_retention_days,
     check_retention_days,
     decode_image,
     expires_at,
+    finding_expires_at,
     image_violation,
+    photo_row,
 )
 from vigia_platform.fleet.domain.ingest_order import (
     CatalogVersionView,
@@ -279,6 +284,91 @@ def test_the_process_reads_the_retention_or_takes_thirty_days() -> None:
             {**ENVIRONMENT, "VIGIA_EPISODE_PHOTO_RETENTION_DAYS": str(value)}
         )
         assert config.episode_photo_retention_days == value
+
+
+# --- Régimen por modo (TASK-588, A-128) ---------------------------------------------------------
+
+
+def _row_of(document: dict[str, Any], *, days: int = 30, finding_days: int = 0) -> EpisodePhotoRow:
+    return photo_row(
+        document,
+        data=None,
+        received_at=NOW,
+        retention_days=days,
+        finding_retention_days=finding_days,
+        canonical_sha256="ab" * 32,
+        platform_record_id=uuid.UUID("0190a8a0-0000-7000-8000-0000000000ff"),
+    )
+
+
+def _mode_document(**extra: Any) -> dict[str, Any]:
+    document = _document(absent_reason="frame_unavailable")
+    document.update(extra)
+    return document
+
+
+def test_a_v150_submission_is_commissioning_peak_zero_with_its_thirty_days() -> None:
+    row = _row_of(_mode_document(), days=30, finding_days=365)
+    assert (row.zone_mode, row.record_id, row.photo_index, row.photo_role) == (
+        ZoneMode.COMMISSIONING,
+        None,
+        0,
+        PhotoRole.PEAK,
+    )
+    assert row.expires_at == NOW + dt.timedelta(days=30)
+
+
+def test_a_productive_photo_takes_the_finding_retention_and_zero_means_no_expiry() -> None:
+    record = uuid.UUID("0190a8a0-0000-7000-8000-0000000000aa")
+    productive = {"zone_mode": "productive", "record_id": str(record)}
+    burst = _row_of(_mode_document(**productive, photo_index=3, photo_role="burst"), finding_days=0)
+    assert (burst.zone_mode, burst.record_id, burst.photo_index, burst.photo_role) == (
+        ZoneMode.PRODUCTIVE,
+        record,
+        3,
+        PhotoRole.BURST,
+    )
+    assert burst.expires_at is None
+    dated = _row_of(_mode_document(**productive), days=30, finding_days=365)
+    assert dated.expires_at == NOW + dt.timedelta(days=365)
+
+
+def test_finding_expires_at_is_none_with_zero_and_exact_otherwise() -> None:
+    assert finding_expires_at(NOW, 0) is None
+    assert finding_expires_at(NOW, 1) == NOW + dt.timedelta(days=1)
+    assert finding_expires_at(NOW, 1825) == NOW + dt.timedelta(days=1825)
+
+
+@pytest.mark.parametrize("days", [-1, 1826, True, 0.0, "0"])
+def test_finding_retention_out_of_range_does_not_start(days: Any) -> None:
+    with pytest.raises(ValueError):
+        check_finding_retention_days(days)
+    if type(days) is int:
+        with pytest.raises(ValueError):
+            EpisodePhotoService(
+                EpisodePhotoDependencies(
+                    database=_Database(_Store()),
+                    clock=SimulatedClock(NOW),
+                    store=_Store(),
+                    finding_retention_days=days,
+                )
+            )
+
+
+@pytest.mark.parametrize("value", ["1826", "-1", "siempre", "99999"])
+def test_the_process_does_not_start_with_finding_retention_outside_0_to_1825(value: str) -> None:
+    with pytest.raises(RuntimeConfigInvalid) as raised:
+        RuntimeConfig.from_environ({**ENVIRONMENT, "VIGIA_FINDING_PHOTO_RETENTION_DAYS": value})
+    assert raised.value.variable == "VIGIA_FINDING_PHOTO_RETENTION_DAYS"
+
+
+def test_the_process_reads_the_finding_retention_or_takes_zero() -> None:
+    assert RuntimeConfig.from_environ(ENVIRONMENT).finding_photo_retention_days == 0
+    for value in (0, 1, 1825):
+        config = RuntimeConfig.from_environ(
+            {**ENVIRONMENT, "VIGIA_FINDING_PHOTO_RETENTION_DAYS": str(value)}
+        )
+        assert config.finding_photo_retention_days == value
 
 
 # --- El orden, con el servicio real sobre una base en memoria -------------------------------------

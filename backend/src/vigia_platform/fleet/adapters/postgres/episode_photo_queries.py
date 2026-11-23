@@ -13,7 +13,17 @@ antes de la purga no devuelve a la vista las fotos que ya habían quedado retira
 llega después de una revocación es de la nueva puesta en marcha y se ve.
 
 **Vencida**: ``expires_at <= now``. A 1 ms de ``expires_at`` la foto sigue; en ``expires_at`` ni se
-sirve ni sobrevive a la purga.
+sirve ni sobrevive a la purga. Una foto con ``expires_at`` nulo (la del hallazgo sin vencimiento
+automático, ``gob_0045``) **nunca** vence: ``NULL <= now`` no es cierto.
+
+**Modo** (A-128, TASK-588). La tabla guarda también la foto del hallazgo (``zone_mode =
+productive``). La lectura de la instaladora (cursor, listado e imagen de SCR-06) y la retirada por
+paso a ``productive`` llevan el filtro explícito ``zone_mode = 'commissioning'``: una foto del
+hallazgo no aparece nunca en SCR-06, ni aunque la zona vuelva a ``commissioning`` por una
+regresión, y no se purga al aprobar la compuerta de uso. El vencimiento vale para los dos modos. La
+lectura de la foto del hallazgo (TASK-589) es aparte: filas ``productive`` por ``record_id``
+(índice ``episode_photo_record``, por organización, planta y ``record_id``), vivas si
+``expires_at`` es nulo o posterior a ``now``.
 
 - ``zone``: la zona en la organización del contexto, si la RLS la deja ver;
 - ``zone_retired``: la compuerta de uso de la zona está aprobada **ahora** (el listado responde
@@ -24,7 +34,7 @@ sirve ni sobrevive a la purga.
 - ``location`` y ``image``: la foto de la petición de imagen; ``image`` es la única sentencia que
   lee los bytes, y solo de una foto viva;
 - ``purge_retired`` y ``purge_expired``: ``DELETE`` de a lo sumo ``limit`` filas, que devuelve solo
-  las que borró (una pasada repetida o solapada no cuenta dos veces).
+  las que borró, con su modo (una pasada repetida o solapada no cuenta dos veces).
 
 SQL sin valores en trazas ni registros (NFR-GOB-57); ``StoredImage`` no muestra sus bytes.
 """
@@ -38,6 +48,7 @@ from typing import Any, Final
 
 from sqlalchemy import text
 
+from vigia_platform.fleet.domain.episode_photo import ZoneMode
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
@@ -46,6 +57,7 @@ __all__ = [
     "EpisodePhotoSummary",
     "PhotoLocation",
     "PostgresEpisodePhotoQueries",
+    "PurgedPhoto",
     "StoredImage",
 ]
 
@@ -64,7 +76,8 @@ _ZONE_RETIRED: Final = text(
 _CURSOR: Final = text(
     "SELECT p.started_at, p.photo_id FROM fleet.episode_photo AS p"
     " WHERE p.organization_id = :organization_id AND p.zone_id = :zone_id"
-    " AND p.photo_id = :photo_id AND p.expires_at > CAST(:now AS timestamptz)"
+    " AND p.photo_id = :photo_id AND p.zone_mode = 'commissioning'"
+    " AND p.expires_at > CAST(:now AS timestamptz)"
     " AND NOT EXISTS (SELECT 1 FROM catalog.gate_state_history AS h"
     " WHERE h.organization_id = p.organization_id AND h.zone_id = p.zone_id"
     " AND h.gate = 'usage' AND h.status = 'approved'"
@@ -78,7 +91,7 @@ _PAGE: Final = text(
     " p.frame_at, p.width, p.height, p.size_bytes, p.blur_params_version, p.image_absent_reason"
     " FROM fleet.episode_photo AS p"
     " WHERE p.organization_id = :organization_id AND p.zone_id = :zone_id"
-    " AND p.expires_at > CAST(:now AS timestamptz)"
+    " AND p.zone_mode = 'commissioning' AND p.expires_at > CAST(:now AS timestamptz)"
     " AND NOT EXISTS (SELECT 1 FROM catalog.gate_state_history AS h"
     " WHERE h.organization_id = p.organization_id AND h.zone_id = p.zone_id"
     " AND h.gate = 'usage' AND h.status = 'approved'"
@@ -98,6 +111,7 @@ _LOCATION: Final = text(
 _IMAGE: Final = text(
     "SELECT p.plant_id, p.zone_id, p.size_bytes, p.sha256, p.image FROM fleet.episode_photo AS p"
     " WHERE p.organization_id = :organization_id AND p.photo_id = :photo_id"
+    " AND p.zone_mode = 'commissioning'"
     " AND p.expires_at > CAST(:now AS timestamptz)"
     " AND NOT EXISTS (SELECT 1 FROM catalog.gate_state_history AS h"
     " WHERE h.organization_id = p.organization_id AND h.zone_id = p.zone_id"
@@ -109,13 +123,14 @@ _PURGE_RETIRED: Final = text(
     "DELETE FROM fleet.episode_photo AS p WHERE p.organization_id = :organization_id"
     " AND p.photo_id IN (SELECT q.photo_id FROM fleet.episode_photo AS q"
     " WHERE q.organization_id = :organization_id"
+    " AND q.zone_mode = 'commissioning'"
     " AND EXISTS (SELECT 1 FROM catalog.gate_state_history AS h"
     " WHERE h.organization_id = q.organization_id AND h.zone_id = q.zone_id"
     " AND h.gate = 'usage' AND h.status = 'approved'"
     " AND h.effective_from <= CAST(:now AS timestamptz)"
     " AND (h.effective_until IS NULL OR h.effective_until > q.received_at))"
     " ORDER BY q.photo_id LIMIT :limit)"
-    " RETURNING p.photo_id"
+    " RETURNING p.photo_id, p.zone_mode"
 )
 _PURGE_EXPIRED: Final = text(
     "DELETE FROM fleet.episode_photo AS p WHERE p.organization_id = :organization_id"
@@ -124,7 +139,7 @@ _PURGE_EXPIRED: Final = text(
     " AND q.expires_at <= CAST(:now AS timestamptz)"
     " ORDER BY q.photo_id LIMIT :limit)"
     " AND p.expires_at <= CAST(:now AS timestamptz)"
-    " RETURNING p.photo_id"
+    " RETURNING p.photo_id, p.zone_mode"
 )
 
 
@@ -173,6 +188,14 @@ class EpisodePhotoSummary:
     size_bytes: int | None
     blur_params_version: str | None
     image_absent_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PurgedPhoto:
+    """Una foto que borró la purga y su modo (la etiqueta ``zone_mode`` de la métrica)."""
+
+    photo_id: uuid.UUID
+    zone_mode: ZoneMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,20 +354,22 @@ class PostgresEpisodePhotoQueries:
 
     async def purge_retired(
         self, transaction: Transaction, now: datetime, *, limit: int
-    ) -> tuple[uuid.UUID, ...]:
-        """Borra a lo sumo ``limit`` fotos de zonas que pasaron a ``productive``."""
+    ) -> tuple[PurgedPhoto, ...]:
+        """Borra a lo sumo ``limit`` fotos de puesta en marcha de zonas que pasaron a
+        ``productive`` (nunca una foto del hallazgo)."""
         result = await transaction.execute(
             _PURGE_RETIRED,
             {"organization_id": transaction.context.organization_id, "now": now, "limit": limit},
         )
-        return tuple(_plain(row.photo_id) for row in result)
+        return tuple(PurgedPhoto(_plain(row.photo_id), ZoneMode(row.zone_mode)) for row in result)
 
     async def purge_expired(
         self, transaction: Transaction, now: datetime, *, limit: int
-    ) -> tuple[uuid.UUID, ...]:
-        """Borra a lo sumo ``limit`` fotos con ``expires_at <= now``."""
+    ) -> tuple[PurgedPhoto, ...]:
+        """Borra a lo sumo ``limit`` fotos con ``expires_at <= now`` (las de ``expires_at`` nulo,
+        nunca)."""
         result = await transaction.execute(
             _PURGE_EXPIRED,
             {"organization_id": transaction.context.organization_id, "now": now, "limit": limit},
         )
-        return tuple(_plain(row.photo_id) for row in result)
+        return tuple(PurgedPhoto(_plain(row.photo_id), ZoneMode(row.zone_mode)) for row in result)

@@ -609,3 +609,36 @@ def test_the_listing_never_carries_the_image_column(stack: FleetStack) -> None:
     body = _list(stack, installer, big.zone_id).content
     assert len(body) < 2_000, len(body)
     assert json.loads(body)["photos"][0]["image"]["size_bytes"] == len(big.data or b"")
+
+
+# --- Fotos del hallazgo (TASK-588, A-128) ---------------------------------------------------------
+
+
+def test_the_installer_never_sees_a_finding_photo_in_scr06(stack: FleetStack) -> None:
+    """Con una foto ``productive`` (con plazo y sin él) y otra ``commissioning`` en la misma zona en
+    ``commissioning``: el listado solo trae la segunda, la imagen de la primera es ``not_found``
+    con ``episode_photo_read`` ``denied`` y como cursor es ``invalid_request``
+    (``m_instaladora_ve_productiva``, una sonda por sentencia)."""
+    site = stack.site()
+    now = stack.authz.now()
+    own = _photo(stack, site, started_at=now - 3 * HOUR)
+    dated = _photo(
+        stack,
+        site,
+        started_at=now - 2 * HOUR,
+        zone_mode="productive",
+        expires_at=now + 365 * 24 * HOUR,
+    )
+    undated = _photo(stack, site, started_at=now - HOUR, zone_mode="productive", no_expiry=True)
+    installer = stack.installer(site)
+    listed = _list(stack, installer, own.zone_id)
+    assert listed.status_code == 200, listed.text
+    assert [item["photo_id"] for item in listed.json()["photos"]] == [str(own.photo_id)]
+    for finding in (dated, undated):
+        response = get(stack, installer, finding.image_path)
+        assert (response.status_code, _code(response)) == (404, "not_found"), response.text
+        assert [e["outcome"] for e in image_audit(stack, finding.photo_id)] == ["denied"]
+        cursor = _list(stack, installer, own.zone_id, after=str(finding.photo_id))
+        assert (cursor.status_code, _code(cursor)) == (400, "invalid_request"), cursor.text
+    served = get(stack, installer, own.image_path)
+    assert (served.status_code, served.content) == (200, own.data)

@@ -49,9 +49,11 @@ from vigia_platform.fleet.adapters.postgres.episode_photo_store import StoredPho
 from vigia_platform.fleet.application.ingest import IngestRejected, IngestReply
 from vigia_platform.fleet.domain.clock_tolerance import FactTime, Window
 from vigia_platform.fleet.domain.episode_photo import (
+    DEFAULT_FINDING_RETENTION_DAYS,
     DEFAULT_RETENTION_DAYS,
     EpisodePhotoRow,
     catalog_violation,
+    check_finding_retention_days,
     check_retention_days,
     decode_image,
     image_violation,
@@ -108,6 +110,9 @@ class EpisodePhotoDependencies:
     store: EpisodePhotoStore
     retention_days: int = DEFAULT_RETENTION_DAYS
     """``VIGIA_EPISODE_PHOTO_RETENTION_DAYS``: de 1 a 90 o el servicio no se construye."""
+    finding_retention_days: int = DEFAULT_FINDING_RETENTION_DAYS
+    """``VIGIA_FINDING_PHOTO_RETENTION_DAYS`` (foto del hallazgo, TASK-588): de 0 a 1 825 (0 = sin
+    vencimiento) o el servicio no se construye."""
     tracer: otel_trace.Tracer = field(default_factory=lambda: otel_trace.get_tracer(TRACER_NAME))
 
 
@@ -137,6 +142,7 @@ class EpisodePhotoService:
 
     def __init__(self, deps: EpisodePhotoDependencies) -> None:
         check_retention_days(deps.retention_days)
+        check_finding_retention_days(deps.finding_retention_days)
         self._deps = deps
 
     def __repr__(self) -> str:
@@ -187,6 +193,7 @@ class EpisodePhotoService:
             data=data,
             received_at=received,
             retention_days=deps.retention_days,
+            finding_retention_days=deps.finding_retention_days,
             canonical_sha256=canonical_sha256(submission),
             platform_record_id=uuid7(deps.clock),
         )
