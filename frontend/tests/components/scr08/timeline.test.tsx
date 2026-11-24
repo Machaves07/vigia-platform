@@ -83,6 +83,7 @@ function milestone(
     actor: null,
     details: { ...NO_DETAILS, ...details },
     deadline: null,
+    photos: [],
     ...changes,
   };
 }

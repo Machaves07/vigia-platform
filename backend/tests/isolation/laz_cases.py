@@ -48,6 +48,7 @@ from vigia_platform.accreditation.monthly.audit import SampleAuditService
 from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.finding_photos import FindingPhotos
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.ledger.application.audit_writer import AuditWriter
@@ -70,6 +71,7 @@ from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.finding_photo import FindingPhotoReader
 from vigia_platform.loop.application.history import ClosedFindingsService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -234,6 +236,7 @@ def _loop(services: LazServices) -> Mapping[str, object]:
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
             detail=_detail(services),  # TASK-342
             timeline=_timeline(services),  # TASK-585
+            finding_photos=_finding_photos(services),  # TASK-589
             history=ClosedFindingsService(  # TASK-586
                 database=database, authorizer=services.authorizer
             ),
@@ -289,6 +292,7 @@ def _detail(services: LazServices) -> FindingDetailService:
             provider_organization_id=_NO_PROVIDER,
         ),
         coverage=CoverageService(database=database, audit=services.audit, clock=services.clock),
+        photos=FindingPhotos(database=database, clock=services.clock),
     )
 
 
@@ -299,6 +303,18 @@ def _timeline(services: LazServices) -> FindingTimelineService:
         subjects=_detail(services),
         reader=LectorExpediente(database=database, audit=services.audit, clock=services.clock),
         timezones=PostgresLoopConfigurationRepository(database),
+    )
+
+
+def _finding_photos(services: LazServices) -> FindingPhotoReader:
+    """La imagen de la foto del hallazgo (TASK-589): los pasos de alcance del detalle."""
+    database: Any = services.database
+    return FindingPhotoReader(
+        database=database,
+        subjects=_detail(services),
+        authorizer=services.authorizer,
+        audit=services.audit,
+        photos=FindingPhotos(database=database, clock=services.clock),
     )
 
 
@@ -651,6 +667,15 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/findings/{finding_state_id}/timeline"),
         Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.finding}/timeline")),
     ),
+    # TASK-589: la imagen de la foto de un hallazgo de B responde igual que la de uno inexistente
+    # (not_found, nunca forbidden ni bytes); su finding_photo_read denied queda en A, nunca en B.
+    (
+        ("GET", "/loop/findings/{finding_state_id}/photos/{photo_id}/image"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", f"/loop/findings/{i.finding}/photos/{i.finding_photo}/image"),
+        ),
+    ),
     # VIG-229 (TASK-313): el panel de vencidos de una planta de B responde igual que el de una
     # inexistente (not_found, nunca forbidden ni una página vacía con el umbral de B).
     (
@@ -954,6 +979,7 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
         {
             ("GET", "/loop/findings/{finding_state_id}"),
             ("GET", "/loop/findings/{finding_state_id}/timeline"),
+            ("GET", "/loop/findings/{finding_state_id}/photos/{photo_id}/image"),
         }
     ),
     "SUP-U05-03": frozenset({("POST", "/loop/findings/{finding_state_id}/classifications")}),
@@ -1022,8 +1048,9 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
 ``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias, ``SUP-U05-16`` lee
 además el análisis en curso para retomarlo (VIG-363), ``SUP-U05-07`` lista además los
 responsables posibles de la acción (TASK-583), ``SUP-U05-02`` también la ficha de vida del
-mismo hallazgo (TASK-585) y ``SUP-U05-01`` también el histórico de lo cerrado (TASK-586); por
-eso las 41 operaciones ocupan 46 rutas declaradas y 46 casos de aislamiento.
+mismo hallazgo (TASK-585) y la imagen de la foto del hallazgo (TASK-589), y ``SUP-U05-01``
+también el histórico de lo cerrado (TASK-586); por eso las 41 operaciones ocupan 47 rutas
+declaradas y 47 casos de aislamiento.
 """
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(

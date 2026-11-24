@@ -5185,6 +5185,41 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/photos/{photo_id}/image":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Imagen difuminada de una foto del hallazgo (auditada en cada petición)"
+      "operationId": "finding_photo_image_loop_findings__finding_state_id__photos__photo_id__image_get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+        - "name": "photo_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Photo Id"
+      "responses":
+        "200":
+          "description": "JPEG difuminado de la foto del hallazgo (mismo origen, private, no-store); la sha256 se verifica antes de servirlo"
+          "content":
+            "image/jpeg":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -10933,6 +10968,113 @@
         - "since"
         - "cause"
       "title": "FindingNoticeOut"
+    "FindingPhotoOut":
+      "properties":
+        "photo_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Photo Id"
+        "photo_index":
+          "type": "integer"
+          "title": "Photo Index"
+        "photo_role":
+          "type": "string"
+          "title": "Photo Role"
+        "classified_as":
+          "type": "string"
+          "title": "Classified As"
+        "camera_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Camera Id"
+        "frame_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Frame At"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "standard":
+          "$ref": "#/components/schemas/FindingPhotoStandardOut"
+        "max_confidence":
+          "type": "number"
+          "title": "Max Confidence"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "ended_at":
+          "type": "string"
+          "title": "Ended At"
+        "episode_duration_ms":
+          "type": "integer"
+          "title": "Episode Duration Ms"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "expires_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Expires At"
+        "has_image":
+          "type": "boolean"
+          "title": "Has Image"
+        "image_absent_reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Image Absent Reason"
+        "width":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Width"
+        "height":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Height"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "photo_id"
+        - "photo_index"
+        - "photo_role"
+        - "classified_as"
+        - "camera_id"
+        - "frame_at"
+        - "family"
+        - "standard"
+        - "max_confidence"
+        - "started_at"
+        - "ended_at"
+        - "episode_duration_ms"
+        - "received_at"
+        - "expires_at"
+        - "has_image"
+        - "image_absent_reason"
+        - "width"
+        - "height"
+      "title": "FindingPhotoOut"
+      "description": "Una foto del hallazgo (A-128): solo metadatos. **Sin** bytes, suma, tamaño ni URL: la\nimagen se pide por ``GET …/photos/{photo_id}/image`` (``evidence.read``, auditada)."
+    "FindingPhotoStandardOut":
+      "properties":
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "version":
+          "type": "integer"
+          "title": "Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+      "title": "FindingPhotoStandardOut"
     "FindingTimelineOut":
       "properties":
         "finding_state_id":
@@ -14534,6 +14676,11 @@
             "$ref": "#/components/schemas/ClipOut"
           "type": "array"
           "title": "Clips"
+        "photos":
+          "items":
+            "$ref": "#/components/schemas/FindingPhotoOut"
+          "type": "array"
+          "title": "Photos"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -14546,6 +14693,7 @@
         - "occurred_at"
         - "signals"
         - "clips"
+        - "photos"
       "title": "RecordOut"
     "RecurrenceEntryOut":
       "properties":
@@ -16579,6 +16727,11 @@
           "anyOf":
             - "$ref": "#/components/schemas/TimelineDeadlineOut"
             - "type": "null"
+        "photos":
+          "items":
+            "$ref": "#/components/schemas/FindingPhotoOut"
+          "type": "array"
+          "title": "Photos"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -16591,6 +16744,7 @@
         - "actor"
         - "details"
         - "deadline"
+        - "photos"
       "title": "TimelineMilestoneOut"
     "TimelineSummaryOut":
       "properties":

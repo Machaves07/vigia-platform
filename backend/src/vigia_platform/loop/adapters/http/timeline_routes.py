@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import exact_query, no_store
+from vigia_platform.loop.adapters.http.findings_routes import FindingPhotoOut, finding_photo_out
 from vigia_platform.loop.adapters.http.services import LoopHttp, installed, loop_http
 from vigia_platform.loop.application.detail import FindingGateUnavailable
 from vigia_platform.loop.application.timeline import (
@@ -105,6 +106,9 @@ class TimelineMilestoneOut(_Strict):
     actor: TimelineActorOut | None
     details: TimelineDetailsOut
     deadline: TimelineDeadlineOut | None
+    photos: tuple[FindingPhotoOut, ...]
+    """Las fotos del tramo en ``finding_received`` y ``late_segment_attached`` (A-128), con la
+    forma del detalle; vacía en los demás hitos."""
 
 
 class TimelineSummaryOut(_Strict):
@@ -185,6 +189,7 @@ def _milestone(milestone: Milestone) -> TimelineMilestoneOut:
             if deadline is None
             else TimelineDeadlineOut(due_at=_stamp(deadline.due_at), met=deadline.met)
         ),
+        photos=tuple(finding_photo_out(photo) for photo in milestone.photos),
     )
 
 

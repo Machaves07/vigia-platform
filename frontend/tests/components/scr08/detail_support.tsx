@@ -164,6 +164,7 @@ export function detail(): FindingDetail {
             read_url: null,
           },
         ],
+        photos: [],
       },
     ],
     classifications: [],

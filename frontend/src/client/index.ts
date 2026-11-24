@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 157 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 158 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -392,6 +392,10 @@ export const OPERATIONS = {
     path: '/loop/findings/{finding_state_id}/timeline',
   },
   list_closed_findings_loop_closed_findings_get: { method: 'get', path: '/loop/closed-findings' },
+  finding_photo_image_loop_findings__finding_state_id__photos__photo_id__image_get: {
+    method: 'get',
+    path: '/loop/findings/{finding_state_id}/photos/{photo_id}/image',
+  },
   request_export_accreditation_exports_post: { method: 'post', path: '/accreditation/exports' },
   export_status_accreditation_exports__export_id__get: {
     method: 'get',

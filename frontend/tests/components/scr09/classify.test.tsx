@@ -464,6 +464,7 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
                     read_url: null,
                   },
                 ],
+                photos: [],
               },
             ],
           }),
@@ -555,6 +556,7 @@ describe(
         occurred_at: INSTANT,
         signals,
         clips: [],
+        photos: [],
       };
     }
 

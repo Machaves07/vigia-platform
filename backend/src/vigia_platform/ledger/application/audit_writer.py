@@ -211,6 +211,15 @@ class AuditOperation(enum.StrEnum):
     fila no coincide con sus bytes: no se sirve). Nunca lleva bytes ni la suma de la imagen. Sin
     migración (A-88): la columna solo exige ``snake_case``. Mismo criterio que
     ``evidence_read_granted``."""
+    FINDING_PHOTO_READ = "finding_photo_read"
+    """U-04 (TASK-589, A-128 §6): **cada** petición de ``GET
+    /loop/findings/{finding_state_id}/photos/{photo_id}/image``, con ``resource``
+    ``finding_photo`` y la planta y la zona del hallazgo cuando el hallazgo está al alcance.
+    ``success`` (la entrada se confirma en la transacción de la lectura, antes de servir un byte),
+    ``denied`` (sin ``findings.read`` o ``evidence.read`` en la zona, hallazgo invisible, foto que
+    no es de uno de sus registros, ``commissioning``, vencida o sin imagen: ``not_found``) o
+    ``error`` (la ``sha256`` o el tamaño no coinciden con los bytes: no se sirve; o la compuerta
+    del instante no se pudo leer). Nunca bytes, suma ni tamaño. Sin migración (A-88)."""
 
 
 class AuditOutcome(enum.StrEnum):

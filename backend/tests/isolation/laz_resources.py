@@ -10,10 +10,12 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import uuid
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from tests.episode_photo_support import jpeg
 from tests.examples.test_ledger_routes import CLIP
 from tests.factories import uuid7
 from tests.isolation.route_cases import Ids
@@ -147,6 +149,33 @@ def seed_laz_resources(world: Any, ids: Ids) -> Ids:
 
     detection_record = uuid7()
     world.run(project())
+    # TASK-589: la foto del hallazgo (``productive``) de su único tramo, con imagen sintética.
+    photo = jpeg(scan=ids.finding_photo.bytes)
+    world.env.execute(
+        "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id, node_id,"
+        " episode_id, segment_index, classified_as, family, standard_id, standard_version,"
+        " max_confidence, started_at, ended_at, received_at, expires_at, camera_id, frame_at,"
+        " width, height, size_bytes, sha256, blur_params_version, image, image_absent_reason,"
+        " canonical_sha256, platform_record_id, zone_mode, record_id, photo_index, photo_role)"
+        " VALUES ($1, $2, $3, $4, $5, $6, 0, 'finding', 'coexistence', $7, 1, 0.9, $8, $8, $8,"
+        " NULL, $9, $8, 320, 240, $10, $11, 'blur-v1', $12, NULL, $13, $14, 'productive', $15, 0,"
+        " 'peak')",
+        ids.organization,
+        ids.finding_photo,
+        ids.plant,
+        ids.zone,
+        ids.node,
+        subject,
+        uuid7(),
+        at,
+        camera,
+        len(photo),
+        hashlib.sha256(photo).hexdigest(),
+        photo,
+        hashlib.sha256(ids.finding_photo.bytes).hexdigest(),
+        uuid7(),
+        uuid.UUID(document["finding_id"]),
+    )
     world.env.execute(
         "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id, gate,"
         " status, effective_from, decided_by, ledger_record_id, record_id)"
