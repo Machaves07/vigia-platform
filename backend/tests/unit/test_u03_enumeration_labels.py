@@ -137,6 +137,7 @@ EXPECTED: dict[str, dict[str, str]] = {
         "clip_window": "ventana de clip",
         "episode": "episodio",
         "single_occupancy": "marca unipersonal",
+        "process_context": "valores de proceso",  # TASK-594 (A-129)
     },
 }
 """Las 21 enumeraciones de §4 con sus notas y la etiqueta propuesta de cada valor."""
