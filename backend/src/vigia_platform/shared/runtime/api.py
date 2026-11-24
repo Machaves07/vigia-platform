@@ -11,6 +11,8 @@ Construye:
   ``VIGIA_DB_POOL_PERSON``, 10 y 5, sin desbordamiento, espera de 5 s) y la credencial rotable de
   ``VIGIA_DB_APP_SECRET`` (runbook 6.6);
 - el ``StoragePort`` de S3 sobre ``VIGIA_EVIDENCE_BUCKET`` (también el centinela de salud), KMS,
+  y, con ``VIGIA_STORE_RELAY=1`` (solo ``local`` e ``integration``, TASK-607), el relevo firmado
+  del mismo origen, con su clave de ``VIGIA_STORE_RELAY_SECRET`` y su ruta ``/store-relay/object``;
   ``SigningService`` con ``LedgerRotationRecorder`` y la infraestructura común
   (``shared.runtime.core``);
 - ``CpuPool`` de ``VIGIA_THREADPOOL_SIZE`` (Argon2id, TOTP, firmas), ``RateLimiter``,
@@ -82,11 +84,14 @@ from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.ratelimit import RateLimiter
 from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
 from vigia_platform.shared.runtime.core import (
+    BinarySecretReader,
+    aws_settings,
     build_core,
     load_credentials,
     node_ca_check,
     open_database,
     s3_storage,
+    store_relay_settings,
 )
 from vigia_platform.shared.runtime.db_credentials import SecretStringReader
 from vigia_platform.shared.runtime.units import (
@@ -95,6 +100,8 @@ from vigia_platform.shared.runtime.units import (
     gate_service,
     registered_units,
 )
+from vigia_platform.shared.secrets import SecretsManagerAdapter
+from vigia_platform.shared.storage_relay import StoreRelayStorage
 from vigia_platform.shared.tokens import LiveViewTokenService
 
 __all__ = ["ORIGIN_KEY_BYTES", "build_api_runtime", "compose_api_runtime"]
@@ -127,8 +134,9 @@ async def compose_api_runtime(
     metrics: PlatformMetrics | None = None,
     units: Sequence[PlatformUnit] | None = None,
     reader: SecretStringReader | None = None,
+    relay_secrets: BinarySecretReader | None = None,
 ) -> AppRuntime:
-    """El ``AppRuntime`` de ``config`` y ``runtime`` (las pruebas inyectan reloj y lector)."""
+    """El ``AppRuntime`` de ``config`` y ``runtime`` (las pruebas inyectan reloj y lectores)."""
     clock = clock if clock is not None else SystemClock()
     metrics = metrics if metrics is not None else get_metrics()
     selected = tuple(units) if units is not None else registered_units()
@@ -142,7 +150,13 @@ async def compose_api_runtime(
     credentials = await load_credentials(runtime, reader)
     database = open_database(runtime, ProcessKind.API, credentials, metrics)
     cpu_pool = CpuPool(clock, max_workers=runtime.threadpool_size, metrics=metrics)
-    evidence = s3_storage(runtime, evidence_bucket, clock)
+    relay = None
+    if runtime.store_relay:
+        secrets = relay_secrets or SecretsManagerAdapter(
+            aws_settings(runtime), clock, metrics=metrics
+        )
+        relay = await store_relay_settings(runtime, secrets, link_base, metrics)
+    evidence = s3_storage(runtime, evidence_bucket, clock, relay=relay)
     core = build_core(
         runtime,
         database=database,
@@ -275,4 +289,5 @@ async def compose_api_runtime(
         ledger=ledger,
         platform=platform,
         state=api_state(selected, services),
+        store_relay=evidence if isinstance(evidence, StoreRelayStorage) else None,
     )

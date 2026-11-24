@@ -11,8 +11,9 @@ cumplirlo sin pago ni AWS real, dentro del propio contenedor:
   el centinela de salud; la clave KMS con **el mismo identificador y el mismo material** (etiquetas
   ``_custom_id_`` y ``_custom_key_material_``, que LocalStack admite), de modo que el texto cifrado
   anterior se sigue descifrando; y los secretos y los objetos pequeños de ``vigia-edge``
-  (``ca/root.pem``) de la última copia. Los secretos derivados de ``/state`` (la base y la clave del
-  hash de origen del alta) se crean si ninguna copia los trae. Al terminar deja ``MARKER``: el
+  (``ca/root.pem``) de la última copia. Los secretos derivados de ``/state`` (la base, la clave del
+  hash de origen del alta y la del relevo firmado del almacén, TASK-607) se crean si ninguna copia
+  los trae. Al terminar deja ``MARKER``: el
   healthcheck del contenedor no da sano hasta entonces.
 - ``save`` (cada ``VIGIA_SAVE_SECONDS``, 10 por omisión, desde ``ready.d``; y a mano) escribe la
   copia en ``/state/localstack-snapshot.json`` (``0600``, atómica, sin reescribir si nada cambió).
@@ -219,6 +220,7 @@ def restore() -> int:
         _setting("VIGIA_ENROLLMENT_SECRET_NAME"): {
             "binary": _read_state_file("enrollment-source.key")
         },
+        _setting("VIGIA_STORE_RELAY_SECRET_NAME"): {"binary": _read_state_file("store-relay.key")},
     }
     created = 0
     for name, value in derived.items():

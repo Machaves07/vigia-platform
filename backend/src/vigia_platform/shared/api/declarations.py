@@ -13,8 +13,9 @@ dependencia de FastAPI:
 - ``unauthenticated(UnauthenticatedRoute.X)``: la ruta está en la **lista cerrada**
   ``UnauthenticatedRoute`` (inicio de sesión, segundo factor y su inscripción con la sesión
   pendiente, cierre de sesión, aceptación de invitación, salud superficial, claves públicas de
-  ``checkpoint`` y hash del verificador, la salud profunda, que es interna, y los estáticos de la
-  aplicación de página única: pantallas, ``/assets/*``, ``/version.json`` y ``/robots.txt``);
+  ``checkpoint`` y hash del verificador, la salud profunda, que es interna, los estáticos de la
+  aplicación de página única: pantallas, ``/assets/*``, ``/version.json`` y ``/robots.txt``, y el
+  relevo firmado del almacén, que solo existe en integración, TASK-607);
   método y plantilla de la ruta deben coincidir con los de la lista;
 - ``node_route(NodeRoute.X)`` (A-51): la ruta es una de las **rutas del contrato** de U-01
   (las diez obligatorias y, desde v1.5.0, la foto del episodio de A-112) bajo ``/api/nodes``
@@ -139,6 +140,11 @@ class UnauthenticatedRoute(enum.Enum):
     APP_ASSET = ("GET", "/assets/{asset_path:path}", Exposure.PUBLIC)
     APP_VERSION = ("GET", "/version.json", Exposure.PUBLIC)
     ROBOTS = ("GET", "/robots.txt", Exposure.PUBLIC)
+    # Relevo firmado del almacén (TASK-607, A-130): **solo** en ``local`` e ``integration`` y solo
+    # con ``VIGIA_STORE_RELAY=1`` (sin él la ruta no existe). La URL es la capacidad, como una de
+    # S3: ni sesión ni auditoría propia; decide el token HMAC de la consulta (``store_relay``).
+    STORE_RELAY_READ = ("GET", "/store-relay/object", Exposure.PUBLIC)
+    STORE_RELAY_WRITE = ("PUT", "/store-relay/object", Exposure.PUBLIC)
 
     @property
     def method(self) -> str:

@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Protocol
 
 from vigia_platform.fleet.adapters.ca.file_signer import FileBackedKms, FileNodeCaSigner
 from vigia_platform.identity.adapters.authz_store import (
@@ -91,6 +91,7 @@ from vigia_platform.shared.secrets import (
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.signing_store import SqlSigningKeyStore
 from vigia_platform.shared.storage import AddressingStyle, ObjectHead, S3Storage, StorageSettings
+from vigia_platform.shared.storage_relay import MIN_KEY_BYTES, StoreRelaySettings, StoreRelayStorage
 
 __all__ = [
     "DB_SECRET_VARIABLE",
@@ -103,6 +104,7 @@ __all__ = [
     "node_ca_check",
     "open_database",
     "s3_storage",
+    "store_relay_settings",
 ]
 
 SYSTEM_ACTOR_ID: Final = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -134,8 +136,19 @@ def aws_settings(config: RuntimeConfig) -> AwsSettings:
     return AwsSettings(region=config.aws_region, endpoint_url=config.aws_endpoint_url)
 
 
-def s3_storage(config: RuntimeConfig, bucket: str, clock: Clock) -> S3Storage:
-    """El depósito ``bucket`` con el punto regional de S3 (o LocalStack, por ruta)."""
+def s3_storage(
+    config: RuntimeConfig,
+    bucket: str,
+    clock: Clock,
+    *,
+    relay: StoreRelaySettings | None = None,
+) -> S3Storage:
+    """El depósito ``bucket`` con el punto regional de S3 (o LocalStack, por ruta).
+
+    Con ``relay`` (solo ``vigia-api`` con ``VIGIA_STORE_RELAY=1``, TASK-607), y **solo** para
+    ``VIGIA_EVIDENCE_BUCKET``, el ``StoreRelayStorage`` que firma contra el relevo del mismo origen.
+    ``vigia-archive`` y ``vigia-edge`` nunca lo usan.
+    """
     endpoint = config.aws_endpoint_url
     settings = StorageSettings(
         bucket=bucket,
@@ -145,7 +158,48 @@ def s3_storage(config: RuntimeConfig, bucket: str, clock: Clock) -> S3Storage:
         region=config.aws_region,
         addressing_style=AddressingStyle.VIRTUAL if endpoint is None else AddressingStyle.PATH,
     )
+    refused = frozenset(b for b in (config.edge_bucket, config.archive_bucket) if b is not None)
+    if relay is not None and config.store_relay and bucket == config.evidence_bucket:
+        return StoreRelayStorage(settings, clock, relay=relay, refused_buckets=refused)
     return S3Storage(settings, clock)
+
+
+class BinarySecretReader(Protocol):
+    """``SecretsPort.get``: el valor binario de un secreto por nombre o ARN."""
+
+    async def get(self, arn: str) -> bytes: ...
+
+
+async def store_relay_settings(
+    config: RuntimeConfig,
+    secrets: BinarySecretReader,
+    public_origin: str,
+    metrics: PlatformMetrics | None = None,
+) -> StoreRelaySettings | None:
+    """La clave del relevo (``VIGIA_STORE_RELAY_SECRET``) y su origen; ``None`` sin relevo.
+
+    Un secreto inexistente, sin valor binario o de menos de 32 bytes detiene el arranque con
+    ``RuntimeConfigInvalid`` sobre esa variable, sin el valor; un Secrets Manager que no responde
+    sale como ``SecretsUnavailable`` (transitorio).
+    """
+    if not config.store_relay:
+        return None
+    secret: str = config.require("store_relay_secret")
+    try:
+        key = await secrets.get(secret)
+    except SecretNotFound:
+        raise RuntimeConfigInvalid(
+            "VIGIA_STORE_RELAY_SECRET", "nombra un secreto que no existe"
+        ) from None
+    except ValueError:
+        raise RuntimeConfigInvalid(
+            "VIGIA_STORE_RELAY_SECRET", "nombra un secreto sin valor binario"
+        ) from None
+    if len(key) < MIN_KEY_BYTES:
+        raise RuntimeConfigInvalid(
+            "VIGIA_STORE_RELAY_SECRET", f"nombra una clave de menos de {MIN_KEY_BYTES} bytes"
+        )
+    return StoreRelaySettings(key=key, public_origin=public_origin, metrics=metrics)
 
 
 async def load_credentials(
