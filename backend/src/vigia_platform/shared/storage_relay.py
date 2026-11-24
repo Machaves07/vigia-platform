@@ -104,7 +104,6 @@ _METADATA_PREFIX: Final = "x-amz-meta-"
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 _MILLISECOND: Final = timedelta(milliseconds=1)
 _B64URL: Final = re.compile(r"[A-Za-z0-9_-]{1,4096}")
-_SIGNATURE_BYTES: Final = 32
 _PAYLOAD_FIELDS: Final = frozenset(
     {"v", "b", "k", "vid", "m", "exp", "ct", "sha", "h", "cd", "rct"}
 )
@@ -286,7 +285,7 @@ class RelayTokens:
             raise denied
         body, signature_text = parts
         signature = _b64d(signature_text)
-        if signature is None or len(signature) != _SIGNATURE_BYTES:
+        if signature is None:  # otra longitud la rechaza ``compare_digest`` (32 bytes)
             raise denied
         if _B64URL.fullmatch(body) is None:
             raise denied

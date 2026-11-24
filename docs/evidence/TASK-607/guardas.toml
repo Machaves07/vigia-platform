@@ -101,13 +101,6 @@ reemplazar = "    return data\n"
 prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_signature_with_other_trailing_bits_is_not_canonical_and_is_refused"
 
 [[guarda]]
-nombre = "la firma tiene 32 bytes"
-archivo = "backend/src/vigia_platform/shared/storage_relay.py"
-buscar = "        if signature is None or len(signature) != _SIGNATURE_BYTES:\n            raise denied\n"
-reemplazar = "        if signature is None:\n            raise denied\n"
-prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_token_without_the_shape_is_refused"
-
-[[guarda]]
 nombre = "clave HMAC de al menos 32 bytes"
 archivo = "backend/src/vigia_platform/shared/storage_relay.py"
 buscar = "        if not isinstance(key, bytes) or len(key) < MIN_KEY_BYTES:\n"
@@ -183,3 +176,365 @@ archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
 buscar = "    if first >= size:\n        raise RangeNotSatisfiable\n"
 reemplazar = "    if False:\n        raise RangeNotSatisfiable\n"
 prueba = "backend/tests/unit/test_store_relay_route.py::test_a_range_outside_the_object_is_416"
+
+# --- Condiciones nuevas sin guarda propia, con su motivo --------------------------------------------
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 81
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 84
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 86
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 88
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 89
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 92
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 93
+motivo = "forma del rango (RFC 9110 §14.2), no una guarda de seguridad: el rango nunca sale de la versión del token; la cubren test_open_suffix_and_clipped_ranges, test_a_range_outside_the_object_is_416[sufijo-vacio] y test_a_malformed_or_multiple_range_is_ignored"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 102
+motivo = "fallo cerrado de composición: la ruta solo se incluye con el relevo (guarda «la ruta del relevo solo existe con el relevo»)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 103
+motivo = "fallo cerrado de composición: la ruta solo se incluye con el relevo (guarda «la ruta del relevo solo existe con el relevo»)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 108
+motivo = "exactamente un token o ninguno; la cubre test_an_altered_missing_or_repeated_token_is_403"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 115
+motivo = "traduce RelayTokenRejected a 403; la deciden las guardas del token (m_deposito_libre, m_sin_vencimiento, método y ca/)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 117
+motivo = "traduce RelayTokenRejected a 403; la deciden las guardas del token (m_deposito_libre, m_sin_vencimiento, método y ca/)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 131
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 132
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 133
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 135
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 160
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 161
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 162
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 164
+motivo = "errores del almacén a 403/503 y a la métrica; la cubren la guarda «una versión que no existe es 403» y la traducción de StorageUnavailable de la cadena"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 143
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 148
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 151
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 154
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 155
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 172
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 196
+motivo = "forma de la respuesta (206, disposición, HEAD sin cuerpo, trozos, ETag); cubierta por test_a_read_serves_the_whole_object_with_its_headers, test_head_answers_the_headers_without_reading_the_body y test_an_attachment_read_is_a_download"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 188
+motivo = "la cubre la guarda «BadDigest del almacén: 400 y nada guardado»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 190
+motivo = "la cubre la guarda «BadDigest del almacén: 400 y nada guardado»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 191
+motivo = "la cubre la guarda «BadDigest del almacén: 400 y nada guardado»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+linea = 193
+motivo = "la cubre la guarda «BadDigest del almacén: 400 y nada guardado»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/api.py"
+linea = 154
+motivo = "composición: solo con VIGIA_STORE_RELAY=1; la deciden las guardas de config y de s3_storage"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/api.py"
+linea = 292
+motivo = "composición: solo con VIGIA_STORE_RELAY=1; la deciden las guardas de config y de s3_storage"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+linea = 250
+motivo = "lector del indicador y entrada del bloque que cubren m_relevo_en_produccion y «el relevo sin su secreto no arranca»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+linea = 476
+motivo = "lector del indicador y entrada del bloque que cubren m_relevo_en_produccion y «el relevo sin su secreto no arranca»"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+linea = 185
+motivo = "sin relevo no se lee el secreto; los fallos de lectura se nombran por variable (test_the_relay_key_is_read_from_its_secret y test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable[inexistente-texto])"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+linea = 190
+motivo = "sin relevo no se lee el secreto; los fallos de lectura se nombran por variable (test_the_relay_key_is_read_from_its_secret y test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable[inexistente-texto])"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+linea = 191
+motivo = "sin relevo no se lee el secreto; los fallos de lectura se nombran por variable (test_the_relay_key_is_read_from_its_secret y test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable[inexistente-texto])"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+linea = 194
+motivo = "sin relevo no se lee el secreto; los fallos de lectura se nombran por variable (test_the_relay_key_is_read_from_its_secret y test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable[inexistente-texto])"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+linea = 195
+motivo = "sin relevo no se lee el secreto; los fallos de lectura se nombran por variable (test_the_relay_key_is_read_from_its_secret y test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable[inexistente-texto])"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 183
+motivo = "solo arma las cabeceras firmadas del PUT (test_an_upload_url_signs_the_type_the_sum_and_the_metadata)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 185
+motivo = "solo arma las cabeceras firmadas del PUT (test_an_upload_url_signs_the_type_the_sum_and_the_metadata)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 214
+motivo = "forma base64url; cualquier otro texto lo rechaza después el HMAC (propiedad test_changing_any_character_of_the_token_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 218
+motivo = "forma base64url; cualquier otro texto lo rechaza después el HMAC (propiedad test_changing_any_character_of_the_token_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 230
+motivo = "lector de la carga ya autenticada por HMAC (solo la firma la plataforma)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 231
+motivo = "lector de la carga ya autenticada por HMAC (solo la firma la plataforma)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 281
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 282
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 284
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 285
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 288
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 289
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 290
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 291
+motivo = "forma del token antes del HMAC: lo mal formado no pasa la firma (test_a_token_without_the_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 295
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 296
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 310
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 314
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 316
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 319
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 325
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 341
+motivo = "validación de la carga ya autenticada (defensa en profundidad; test_an_authentic_payload_without_its_exact_shape_is_refused)"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 378
+motivo = "métrica: el proveedor global si no se inyecta"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 448
+motivo = "el raise de m_put_de_clip"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 481
+motivo = "la cubre m_ultima_version"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 507
+motivo = "rango hacia el almacén; lo cubre m_sin_rango"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 513
+motivo = "versión que desaparece entre HEAD y GET (carrera): mismo trato que la guarda de relay_head"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 514
+motivo = "versión que desaparece entre HEAD y GET (carrera): mismo trato que la guarda de relay_head"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 515
+motivo = "versión que desaparece entre HEAD y GET (carrera): mismo trato que la guarda de relay_head"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 516
+motivo = "versión que desaparece entre HEAD y GET (carrera): mismo trato que la guarda de relay_head"
+
+[[exenta]]
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+linea = 546
+motivo = "la cubre la guarda «BadDigest del almacén: 400 y nada guardado»"
+
+[[exenta]]
+archivo = "local/integration/init_state.py"
+linea = 139
+motivo = "idempotencia de init (test_init_creates_private_secrets_once_and_never_replaces_them)"
