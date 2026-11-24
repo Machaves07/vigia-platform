@@ -44,7 +44,7 @@
   "scr08.timeline.review_note": "Nota de la revisión",
   "scr08.timeline.record_type": "Tipo de registro",
   "scr08.timeline.attachments": "Adjuntos",
-  "scr08.timeline.attachment_declared": "Adjunto declarado sin personas identificables",
+  "scr08.timeline.attachment_declared": "Declarado al subirlo: el adjunto no contiene ninguna persona identificable",
   "scr08.timeline.attachment_no_permission": "Su rol no permite ver esta evidencia",
   "scr08.timeline.attachment_photo": "Foto adjunta",
   "scr08.timeline.attachment_pdf": "Documento PDF adjunto",
