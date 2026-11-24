@@ -4,10 +4,10 @@
  * prevalece; aquí solo se evita enviar lo que ya se sabe que rechaza.
  */
 import { useState } from 'react';
-import { checkFreeText } from '@/ports/validation';
 import {
   PROCESS_STATE_PAIRS,
   PROCESS_UNITS,
+  processDescriptionValid,
   screenLabel,
   type Catalog,
   type ProcessStatePair,
@@ -22,7 +22,6 @@ const MAX_SCALE = 1e12;
 const CODE = /^[A-Z0-9-]{2,32}$/u;
 const READER = /^[a-z][a-z0-9_.-]{0,31}$/u;
 const INTEGER = /^\d+$/u;
-const DESCRIPTION = { minLength: 1, maxLength: 120 } as const;
 
 export interface DeclaredSignal {
   readonly signal_id: string;
@@ -173,7 +172,7 @@ export function processIssues(
     if (!CODE.test(variable.code)) at('code', 'scr04.parameters.process_code_format');
     else if ((codes.get(variable.code) ?? 0) > 1)
       at('code', 'scr04.parameters.process_code_repeated');
-    if (!checkFreeText(variable.description_es, DESCRIPTION).ok)
+    if (!processDescriptionValid(variable.description_es))
       at('description_es', 'scr04.parameters.process_description_invalid');
     if (variable.kind === 'binary') {
       if (!declared.has(variable.signal_id))

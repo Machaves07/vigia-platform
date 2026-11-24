@@ -158,6 +158,11 @@ export function reasonValid(reason: string, vocabulary = false): boolean {
   );
 }
 
+/** Nombre de una variable de proceso: de 1 a 120 con la política base de texto libre. */
+export function processDescriptionValid(description: string): boolean {
+  return checkFreeText(description, { minLength: 1, maxLength: 120 }).ok;
+}
+
 export function bodyIssues(operation: BodyOperationId, body: unknown) {
   const result = validateBody(operation, body);
   return result.ok ? [] : result.issues;
