@@ -1683,7 +1683,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Presentación de la foto de un episodio de la sombra (v1.5.0). */
+    /** Presentación de la foto de un episodio (v1.5.0; en productive desde v1.6.0). */
     post: operations['post_episode_photo'];
     delete?: never;
     options?: never;
@@ -7269,6 +7269,64 @@ export interface components {
       /** Recurrence After Days */
       recurrence_after_days?: number | null;
     };
+    /**
+     * ProcessContextDeclaration
+     * @description Variables de proceso de la zona y su ventana (A-129). Reglas que verifica el modelo: regla (7) del catálogo.
+     */
+    ProcessContextDeclaration: {
+      /** Before Ms */
+      before_ms: number;
+      /** Variables */
+      variables: components['schemas']['ProcessVariableDeclaration'][];
+    };
+    /**
+     * ProcessScale
+     * @description Escala lineal 4-20 mA: el valor en unidades de ingeniería a 4 mA y a 20 mA; distintos entre sí (verificado en el modelo).
+     */
+    ProcessScale: {
+      /** At 4 Ma */
+      at_4_ma: number;
+      /** At 20 Ma */
+      at_20_ma: number;
+    };
+    /**
+     * ProcessStatePair
+     * @description Par de etiquetas de una variable de proceso de estado (v1.6.0, adenda A-129): la del valor `asserted` de la señal citada y la del `deasserted`, separadas por « / ». `labels.es.json` publica además cada una con las claves `<par>.asserted` y `<par>.deasserted`.
+     * @enum {string}
+     */
+    ProcessStatePair:
+      'closed_open' | 'in_position_out' | 'at_rest_moving' | 'home_away' | 'on_off' | 'yes_no';
+    /**
+     * ProcessUnit
+     * @description Unidad de ingeniería de una variable de proceso analógica (v1.6.0, adenda A-129).
+     * @enum {string}
+     */
+    ProcessUnit:
+      'm_per_min' | 'm' | 'percent' | 'rpm' | 'deg_c' | 'bar' | 'kg' | 'ampere' | 'count';
+    /**
+     * ProcessVariableDeclaration
+     * @description Variable de proceso declarada. `analog`: lector y canal 4-20 mA (`source`), `unit`, `scale` y `decimals`. `binary`: la `signal_id` de una señal de `signals` (verificado en el modelo) y el par de etiquetas `states`; la variable no repite la fuente, toma la lectura ya interpretada de la señal.
+     */
+    ProcessVariableDeclaration: {
+      variable_id: components['schemas']['UUID'];
+      code: components['schemas']['Code'];
+      kind: components['schemas']['ProcessVariableKind'];
+      /** Description Es */
+      description_es: string;
+      source?: components['schemas']['SignalSource'] | null;
+      unit?: components['schemas']['ProcessUnit'] | null;
+      scale?: components['schemas']['ProcessScale'] | null;
+      /** Decimals */
+      decimals?: number | null;
+      signal_id?: components['schemas']['UUID'] | null;
+      states?: components['schemas']['ProcessStatePair'] | null;
+    };
+    /**
+     * ProcessVariableKind
+     * @description Clase de una variable de proceso de la zona (`ZoneCatalog.process_context`, v1.6.0, adenda A-129): analógica 4-20 mA o de estado sobre una señal declarada.
+     * @enum {string}
+     */
+    ProcessVariableKind: 'analog' | 'binary';
     /** ProfileBody */
     ProfileBody: {
       /** Display Name */
@@ -9277,7 +9335,7 @@ export interface components {
     };
     /**
      * ZoneCatalog
-     * @description Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen.
+     * @description Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda); (7) desde v1.6.0, en `process_context.variables`, `variable_id` y `code` únicos, toda `signal_id` de una variable `binary` es una señal de `signals` y en una `analog` `scale.at_4_ma ≠ scale.at_20_ma` (entrada A-129 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen.
      */
     vigia_contracts__models__zone_catalog__Payload: {
       zone_id: components['schemas']['UUID'];
@@ -9302,6 +9360,7 @@ export interface components {
        * @constant
        */
       commissioning_watermark: true;
+      process_context?: components['schemas']['ProcessContextDeclaration'] | null;
     };
     /**
      * SignedEnvelope

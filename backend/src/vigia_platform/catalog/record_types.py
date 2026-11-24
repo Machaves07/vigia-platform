@@ -3,11 +3,12 @@
 Trece de los veintiséis tipos de U-03; los otros trece (ingesta, alta, credenciales y versiones
 de flota) están en ``fleet.record_types``. Todos los escribe U-03, en la cadena de **planta** y en
 su versión 1 (``walk_test_result`` también en la 2, TASK-216; ``catalog_version_published`` en la
-2 desde VIG-457, con el sobre del contrato v1.5.0), con un modelo de contenido
-estricto (``ContentModel``). Retirar un tipo o una
-versión está prohibido (BR-NUC-52): una versión nueva solo amplía. La versión 1 de
-``catalog_version_published`` queda **congelada** en ``record_types_frozen`` (VIG-457): el sobre
-del contrato v1.1.0 que persistió ``f64df12``, para que el contrato vigente no la cambie.
+2 desde VIG-457, con el sobre del contrato v1.5.0, y en la 3 desde TASK-593, con el de v1.6.0), con
+un modelo de contenido estricto (``ContentModel``). Retirar un tipo o una
+versión está prohibido (BR-NUC-52): una versión nueva solo amplía. Las versiones 1 y 2 de
+``catalog_version_published`` quedan **congeladas** en ``record_types_frozen`` (VIG-457: el sobre
+del contrato v1.1.0 que persistió ``f64df12``) y ``record_types_frozen_v1_5`` (TASK-593: el de
+v1.5.0), para que el contrato vigente no las cambie.
 
 - **Texto libre** (A-45): solo en las rutas declaradas de ``free_text_paths``; pasa la política
   base de U-02 y el validador mínimo de U-03 (D-7). Ningún campo identifica a una persona
@@ -44,6 +45,7 @@ from vigia_platform.catalog.domain.enums import (
     WalkTestKind,
 )
 from vigia_platform.catalog.record_types_frozen import CatalogVersionPublishedV1
+from vigia_platform.catalog.record_types_frozen_v1_5 import CatalogVersionPublishedV2
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorUnit, Role
 
@@ -708,6 +710,12 @@ declarado del estándar (el único texto libre del contrato, RF-CTR-03), el nomb
 declaró, la descripción de las señales y el ``key_id`` del sobre, que mezcla mayúsculas y
 minúsculas (``schema_rules.is_free_text``)."""
 
+PROCESS_VARIABLE_FREE_TEXT_PATH: Final = (
+    "/envelope/payload/process_context/variables[*]/description_es"
+)
+"""Desde la versión 3 (contrato v1.6.0, A-129): el nombre de cada variable de proceso para quien
+clasifica, que solo vive en el catálogo firmado (nunca en un registro de la ingesta, BR-CTR-13)."""
+
 CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _catalog(
         "catalog_version_published",
@@ -718,11 +726,23 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
     _catalog(
         "catalog_version_published",
-        CatalogVersionPublished,
+        CatalogVersionPublishedV2,
         source_key_path="/source_key",
         free_text_paths=("/reason_es", *ENVELOPE_FREE_TEXT_PATHS),
         outbox_events=("catalog_updated", "regression_marked"),
         schema_version=2,
+    ),
+    _catalog(
+        "catalog_version_published",
+        CatalogVersionPublished,
+        source_key_path="/source_key",
+        free_text_paths=(
+            "/reason_es",
+            *ENVELOPE_FREE_TEXT_PATHS,
+            PROCESS_VARIABLE_FREE_TEXT_PATH,
+        ),
+        outbox_events=("catalog_updated", "regression_marked"),
+        schema_version=3,
     ),
     _catalog(
         "standard_admission_test",
@@ -813,9 +833,10 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
 )
 """Los trece tipos del catálogo, en versión 1 (domain-entities §5), y la versión 2 de
-``walk_test_result`` (TASK-216) y de ``catalog_version_published`` (VIG-457: el sobre del contrato
-v1.5.0; la 1, congelada en ``record_types_frozen``), cada una justo después de su 1: las versiones
-se registran en orden."""
+``walk_test_result`` (TASK-216) y las 2 y 3 de ``catalog_version_published`` (VIG-457 y TASK-593:
+los sobres de los contratos v1.5.0, congelado en ``record_types_frozen_v1_5``, y v1.6.0; la 1,
+congelada en ``record_types_frozen``), cada una justo después de la anterior: las versiones se
+registran en orden."""
 
 
 def register_catalog_record_types(registry: RecordTypeRegistry) -> None:

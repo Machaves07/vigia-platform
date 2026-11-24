@@ -19,7 +19,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.5.0#subdirectory=generated/python",
+  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@363c8040f0b7835ada36e314f65f6b72fc4daf4f#subdirectory=generated/python",
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "pydantic>=2,<3",

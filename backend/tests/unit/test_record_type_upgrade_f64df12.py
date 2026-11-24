@@ -61,8 +61,7 @@ def test_the_fixture_is_the_table_that_f64df12_persisted() -> None:
     assert document["generated_from"]["contract"] == "vigia-contracts v1.1.0"
     assert len(ROWS) == 58
     assert {name: ROWS[name].schema_version for name in UPGRADED_TYPES} == {
-        "catalog_version_published": 1,
-        "ingest_rejected": 1,
+        name: 1 for name in UPGRADED_TYPES
     }
 
 
@@ -73,7 +72,7 @@ def test_synchronizing_over_the_f64df12_table_starts_and_only_raises_the_changed
     assert registry.sealed
     after = asyncio.run(store.load())
     changed = {name: row.schema_version for name, row in after.items() if row != ROWS.get(name)}
-    assert changed == {"catalog_version_published": 2, "ingest_rejected": 2}
+    assert changed == UPGRADED_TYPES
     for name in changed:
         assert after[name] == registry.get(name).to_persisted()
     # Volver a arrancar sobre la tabla ya actualizada tampoco cambia nada.
@@ -105,9 +104,9 @@ def test_only_the_changed_types_have_a_new_version_and_it_only_widens() -> None:
         assert compatibility_problems(old, new) == [], name
 
 
-def test_writers_write_version_2_with_the_current_models() -> None:
+def test_writers_write_the_last_version_with_the_current_models() -> None:
     registry = _registry()
-    assert registry.get("catalog_version_published").schema_version == 2
+    assert registry.get("catalog_version_published").schema_version == 3
     assert registry.get("catalog_version_published").definition.content_model is (
         CatalogVersionPublished
     )
@@ -301,22 +300,25 @@ def test_the_frozen_v1_keeps_the_rules_between_fields(document: str, message: st
 
 
 def test_reintroducing_the_change_without_a_new_version_prevents_startup() -> None:
-    """La mutación con nombre «v1 desde el contrato vigente»: registrar ``ingest_rejected`` y
-    ``catalog_version_published`` solo con los modelos actuales en la versión 1 (lo que hacía
-    ``main`` antes de VIG-457) vuelve a impedir el arranque, con los dos problemas del informe."""
+    """La mutación con nombre «v1 desde el contrato vigente»: registrar los tipos cambiados solo
+    con los modelos actuales en la versión 1 (lo que hacía ``main`` antes de VIG-457 y lo que
+    habría hecho TASK-593 sin congelar) vuelve a impedir el arranque, con un problema por tipo."""
     registry = RecordTypeRegistry()
     for compiled in _registry().all_versions():
         definition = compiled.definition
         if definition.record_type in UPGRADED_TYPES:
             if definition.schema_version != 1:
                 continue
-            current = _registry().get(definition.record_type).definition.content_model
-            definition = replace(definition, content_model=current)
+            current = _registry().get(definition.record_type).definition
+            definition = replace(
+                definition,
+                content_model=current.content_model,
+                free_text_paths=current.free_text_paths,
+            )
         registry.register(definition)
     with pytest.raises(RegistryStartupError) as failure:
         asyncio.run(registry.synchronize(InMemoryRecordTypeStore(ROWS)))
-    assert sorted(failure.value.problems) == [
-        "catalog_version_published: el esquema de la versión 1 cambió sin subir schema_version",
-        "ingest_rejected: el esquema de la versión 1 cambió sin subir schema_version",
-    ]
+    problems = failure.value.problems
+    for name in UPGRADED_TYPES:
+        assert f"{name}: el esquema de la versión 1 cambió sin subir schema_version" in problems
     assert not registry.sealed

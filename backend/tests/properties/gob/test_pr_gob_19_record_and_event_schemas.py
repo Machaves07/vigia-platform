@@ -140,11 +140,14 @@ def test_exactly_the_26_types_and_the_15_events_are_declared() -> None:
 
 LATEST_VERSIONS: Final = {
     "walk_test_result": 2,
-    "catalog_version_published": 2,
+    "catalog_version_published": 3,
     "ingest_rejected": 2,
+    "finding_received": 2,
+    "detection_for_review_received": 2,
 }
 """Tipos con una versión posterior a la 1 (TASK-216 amplía el acta; VIG-457, los contratos v1.4.0 y
-v1.5.0 amplían el sobre del catálogo y ``record_kind``); la 1 sigue registrada."""
+v1.5.0 amplían el sobre del catálogo y ``record_kind``; TASK-593, el v1.6.0 amplía el sobre, el
+hallazgo y la detección); las anteriores siguen registradas."""
 
 
 def test_every_type_is_written_by_u03_in_the_plant_chain_at_version_1() -> None:

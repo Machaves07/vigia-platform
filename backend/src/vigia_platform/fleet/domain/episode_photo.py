@@ -24,8 +24,12 @@ en ``image.width`` o ``image.height``, precisión del 11-11/12-11 de A-112) y el
 píxeles: la verificación del difuminado es la del dueño, a ojo (A-112, punto 2).
 
 **Catálogo** (paso 7): el estándar citado existe con esa versión en alguna versión del catálogo
-vigente en la ventana del tramo (``schema_invalid`` en ``standard``) y la cámara del cuadro, si la
-hay, está declarada en una de las versiones que lo citan (``schema_invalid`` en ``camera_id``).
+vigente en la ventana del tramo (``schema_invalid`` en ``standard``), la cámara del cuadro, si la
+hay, está declarada en una de las versiones que lo citan (``schema_invalid`` en ``camera_id``) y
+los valores de proceso, si los trae (v1.6.0, A-129, Q6), concuerdan con una de ellas
+(``ingest_order.process_context_violation``; ``schema_invalid`` en
+``process_context.variables[i]`` o ``process_context.variables``). El bloque se guarda tal cual en
+la columna ``process_context`` (``gob_0046``; nula sin bloque) y se purga con la fila.
 
 **Régimen por modo** (A-128, TASK-588): la misma tabla guarda la foto de la sombra
 (``commissioning``, A-112) y la foto del hallazgo (``productive``, con el ``record_id`` del
@@ -55,11 +59,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
 
+from vigia_contracts.canonical import canonicalize
 from vigia_contracts.images import JpegDefect, JpegDefectCode, jpeg_facts
 from vigia_contracts.models.enumerations import RejectionCode
 
 from vigia_platform.fleet.domain.clock_tolerance import Window
-from vigia_platform.fleet.domain.ingest_order import CatalogVersionView
+from vigia_platform.fleet.domain.ingest_order import (
+    CatalogVersionView,
+    process_context_violation,
+)
 
 __all__ = [
     "DEFAULT_FINDING_RETENTION_DAYS",
@@ -266,24 +274,35 @@ def catalog_violation(
     """``field`` del ``schema_invalid`` del paso 7, o ``None``.
 
     ``standard`` si ninguna versión vigente en ``window`` cita el estándar con su versión;
-    ``camera_id`` si la cámara del cuadro no está en ninguna de las que lo citan.
+    ``camera_id`` si la cámara del cuadro no está en ninguna de las que lo citan; el campo de los
+    valores de proceso de la **más nueva** de esas si ninguna concuerda con ellos (como el paso 7
+    de los hallazgos).
     """
     standard = document["standard"]
     standard_id, version = _uuid(standard["standard_id"]), standard["version"]
-    citing = [
-        item
-        for item in versions
-        if item.in_force_during(window)
-        and standard_id is not None
-        and type(version) is int
-        and item.cites(standard_id, version)
-    ]
+    citing = sorted(
+        (
+            item
+            for item in versions
+            if item.in_force_during(window)
+            and standard_id is not None
+            and type(version) is int
+            and item.cites(standard_id, version)
+        ),
+        key=lambda item: item.version,
+        reverse=True,
+    )
     if not citing:
         return "standard"
     camera = document.get("camera_id")
-    if camera is not None and not any(_uuid(camera) in item.cameras for item in citing):
-        return "camera_id"
-    return None
+    if camera is not None:
+        citing = [item for item in citing if _uuid(camera) in item.cameras]
+        if not citing:
+            return "camera_id"
+    fields = [process_context_violation(item, document) for item in citing]
+    if None in fields:
+        return None
+    return fields[0]
 
 
 # --- Paso 9: la fila ----------------------------------------------------------------------------
@@ -324,6 +343,9 @@ class EpisodePhotoRow:
     record_id: uuid.UUID | None = None
     photo_index: int = 0
     photo_role: PhotoRole = PhotoRole.PEAK
+    process_context: str | None = None
+    """El bloque ``process_context`` de la presentación en JSON canónico (RFC 8785), o ``None`` sin
+    bloque (``gob_0046``; A-129, Q6)."""
 
     def __repr__(self) -> str:
         # Nunca los bytes de la imagen (NFR-GOB-25).
@@ -360,6 +382,7 @@ def photo_row(
     else:
         expiry = expires_at(received_at, retention_days)
     camera, frame = submission.get("camera_id"), submission.get("frame_at")
+    process = submission.get("process_context")
     standard = submission["standard"]
     episode = submission["episode"]
     node_time = submission["node_time"]
@@ -395,4 +418,5 @@ def photo_row(
         record_id=None if record is None else uuid.UUID(str(record)),
         photo_index=index,
         photo_role=role,
+        process_context=None if process is None else canonicalize(process).decode("utf-8"),
     )

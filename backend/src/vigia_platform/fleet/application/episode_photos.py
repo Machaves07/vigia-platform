@@ -3,12 +3,14 @@
 ``POST /api/nodes/episode-photos`` (``node_api.routes.episode_photos``) llega aquí con la
 verificación previa común de ``node_api`` hecha: (1) versión, (2) certificado y zona del nodo
 **antes** que el esquema (``before_schema``), (3) tamaño (307 200 bytes) y (4) esquema con el modelo
-estricto ``EpisodePhotoSubmission`` de v1.5.0. Este servicio completa, en el orden de BR-GOB-84
-(el primer fallo decide el código):
+estricto ``EpisodePhotoSubmission`` del contrato vigente (v1.6.0). Este servicio completa, en el
+orden de BR-GOB-84 (el primer fallo decide el código):
 
 - **paso 4, lo que el esquema no expresa**: ``contract_version`` del cuerpo igual a la cabecera,
-  ``Idempotency-Key`` igual a ``photo_id`` (BR-CTR-26) y ``data_base64`` que se decodifica →
-  ``schema_invalid``;
+  ``Idempotency-Key`` igual a ``photo_id`` (BR-CTR-26), ``data_base64`` que se decodifica y
+  ``zone_mode`` de ``commissioning`` → ``schema_invalid``. La foto del hallazgo (``productive``,
+  A-128), que el lector estricto de v1.6.0 ya admite, se rechaza con ``field = zone_mode`` hasta
+  TASK-603: nunca se guarda como foto de puesta en marcha;
 - **paso 5, idempotencia atómica** (BR-GOB-89): en **una** transacción, ``INSERT … ON CONFLICT DO
   NOTHING`` de la fila y, si ya había una con ese ``photo_id`` en la organización, la comparación
   de su ``canonical_sha256`` con el de la presentación: igual → ``accepted_duplicate`` con el
@@ -18,8 +20,9 @@ estricto ``EpisodePhotoSubmission`` de v1.5.0. Este servicio completa, en el ord
 - **paso 6, imagen** (si la hay): ``fleet.domain.episode_photo.image_violation`` (tamaño, suma,
   ``jpeg_facts``, dimensiones y marca; no mira los píxeles);
 - **paso 7**: antigüedad (``timestamp_out_of_window``, con ``sent_records_retention_days`` del
-  nodo, como los demás registros fechados) y el estándar vigente y la cámara del catálogo de la
-  zona (``schema_invalid`` en ``standard`` o ``camera_id``);
+  nodo, como los demás registros fechados), el estándar vigente y la cámara del catálogo de la
+  zona y sus valores de proceso, si los trae (``schema_invalid`` en ``standard``, ``camera_id`` o
+  ``process_context.variables…``, A-129);
 - **paso 8**: la compuerta de **montaje** aprobada en la ventana del hecho
   (``zone_gate_not_approved``; A-112 la usa aquí para el montaje);
 - **paso 9**: la transacción confirma. Si cualquier paso falla, se revierte y no queda nada.
@@ -52,6 +55,7 @@ from vigia_platform.fleet.domain.episode_photo import (
     DEFAULT_FINDING_RETENTION_DAYS,
     DEFAULT_RETENTION_DAYS,
     EpisodePhotoRow,
+    ZoneMode,
     catalog_violation,
     check_finding_retention_days,
     check_retention_days,
@@ -179,6 +183,10 @@ class EpisodePhotoService:
                 body_level=True,
                 zone_id=zone_id,
             )
+        if submission.get("zone_mode") != ZoneMode.COMMISSIONING.value:
+            # La foto del hallazgo (A-128) aún no se admite: la ingesta de ``productive`` es de
+            # TASK-603. Sin ``zone_mode`` el lector estricto ya rechazó en el paso 4.
+            raise IngestRejected(RejectionCode.SCHEMA_INVALID, field="zone_mode", zone_id=zone_id)
         image = submission.get("image")
         try:
             data = None if image is None else decode_image(image)

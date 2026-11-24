@@ -5,7 +5,8 @@ Todas las sentencias van en la transacción de la presentación, con el ``ScopeC
 (defensa en profundidad, NFR-GOB-30):
 
 - ``claim``: ``INSERT … ON CONFLICT (organization_id, photo_id) DO NOTHING RETURNING``, con el
-  modo, el ``record_id``, el índice y el papel de la foto (``gob_0045``, TASK-588). Un segundo
+  modo, el ``record_id``, el índice y el papel de la foto (``gob_0045``, TASK-588) y los valores de
+  proceso como ``jsonb`` (``gob_0046``, TASK-593; nulos sin bloque). Un segundo
   ``photo_id`` con el mismo ``(zona, episodio, tramo, índice)`` de ``productive`` choca con el
   índice único ``episode_photo_productive_slot`` y lanza ``IntegrityError`` (su traducción a
   ``schema_invalid`` en ``photo_index`` es de la ingesta, TASK-603). Es la
@@ -73,21 +74,24 @@ COLUMNS: Final = (
     "record_id",
     "photo_index",
     "photo_role",
+    "process_context",
 )
-"""Las columnas de ``fleet.episode_photo`` (``gob_0042`` y ``gob_0045``), en el orden del
-``INSERT``."""
+"""Las columnas de ``fleet.episode_photo`` (``gob_0042``, ``gob_0045`` y ``gob_0046``), en el orden
+del ``INSERT``."""
 
 _CLAIM: Final = text(
     "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id, node_id,"
     " episode_id, segment_index, classified_as, family, standard_id, standard_version,"
     " max_confidence, started_at, ended_at, received_at, expires_at, camera_id, frame_at, width,"
     " height, size_bytes, sha256, blur_params_version, image, image_absent_reason,"
-    " canonical_sha256, platform_record_id, zone_mode, record_id, photo_index, photo_role)"
+    " canonical_sha256, platform_record_id, zone_mode, record_id, photo_index, photo_role,"
+    " process_context)"
     " VALUES (:organization_id, :photo_id, :plant_id, :zone_id, :node_id, :episode_id,"
     " :segment_index, :classified_as, :family, :standard_id, :standard_version, :max_confidence,"
     " :started_at, :ended_at, :received_at, :expires_at, :camera_id, :frame_at, :width, :height,"
     " :size_bytes, :sha256, :blur_params_version, :image, :image_absent_reason,"
-    " :canonical_sha256, :platform_record_id, :zone_mode, :record_id, :photo_index, :photo_role)"
+    " :canonical_sha256, :platform_record_id, :zone_mode, :record_id, :photo_index, :photo_role,"
+    " CAST(:process_context AS jsonb))"
     " ON CONFLICT (organization_id, photo_id) DO NOTHING RETURNING photo_id"
 )
 _STORED: Final = text(

@@ -317,5 +317,40 @@
   "heartbeat_notice": {
     "no_heartbeat_since": "Sin latido desde",
     "no_heartbeat_received": "Sin latido recibido todavía"
+  },
+  "process_variable_kind": {
+    "analog": "analógica",
+    "binary": "de estado"
+  },
+  "process_unit": {
+    "ampere": "A",
+    "bar": "bar",
+    "count": "unidades",
+    "deg_c": "°C",
+    "kg": "kg",
+    "m": "m",
+    "m_per_min": "m/min",
+    "percent": "%",
+    "rpm": "rpm"
+  },
+  "process_state_pair": {
+    "at_rest_moving": "en reposo / en movimiento",
+    "at_rest_moving.asserted": "en reposo",
+    "at_rest_moving.deasserted": "en movimiento",
+    "closed_open": "cerrada / abierta",
+    "closed_open.asserted": "cerrada",
+    "closed_open.deasserted": "abierta",
+    "home_away": "en HOME / fuera de HOME",
+    "home_away.asserted": "en HOME",
+    "home_away.deasserted": "fuera de HOME",
+    "in_position_out": "en posición / fuera de posición",
+    "in_position_out.asserted": "en posición",
+    "in_position_out.deasserted": "fuera de posición",
+    "on_off": "encendido / apagado",
+    "on_off.asserted": "encendido",
+    "on_off.deasserted": "apagado",
+    "yes_no": "sí / no",
+    "yes_no.asserted": "sí",
+    "yes_no.deasserted": "no"
   }
 }

@@ -542,8 +542,15 @@ U04_ENUMERATIONS = {*LOOP_LABELS, *ACCREDITATION_LABELS, *NOTIFICATIONS_LABELS}
 """Las de ``labels.loop.es.json`` (VIG-201, NFR-LAZ-52), que se carga junto a la de U-02."""
 
 
+CONTRACT_COPIES = {"process_variable_kind", "process_unit", "process_state_pair"}
+"""Listas del contrato v1.6.0 copiadas para la consola, que sigue en ``@vigia/contracts`` v1.1.0
+(TASK-593, A-129); su paridad con el paquete la comprueba ``test_process_labels_parity.py``."""
+
+
 def test_the_labels_file_covers_every_labelled_enumeration() -> None:
-    assert LABELS.enumerations() == DESIGN_ENUMERATIONS | U03_ENUMERATIONS | U04_ENUMERATIONS
+    assert LABELS.enumerations() == (
+        DESIGN_ENUMERATIONS | U03_ENUMERATIONS | U04_ENUMERATIONS | CONTRACT_COPIES
+    )
     assert LABELS.require_complete(LABEL_BINDINGS) == []
     assert LABELS.label("role", Role.COPASST) == "COPASST"
 

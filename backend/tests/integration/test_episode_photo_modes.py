@@ -234,6 +234,8 @@ NEW_COLUMNS: Final = {
     "photo_index": 0,
     "photo_role": "peak",
 }
+LATER_COLUMNS: Final = {"process_context": None}
+"""Columnas de migraciones posteriores (``gob_0046``, TASK-593): nulas en las filas anteriores."""
 
 
 def test_migration_gob_0045_leaves_every_v150_row_commissioning_and_unchanged(
@@ -244,7 +246,9 @@ def test_migration_gob_0045_leaves_every_v150_row_commissioning_and_unchanged(
     for photo_id, old in upgraded.before.items():
         new = upgraded.after[photo_id]
         assert {key: new[key] for key in NEW_COLUMNS} == NEW_COLUMNS
-        assert {key: value for key, value in new.items() if key not in NEW_COLUMNS} == old
+        assert {key: new[key] for key in LATER_COLUMNS} == LATER_COLUMNS
+        added = NEW_COLUMNS.keys() | LATER_COLUMNS.keys()
+        assert {key: value for key, value in new.items() if key not in added} == old
 
 
 def test_migration_gob_0045_keeps_the_previous_image_working(upgraded: Upgraded) -> None:

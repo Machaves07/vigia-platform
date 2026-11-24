@@ -3,7 +3,9 @@
 Trece de los veintiséis tipos de U-03; los otros trece (catálogo, compuertas y comisionamiento)
 están en ``catalog.record_types``. Todos los escribe U-03, en la cadena de **planta** y en su
 versión 1 (``ingest_rejected`` también en la 2 desde VIG-457, con el ``record_kind`` del contrato
-v1.5.0; su 1 queda congelada en ``record_types_frozen``). Retirar un tipo o una versión está
+v1.5.0; su 1 queda congelada en ``record_types_frozen``; ``finding_received`` y
+``detection_for_review_received`` también en la 2 desde TASK-593, con los modelos de v1.6.0; su 1,
+la de v1.5.0, queda congelada en ``record_types_frozen_v1_5``). Retirar un tipo o una versión está
 prohibido (BR-NUC-52).
 
 - **Ingesta** (``finding_received``, ``detection_for_review_received``,
@@ -36,6 +38,7 @@ from vigia_contracts.models.observability_event import ObservabilityEvent
 
 from vigia_platform.fleet.domain.enums import EnrollmentAttemptResult, UpdateResult
 from vigia_platform.fleet.record_types_frozen import IngestRejectedV1
+from vigia_platform.fleet.record_types_frozen_v1_5 import DetectionForReviewV1, FindingV1
 from vigia_platform.ledger.domain.coverage import CommunicationState
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorUnit
@@ -265,23 +268,27 @@ CONTRACT_FREE_TEXT_PATHS: Final = (
 CLIP_FREE_TEXT_PATH: Final = "/storage_key"
 """Ruta, dentro de cada clip, de su clave de almacenamiento (texto libre para el registro)."""
 
+
+def _ingested(
+    record_type: str, model: type[BaseModel], id_field: str, schema_version: int
+) -> RecordType:
+    """Un hallazgo o una detección: el modelo del contrato con ``receipt`` y sus clips."""
+    return _fleet(
+        record_type,
+        model,
+        source_key_path=f"/{id_field}",
+        free_text_paths=(*CONTRACT_FREE_TEXT_PATHS, "/cameras[*]/clips[*]" + CLIP_FREE_TEXT_PATH),
+        evidence_paths=("/cameras[*]/clips[*]",),
+        outbox_events=(record_type,),
+        schema_version=schema_version,
+    )
+
+
 FLEET_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
-    _fleet(
-        "finding_received",
-        Finding,
-        source_key_path="/finding_id",
-        free_text_paths=(*CONTRACT_FREE_TEXT_PATHS, "/cameras[*]/clips[*]" + CLIP_FREE_TEXT_PATH),
-        evidence_paths=("/cameras[*]/clips[*]",),
-        outbox_events=("finding_received",),
-    ),
-    _fleet(
-        "detection_for_review_received",
-        DetectionForReview,
-        source_key_path="/detection_id",
-        free_text_paths=(*CONTRACT_FREE_TEXT_PATHS, "/cameras[*]/clips[*]" + CLIP_FREE_TEXT_PATH),
-        evidence_paths=("/cameras[*]/clips[*]",),
-        outbox_events=("detection_for_review_received",),
-    ),
+    _ingested("finding_received", FindingV1, "finding_id", 1),
+    _ingested("finding_received", Finding, "finding_id", 2),
+    _ingested("detection_for_review_received", DetectionForReviewV1, "detection_id", 1),
+    _ingested("detection_for_review_received", DetectionForReview, "detection_id", 2),
     _fleet(
         "observability_event_received",
         ObservabilityEvent,
@@ -331,8 +338,9 @@ FLEET_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
 )
 """Los trece tipos de la flota y la ingesta, en versión 1 (domain-entities §5), y la versión 2 de
 ``ingest_rejected`` (VIG-457: ``record_kind`` del contrato v1.5.0, con ``episode_photo``; la 1,
-congelada en ``record_types_frozen``), justo después de su 1: las versiones se registran en
-orden."""
+congelada en ``record_types_frozen``) y de ``finding_received`` y ``detection_for_review_received``
+(TASK-593: los modelos de v1.6.0; la 1, la de v1.5.0, congelada en ``record_types_frozen_v1_5``),
+cada una justo después de su 1: las versiones se registran en orden."""
 
 
 def register_fleet_record_types(registry: RecordTypeRegistry) -> None:
