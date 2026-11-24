@@ -707,6 +707,12 @@ async def test_document_upload_grant_goes_from_issued_to_used_or_expired(
             " 'thresholds', 'clip_window', 'episode', 'single_occupancy']",
             "ok",
         ),
+        ("changed_fields = ARRAY['process_context']", "ok"),  # gob_0047, TASK-594
+        (
+            "changed_fields = ARRAY['standards', 'cameras', 'minimum_coverage', 'signals',"
+            " 'thresholds', 'clip_window', 'episode', 'single_occupancy', 'process_context']",
+            CHECK_VIOLATION,  # de 1 a 8 valores
+        ),
         ("changed_fields = ARRAY['cameras', 'cameras']", CHECK_VIOLATION),
         ("changed_fields = ARRAY['cameras', NULL]", CHECK_VIOLATION),
         ("changed_fields = ARRAY[['cameras'], ['signals']]", CHECK_VIOLATION),

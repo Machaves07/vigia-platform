@@ -77,6 +77,17 @@ export function declaredSignals(initial: Catalog): DeclaredSignal[] {
     .filter((signal) => signal.signal_id !== '');
 }
 
+/** ¿Alguna variable de estado publicada cita una señal que el borrador de señales retira? */
+export function citedSignalMissing(
+  initial: Catalog,
+  signals: readonly { readonly signal_id: string }[],
+): boolean {
+  const kept = new Set(signals.map((signal) => signal.signal_id));
+  return processDraft(initial).variables.some(
+    (variable) => variable.kind === 'binary' && !kept.has(variable.signal_id),
+  );
+}
+
 /** El borrador desde la versión vigente; sin bloque, la ventana de Pope (30 s) y ninguna. */
 export function processDraft(initial: Catalog): ProcessDraft {
   const block = record(initial.catalog.process_context);

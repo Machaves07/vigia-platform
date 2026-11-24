@@ -304,4 +304,46 @@ describe('SCR-04 valores de proceso', { timeout: 60_000 }, () => {
     submit();
     expect(issueKeys(variable)).toContain('scr04.parameters.process_signal_undeclared');
   });
+  it('no deja retirar una señal que cita una variable de estado publicada y dice por qué', async () => {
+    const current = withSignals();
+    current.catalog = {
+      ...current.catalog,
+      process_context: {
+        before_ms: 30_000,
+        variables: [
+          {
+            variable_id: '0190a1b2-5555-7000-8000-000000000103',
+            code: 'JUMBO-POS',
+            kind: 'binary',
+            description_es: 'Jumbo en posición',
+            signal_id: JUMBO_SIGNAL,
+            states: 'in_position_out',
+          },
+        ],
+      },
+    };
+    await renderPage(<Page />, undefined, current);
+    await screen.findByRole('form', { name: text('scr04.parameters.title') }, WAIT);
+    fireEvent.change(screen.getByRole('combobox', { name: text('scr04.parameters.parameter') }), {
+      target: { value: 'signals' },
+    });
+    let writes = 0;
+    server.use(
+      http.put('http://localhost/zones/:zone/signals', () => {
+        writes += 1;
+        return HttpResponse.json(withSignals(2));
+      }),
+    );
+    const removers = screen.getAllByRole('button', {
+      name: text('scr04.parameters.remove_signal'),
+    });
+    const last = removers.at(-1);
+    if (last === undefined) throw new Error('sin señales');
+    fireEvent.click(last);
+    reason();
+    submit();
+    const alert = await screen.findByRole('alert', {}, WAIT);
+    expect(alert.textContent).toBe(text('scr04.parameters.signal_cited_by_process'));
+    expect(writes).toBe(0);
+  });
 });

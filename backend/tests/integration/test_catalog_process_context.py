@@ -16,6 +16,8 @@ como ``vigia_app`` (``tests.catalog_routes_support``):
   las señales sí, como siempre.
 - **Rastro**: ``catalog_version_published`` con el usuario, el rol, el motivo y la hora, y el evento
   ``catalog_updated`` con ``changed_fields = [process_context]``.
+- **Migración** ``gob_0047`` sobre una base en ``gob_0046`` con versiones del catálogo: las filas no
+  cambian y ``process_context`` pasa a ser un ``changed_fields`` válido (antes, ``CheckViolation``).
 
 Datos sintéticos con las escalas de Pope (A-129): velocidad 4 mA = 0 y 20 mA = 2000 m/min en el
 canal 0, metros en bobina 4 mA = 0 y 20 mA = 50 000 m en el canal 1 y «jumbo en posición» sobre
@@ -26,21 +28,30 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import uuid
 from collections.abc import Iterator
 from typing import Any, Final
 
+import asyncpg  # type: ignore[import-untyped]
 import httpx
 import pytest
 
 from tests.authz_support import Site
+from tests.catalog_db import seed_catalog
 from tests.catalog_routes_support import (
     REASON,
     CatalogRoutes,
     catalog_routes_world,
 )
+from tests.identity_db import MigratedDatabase, seed_identity
 from tests.integration.conftest import PostgresEndpoint
+from tests.integration.test_roles import run_alembic
 from vigia_platform.shared.context import Role, ScopeLevel
+from vigia_platform.shared.migration_credentials import (
+    APP_PASSWORD_VARIABLE,
+    MIGRATE_PASSWORD_VARIABLE,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -398,3 +409,104 @@ def test_the_new_version_is_in_the_chain_with_the_user_the_reason_and_the_time(
         "catalog_version": 2,
         "changed_fields": ["process_context"],
     }
+
+
+# --- Migración gob_0047 ---------------------------------------------------------------------------
+
+PREVIOUS_HEAD: Final = "gob_0046"
+_COPY_WITH_PROCESS_CONTEXT: Final = (
+    "INSERT INTO catalog.zone_catalog_version SELECT (row_).* FROM ("
+    " SELECT jsonb_populate_record(NULL::catalog.zone_catalog_version, to_jsonb(v)"
+    " || jsonb_build_object('catalog_version', v.catalog_version + 1000,"
+    " 'changed_fields', jsonb_build_array('process_context'))) AS row_"
+    " FROM catalog.zone_catalog_version AS v WHERE zone_id = $1) AS s"
+)
+"""Copia de una versión con ``changed_fields = [process_context]`` (lo que escribe la ruta)."""
+
+
+def _alembic(migrated: MigratedDatabase, revision: str) -> None:
+    result = run_alembic(
+        migrated.endpoint,
+        migrated.database,
+        {
+            APP_PASSWORD_VARIABLE: migrated.app_password,
+            MIGRATE_PASSWORD_VARIABLE: migrated.migrate_password,
+        },
+        "upgrade",
+        revision,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+async def _admin(endpoint: PostgresEndpoint, statement: str) -> None:
+    connection = await asyncpg.connect(
+        host=endpoint.host,
+        port=endpoint.port,
+        user=endpoint.user,
+        password=endpoint.password,
+        database=endpoint.database,
+    )
+    try:
+        await connection.execute(statement)
+    finally:
+        await connection.close()
+
+
+async def _seeded_zone(migrated: MigratedDatabase) -> uuid.UUID:
+    connection = await migrated.connect()
+    try:
+        seed = await seed_catalog(connection, await seed_identity(connection))
+        zone: uuid.UUID = seed.plant(seed.identity.a.organization_id).zone_id
+        return zone
+    finally:
+        await connection.close()
+
+
+async def _versions(migrated: MigratedDatabase) -> list[dict[str, Any]]:
+    connection = await migrated.connect()
+    try:
+        rows = await connection.fetch(
+            "SELECT * FROM catalog.zone_catalog_version ORDER BY zone_id, catalog_version"
+        )
+    finally:
+        await connection.close()
+    return [dict(row) for row in rows]
+
+
+async def _copy(migrated: MigratedDatabase, zone: uuid.UUID) -> str:
+    """``ok`` o el nombre de la restricción que rechaza la copia."""
+    connection = await migrated.connect()
+    try:
+        await connection.execute(_COPY_WITH_PROCESS_CONTEXT, zone)
+    except asyncpg.CheckViolationError as error:
+        return str(error.constraint_name)
+    finally:
+        await connection.close()
+    return "ok"
+
+
+def test_migration_gob_0047_admits_process_context_and_keeps_the_rows(
+    postgres_endpoint: PostgresEndpoint,
+) -> None:
+    """La mutación con nombre ``m_sin_migracion_changed_fields`` (sin ``gob_0047``)."""
+    name = f"vigia_gob_0047_{secrets.token_hex(4)}"
+    asyncio.run(_admin(postgres_endpoint, f"CREATE DATABASE {name}"))
+    migrated = MigratedDatabase(
+        postgres_endpoint, name, secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+    )
+    try:
+        _alembic(migrated, PREVIOUS_HEAD)
+        zone = asyncio.run(_seeded_zone(migrated))
+        before = asyncio.run(_versions(migrated))
+        assert before and all("process_context" not in row["changed_fields"] for row in before)
+        constraint = "zone_catalog_version_changed_fields"
+        assert asyncio.run(_copy(migrated, zone)) == constraint
+
+        _alembic(migrated, "head")
+
+        assert asyncio.run(_versions(migrated)) == before
+        assert asyncio.run(_copy(migrated, zone)) == "ok"
+        after = asyncio.run(_versions(migrated))
+        assert [r["changed_fields"] for r in after if r not in before] == [["process_context"]]
+    finally:
+        asyncio.run(_admin(postgres_endpoint, f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))

@@ -61,6 +61,7 @@
   "scr04.parameters.channel": "Canal de la señal",
   "scr04.parameters.add_signal": "Añadir señal",
   "scr04.parameters.remove_signal": "Retirar señal del borrador",
+  "scr04.parameters.signal_cited_by_process": "Una variable de proceso de estado usa esta señal. Cámbiela o retírela en «Valores de proceso» antes de retirar la señal.",
   "scr04.parameters.pre_seconds": "Ventana previa, segundos",
   "scr04.parameters.post_seconds": "Ventana posterior, segundos",
   "scr04.parameters.grouping_window_ms": "Agrupación del episodio, milisegundos",

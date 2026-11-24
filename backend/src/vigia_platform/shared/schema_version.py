@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 46
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0046`` (la columna
+MINIMUM_SCHEMA_VERSION: Final = 47
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0047``
+(``process_context`` en ``catalog.zone_catalog_version.changed_fields``, que la publicación de las
+variables de proceso escribe, TASK-594), que incluye ``gob_0046`` (la columna
 ``process_context`` de ``fleet.episode_photo``, que la ingesta de la foto escribe, TASK-593), que
 incluye ``gob_0045`` (``zone_mode``,
 ``record_id``, ``photo_index`` y ``photo_role`` de ``fleet.episode_photo``, que la lectura de la

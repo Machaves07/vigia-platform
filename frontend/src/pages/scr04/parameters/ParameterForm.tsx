@@ -17,6 +17,7 @@ import {
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import {
+  citedSignalMissing,
   declaredSignals,
   processBody,
   processDraft,
@@ -201,6 +202,11 @@ export function ParameterForm({
         });
         break;
       case 'signals':
+        // Una variable de estado publicada no puede quedarse sin su señal (regla 7, A-129).
+        if (citedSignalMissing(initial, signals)) {
+          setIssue('scr04.parameters.signal_cited_by_process');
+          return;
+        }
         body.signals = signals;
         break;
       case 'thresholds':
