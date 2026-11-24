@@ -506,7 +506,9 @@ def test_migration_gob_0047_admits_process_context_and_keeps_the_rows(
 
         assert asyncio.run(_versions(migrated)) == before
         assert asyncio.run(_copy(migrated, zone)) == "ok"
-        after = asyncio.run(_versions(migrated))
-        assert [r["changed_fields"] for r in after if r not in before] == [["process_context"]]
+        copies = [r for r in asyncio.run(_versions(migrated)) if r not in before]
+        in_zone = [r for r in before if r["zone_id"] == zone]
+        assert len(copies) == len(in_zone) >= 1
+        assert all(r["changed_fields"] == ["process_context"] for r in copies)
     finally:
         asyncio.run(_admin(postgres_endpoint, f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))

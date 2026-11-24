@@ -19,11 +19,12 @@ la matriz afectada queda vacía. Cambiar las señales sí la deja, como siempre.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import Field, StrictInt, StrictStr
+from pydantic import Field, StrictInt, StrictStr, field_validator
 from vigia_contracts.models.zone_catalog import ProcessVariableDeclaration
 
 from vigia_platform.catalog.adapters.http.catalog import CatalogVersionOut, Strict, published
@@ -55,6 +56,24 @@ class ProcessContextBody(Strict):
     variables: list[ProcessVariableDeclaration] = Field(max_length=MAX_PROCESS_VARIABLES)
     """``ProcessVariableDeclaration`` del contrato; vacía, la versión nueva sale sin el bloque."""
     reason_es: StrictStr
+
+    @field_validator("variables", mode="before")
+    @classmethod
+    def _contract_reader(cls, value: object) -> object:
+        """Cada variable por el lector estricto del contrato en modo JSON.
+
+        FastAPI valida el cuerpo ya decodificado (modo Python), donde los modelos estrictos del
+        contrato no admiten un enumerado ni un UUID escritos como texto: sin esto, ninguna
+        petición válida pasaría. Lo que no cumple el contrato sigue siendo ``invalid_request``.
+        """
+        if not isinstance(value, list):
+            return value
+        return [
+            ProcessVariableDeclaration.model_validate_json(json.dumps(item))
+            if isinstance(item, dict)
+            else item
+            for item in value
+        ]
 
 
 def process_context_router() -> APIRouter:

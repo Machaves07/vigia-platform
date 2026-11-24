@@ -556,7 +556,7 @@ def test_the_first_publication_writes_version_standard_records_cameras_and_one_e
     assert json.loads(event["payload"]) == {
         "zone_id": str(zone),
         "catalog_version": 1,
-        "changed_fields": [f.value for f in CatalogChangedField],
+        "changed_fields": [f.value for f in ALL_CHANGED_FIELDS],
     }
     assert catalogs.marker.calls[-1] == (zone, None, 1, ALL_CHANGED_FIELDS)
 
