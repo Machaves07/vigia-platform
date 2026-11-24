@@ -16,8 +16,17 @@
  *
  * El hito de detección resume en una línea los valores de proceso del instante del hecho
  * (TASK-596, A-129; `process` del propio hito): sin serie, sin horas y sin lectura nueva.
+ *
+ * Cada evidencia y el cierre muestran sus adjuntos (TASK-609, O-22) por su referencia, que trae la
+ * ficha sin URL: con `closure_attachments.read`, la foto (JPEG o PNG) se mira en un lienzo con
+ * «Ver foto» y el PDF se descarga con «Preparar el enlace del adjunto»; cada apertura pide su URL
+ * en ese momento, con su propia auditoría, y montar la ficha no pide ninguna. Sin el permiso, el
+ * aviso del rol y ninguna petición. En «Cierre firmado» la descripción es «Descripción del
+ * cierre» y el tipo de la acción no se repite.
  */
 import { useState, type ReactNode } from 'react';
+import { AttachmentPreview } from '@/components/DirectUploadField/AttachmentPreview';
+import { AttachmentReadLink } from '@/components/DirectUploadField/AttachmentReadLink';
 import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ProcessSummary } from '@/pages/shared/ProcessValues';
@@ -43,9 +52,16 @@ const WITH_PHOTO: ReadonlySet<MilestoneKind> = new Set([
 interface PhotoContext {
   readonly findingStateId: string;
   readonly canView: boolean;
+  /** La sesión tiene `closure_attachments.read` (los adjuntos del cierre). */
+  readonly canReadAttachments: boolean;
   readonly aggregated: boolean;
   readonly clock: Clock;
 }
+
+type Attachment = TimelineMilestone['attachments'][number];
+
+/** Los adjuntos que se pintan en un lienzo; los demás (PDF) se descargan. */
+const PHOTO_TYPES: ReadonlySet<Attachment['content_type']> = new Set(['image/jpeg', 'image/png']);
 
 import styles from './timeline.module.css';
 
@@ -143,12 +159,20 @@ function MilestoneDetails({
   };
   add('outcome', text('scr08.timeline.outcome'), outcomeLabel(kind, details.outcome));
   add('reason', text('scr08.timeline.reason'), reasonLabel(details));
-  add(
-    'action_type',
-    text('scr08.timeline.action_type'),
-    labelled('action_type', details.action_type),
-  );
-  add('description', text('scr08.timeline.description'), details.description);
+  const closure = kind === 'closure';
+  // En el cierre, el tipo de la acción ya lo dice su asignación: no se repite (O-22).
+  if (!closure) {
+    add(
+      'action_type',
+      text('scr08.timeline.action_type'),
+      labelled('action_type', details.action_type),
+    );
+  }
+  if (closure) {
+    add('closure_description', text('scr08.timeline.closure_description'), details.description);
+  } else {
+    add('description', text('scr08.timeline.description'), details.description);
+  }
   add('expected', text('scr08.timeline.expected'), details.expected_outcome);
   add('assignee', text('scr08.timeline.assignee'), details.assignee_display_name);
   add(
@@ -208,6 +232,64 @@ function MilestoneDetails({
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * Los adjuntos de una evidencia o del cierre (TASK-609): el aviso fijo de la declaración y, con
+ * `closure_attachments.read`, cada uno a demanda; sin el permiso, el aviso del rol y nada más.
+ */
+function MilestoneAttachments({
+  attachments,
+  photo,
+}: {
+  readonly attachments: readonly Attachment[];
+  readonly photo: PhotoContext;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className={styles.attachments} data-part="attachments">
+      <h4>{text('scr08.timeline.attachments')}</h4>
+      <p data-part="attachment_declared" data-text-key="scr08.timeline.attachment_declared">
+        {text('scr08.timeline.attachment_declared')}
+      </p>
+      {photo.canReadAttachments ? (
+        <ul className={styles.attachmentList}>
+          {attachments.map((attachment) => {
+            const isPhoto = PHOTO_TYPES.has(attachment.content_type);
+            const name = text(
+              isPhoto ? 'scr08.timeline.attachment_photo' : 'scr08.timeline.attachment_pdf',
+            );
+            return (
+              <li
+                key={attachment.attachment_id}
+                data-part="attachment"
+                data-attachment-id={attachment.attachment_id}
+                data-content-type={attachment.content_type}
+              >
+                <p data-part="attachment_kind">{name}</p>
+                {isPhoto ? (
+                  <AttachmentPreview
+                    attachmentId={attachment.attachment_id}
+                    alt={name}
+                    clock={photo.clock}
+                  />
+                ) : (
+                  <AttachmentReadLink attachmentId={attachment.attachment_id} clock={photo.clock} />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p
+          data-part="attachment_no_permission"
+          data-text-key="scr08.timeline.attachment_no_permission"
+        >
+          {text('scr08.timeline.attachment_no_permission')}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -312,6 +394,7 @@ function Milestone({
             headingLevel={4}
           />
         )}
+        <MilestoneAttachments attachments={milestone.attachments} photo={photo} />
         <RecordId recordId={milestone.record_id} />
       </div>
     </li>
@@ -376,17 +459,21 @@ export function TimelineView({
   timeline,
   timeZone,
   canViewPhoto,
+  canReadAttachments,
   clock,
 }: {
   readonly timeline: FindingTimeline;
   readonly timeZone: string;
   /** La sesión tiene `evidence.read`: sin él, la foto da el aviso del rol y no se pide. */
   readonly canViewPhoto: boolean;
+  /** La sesión tiene `closure_attachments.read`: sin él, los adjuntos dan el aviso del rol. */
+  readonly canReadAttachments: boolean;
   readonly clock: Clock;
 }) {
   const photo: PhotoContext = {
     findingStateId: timeline.finding_state_id,
     canView: canViewPhoto,
+    canReadAttachments,
     aggregated: timeline.time_aggregated,
     clock,
   };

@@ -121,6 +121,9 @@ export default function Page() {
           timeline={data}
           timeZone={plant?.timezone ?? 'UTC'}
           canViewPhoto={principal?.effective_permissions.includes('evidence.read') ?? false}
+          canReadAttachments={
+            principal?.effective_permissions.includes('closure_attachments.read') ?? false
+          }
           clock={detailClock()}
         />
       )}

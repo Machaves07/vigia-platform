@@ -6635,6 +6635,14 @@
         - "attempt_count"
         - "draft"
       "title": "AssistantRequestOut"
+    "AttachmentContentType":
+      "type": "string"
+      "enum":
+        - "image/jpeg"
+        - "image/png"
+        - "application/pdf"
+      "title": "AttachmentContentType"
+      "description": "``attachment_content_type``: el tipo MIME de un adjunto de evidencia de cierre (§6.3)."
     "AuditCursorOut":
       "properties":
         "occurred_at":
@@ -16902,6 +16910,25 @@
         - "display_name"
       "title": "TimelineActorOut"
       "description": "Quién hizo el paso: el usuario de la plataforma (P8), nunca una persona observada."
+    "TimelineAttachmentOut":
+      "properties":
+        "attachment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Attachment Id"
+        "content_type":
+          "$ref": "#/components/schemas/AttachmentContentType"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attachment_id"
+        - "content_type"
+        - "size_bytes"
+      "title": "TimelineAttachmentOut"
+      "description": "La referencia de un adjunto del cierre: lo justo para pintarlo o descargarlo a demanda."
     "TimelineDeadlineOut":
       "properties":
         "due_at":
@@ -17093,6 +17120,11 @@
             "$ref": "#/components/schemas/ProcessVariableSummaryOut"
           "type": "array"
           "title": "Process"
+        "attachments":
+          "items":
+            "$ref": "#/components/schemas/TimelineAttachmentOut"
+          "type": "array"
+          "title": "Attachments"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -17107,6 +17139,7 @@
         - "deadline"
         - "photos"
         - "process"
+        - "attachments"
       "title": "TimelineMilestoneOut"
     "TimelineSummaryOut":
       "properties":

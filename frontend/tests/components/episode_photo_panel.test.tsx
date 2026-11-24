@@ -146,6 +146,7 @@ function milestone(
     deadline: null,
     photos: [...photos],
     process: [],
+    attachments: [],
   };
 }
 
@@ -263,7 +264,13 @@ function openDetail(detail: FindingDetail, canView = true) {
 
 function openTimeline(value: FindingTimeline, canView = true) {
   return mount(
-    <TimelineView timeline={value} timeZone={TIME_ZONE} canViewPhoto={canView} clock={clock} />,
+    <TimelineView
+      timeline={value}
+      timeZone={TIME_ZONE}
+      canViewPhoto={canView}
+      canReadAttachments={false}
+      clock={clock}
+    />,
   );
 }
 

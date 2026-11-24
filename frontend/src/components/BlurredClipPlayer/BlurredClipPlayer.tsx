@@ -15,12 +15,16 @@
  *   preferencias, almacenamiento ni texto visible, y se quita del elemento al desmontar.
  * - `storage_unavailable` → «evidencia no disponible ahora» con «reintentar», solo en este
  *   reproductor: el resto de la pantalla sigue (BR-APP-74).
+ * - **Un clip que no carga** (O-15, TASK-609): el evento `error` del `<video>`, o `stalled` sin
+ *   ningún dato durante 10 s (contados con el `Clock`), pasan a «No se pudo cargar el clip» con
+ *   «Reintentar»; la URL que falló se quita del elemento y se olvida, y solo el gesto de la
+ *   persona pide otra (nunca un reintento automático: cada URL es una concesión auditada).
  */
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 
 import { isPortError } from '@/ports/shared';
 import { readEvidenceUrl, type ReadUrl } from '@/ports/upload';
-import type { Clock } from '@/state/clock';
+import type { Clock, TimerHandle } from '@/state/clock';
 import {
   countdownReducer,
   EVIDENCE_URL_MAX_SECONDS,
@@ -51,6 +55,14 @@ type Phase =
   | { readonly kind: 'failed'; readonly textKey: string; readonly message: string };
 
 const IDLE: Phase = { kind: 'idle' };
+
+/** `stalled` sin ningún dato durante este tiempo: el clip no carga (O-15) `[objetivo propio]`. */
+const STALLED_WITHOUT_DATA_MS = 10_000;
+
+/** `HTMLMediaElement.HAVE_CURRENT_DATA`: ya hay un cuadro que mostrar. */
+const HAVE_CURRENT_DATA = 2;
+
+const LOAD_FAILED: Phase = { kind: 'failed', textKey: 'media.clip.load_failed', message: '' };
 
 /** Qué se muestra cuando no se pudo obtener la URL. */
 function failedPhase(error: unknown): Phase {
@@ -104,12 +116,19 @@ export function BlurredClipPlayer({
   const autoplayRef = useRef(false);
   /** Clip de la apertura en curso: una respuesta de otro clip se descarta. */
   const currentRef = useRef(evidenceId);
+  /** Espera de `stalled` sin datos, si la hay. */
+  const stallRef = useRef<TimerHandle | null>(null);
   /** Fase del clip `clip`; otro clip empieza en reposo. */
   const [state, setState] = useState<{ readonly clip: string; readonly phase: Phase }>({
     clip: evidenceId,
     phase: IDLE,
   });
   const phase = state.clip === evidenceId ? state.phase : IDLE;
+
+  const clearStall = useCallback(() => {
+    if (stallRef.current !== null) clock.clearTimeout(stallRef.current);
+    stallRef.current = null;
+  }, [clock]);
 
   useEffect(() => {
     currentRef.current = evidenceId;
@@ -118,9 +137,37 @@ export function BlurredClipPlayer({
     autoplayRef.current = false;
     const video = videoRef.current;
     return () => {
+      clearStall();
       video?.removeAttribute('src');
     };
-  }, [evidenceId]);
+  }, [evidenceId, clearStall]);
+
+  /**
+   * La URL del `src` no sirvió: se quita y se olvida (la siguiente pulsación pide otra) y el
+   * reproductor lo dice. No pide nada: reintentar es un gesto (UI-12).
+   */
+  const loadFailed = useCallback(
+    (video: HTMLVideoElement) => {
+      clearStall();
+      if (!video.hasAttribute('src')) return;
+      video.removeAttribute('src');
+      expiryRef.current = idleCountdown;
+      setState({ clip: currentRef.current, phase: LOAD_FAILED });
+    },
+    [clearStall],
+  );
+
+  const onStalled = useCallback(
+    (event: SyntheticEvent<HTMLVideoElement>) => {
+      const video = event.currentTarget;
+      if (stallRef.current !== null || video.readyState >= HAVE_CURRENT_DATA) return;
+      stallRef.current = clock.setTimeout(() => {
+        stallRef.current = null;
+        if (video.readyState < HAVE_CURRENT_DATA) loadFailed(video);
+      }, STALLED_WITHOUT_DATA_MS);
+    },
+    [clock, loadFailed],
+  );
 
   /**
    * Lanza la reproducción; el evento `play` que provoca no vuelve a pedir URL. La marca se quita
@@ -201,6 +248,11 @@ export function BlurredClipPlayer({
           playsInline
           preload="none"
           onPlay={onPlay}
+          onError={(event) => {
+            loadFailed(event.currentTarget);
+          }}
+          onStalled={onStalled}
+          onLoadedData={clearStall}
           onContextMenu={(event) => {
             event.preventDefault();
           }}

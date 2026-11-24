@@ -3002,6 +3002,12 @@ export interface components {
       attempt_count: number;
       draft: components['schemas']['DraftOut'] | null;
     };
+    /**
+     * AttachmentContentType
+     * @description ``attachment_content_type``: el tipo MIME de un adjunto de evidencia de cierre (§6.3).
+     * @enum {string}
+     */
+    AttachmentContentType: 'image/jpeg' | 'image/png' | 'application/pdf';
     /** AuditCursorOut */
     AuditCursorOut: {
       /** Occurred At */
@@ -8688,6 +8694,20 @@ export interface components {
       /** Display Name */
       display_name: string;
     };
+    /**
+     * TimelineAttachmentOut
+     * @description La referencia de un adjunto del cierre: lo justo para pintarlo o descargarlo a demanda.
+     */
+    TimelineAttachmentOut: {
+      /**
+       * Attachment Id
+       * Format: uuid
+       */
+      attachment_id: string;
+      content_type: components['schemas']['AttachmentContentType'];
+      /** Size Bytes */
+      size_bytes: number;
+    };
     /** TimelineDeadlineOut */
     TimelineDeadlineOut: {
       /** Due At */
@@ -8766,6 +8786,8 @@ export interface components {
       photos: components['schemas']['FindingPhotoOut'][];
       /** Process */
       process: components['schemas']['ProcessVariableSummaryOut'][];
+      /** Attachments */
+      attachments: components['schemas']['TimelineAttachmentOut'][];
     };
     /** TimelineSummaryOut */
     TimelineSummaryOut: {

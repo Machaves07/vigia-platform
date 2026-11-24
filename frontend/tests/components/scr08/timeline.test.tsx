@@ -86,6 +86,7 @@ function milestone(
     deadline: null,
     photos: [],
     process: [],
+    attachments: [],
     ...changes,
   };
 }
@@ -221,7 +222,7 @@ afterEach(() => {
   installTransport(null);
 });
 
-async function fixture() {
+async function fixture(permissions: readonly string[] = ['findings.read']) {
   const path = `/findings/${FINDING}/timeline`;
   const clock = new FakeClock(START + 10_000 * MINUTE);
   const connection = createPortConnection(clock);
@@ -236,7 +237,7 @@ async function fixture() {
   const me = meResponse({
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
-    permissions: ['findings.read'],
+    permissions: [...permissions],
   });
   const session = createSessionStore({
     clock,
@@ -569,6 +570,189 @@ describe(
       // Y lo de siempre, nombrado: una lectura que se hiciera con o sin bloque también caería aquí.
       expect(baseline).toEqual(['GET /hierarchy', `GET /loop/findings/${FINDING}/timeline`]);
       expect(env.calls.timeline).toBe(1);
+    });
+  },
+);
+
+describe(
+  'SCR-08 ficha de vida: adjuntos del cierre y «Descripción del cierre» (TASK-609)',
+  { timeout: 60_000 },
+  () => {
+    const READ_URL = 'http://localhost/loop/attachments/:attachment_id/read-url';
+    const STORE = 'https://vigia-evidence-000000000000-us-east-1.s3.us-east-1.amazonaws.com';
+    const JPG = {
+      attachment_id: '0192d3e4-5f60-7a1b-8c2d-000000000001',
+      content_type: 'image/jpeg',
+      size_bytes: 2048,
+    } as const;
+    const PDF = {
+      attachment_id: '0192d3e4-5f60-7a1b-8c2d-000000000002',
+      content_type: 'application/pdf',
+      size_bytes: 4096,
+    } as const;
+    const READER = ['findings.read', 'closure_attachments.read'];
+
+    /** El ciclo con un JPG y un PDF en la primera evidencia y los dos en el cierre. */
+    function withAttachments(): FindingTimeline {
+      return timeline({
+        milestones: cycle().map((m, index) =>
+          index === 3 || m.kind === 'closure' ? { ...m, attachments: [JPG, PDF] } : m,
+        ),
+      });
+    }
+
+    /** Las URL pedidas y lo que llega al almacén; los bytes, sintéticos y generados aquí. */
+    function serve() {
+      const requested: string[] = [];
+      const fetched: string[] = [];
+      server.use(
+        http.post(READ_URL, ({ params }) => {
+          const id = String(params.attachment_id);
+          requested.push(id);
+          return HttpResponse.json({
+            attachment_id: id,
+            url: `${STORE}/closure/${id}.jpg?X-Amz-Signature=${String(requested.length)}`,
+            expires_at: new Date(START + 20_000 * MINUTE).toISOString(),
+            content_disposition: 'attachment',
+          });
+        }),
+        http.get(`${STORE}/closure/:name`, ({ request }) => {
+          fetched.push(request.url);
+          return new HttpResponse(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]), {
+            headers: { 'Content-Type': 'image/jpeg' },
+          });
+        }),
+      );
+      return { requested, fetched };
+    }
+
+    function attachmentsOf(kind: TimelineMilestone['kind']): HTMLElement[] {
+      return items()
+        .filter((item) => item.getAttribute('data-kind') === kind)
+        .flatMap((item) => [...item.querySelectorAll<HTMLElement>('[data-part="attachment"]')]);
+    }
+
+    it('las referencias en el orden del servidor, con el aviso fijo, y nada pedido al montar', async () => {
+      const seen = serve();
+      const env = await fixture(READER);
+      env.responses.timeline = () => HttpResponse.json(withAttachments());
+      await opened(env);
+      for (const kind of ['action_evidence_added', 'closure'] as const) {
+        expect(
+          attachmentsOf(kind).map((li) => [
+            li.getAttribute('data-attachment-id'),
+            li.getAttribute('data-content-type'),
+          ]),
+        ).toEqual([
+          [JPG.attachment_id, 'image/jpeg'],
+          [PDF.attachment_id, 'application/pdf'],
+        ]);
+      }
+      const notices = [...document.querySelectorAll('[data-part="attachment_declared"]')];
+      expect(notices.map((n) => n.textContent)).toEqual([
+        text('scr08.timeline.attachment_declared'),
+        text('scr08.timeline.attachment_declared'),
+      ]);
+      // m_pide_al_montar: ninguna URL ni ningún objeto sin gesto, tampoco en 5 minutos.
+      for (let minute = 0; minute < 5; minute += 1) {
+        await act(async () => {
+          env.clock.advance(MINUTE);
+          await settle();
+        });
+      }
+      expect(seen.requested).toEqual([]);
+      expect(seen.fetched).toEqual([]);
+      expect(document.querySelectorAll('canvas, img')).toHaveLength(0);
+    });
+
+    it('«Ver foto» pide una sola URL, la del adjunto pulsado; el PDF se descarga por su enlace', async () => {
+      const seen = serve();
+      const env = await fixture(READER);
+      env.responses.timeline = () => HttpResponse.json(withAttachments());
+      await opened(env);
+      const [photo, pdf] = attachmentsOf('action_evidence_added');
+      if (photo === undefined || pdf === undefined) throw new Error('sin adjuntos');
+      expect(part(photo, 'attachment_kind')?.textContent).toBe(
+        text('scr08.timeline.attachment_photo'),
+      );
+      expect(part(pdf, 'attachment_kind')?.textContent).toBe(text('scr08.timeline.attachment_pdf'));
+      // El PDF: el enlace de descarga de «Evidencia y cierre», que no pide nada hasta el gesto.
+      expect(
+        within(pdf).getByRole('button', { name: text('media.attachment.prepare') }),
+      ).toBeDefined();
+      expect(part(pdf, 'show_attachment')).toBeNull();
+      fireEvent.click(
+        within(photo).getByRole('button', { name: text('media.attachment.show_photo') }),
+      );
+      await waitFor(() => {
+        expect(seen.requested).toEqual([JPG.attachment_id]);
+      }, WAIT);
+      // jsdom no decodifica la foto: el lienzo existe con su rol y su nombre, aunque siga oculto.
+      const canvas = part(photo, 'attachment_canvas');
+      expect(canvas?.getAttribute('role')).toBe('img');
+      expect(canvas?.getAttribute('aria-label')).toBe(text('scr08.timeline.attachment_photo'));
+      expect(canvas?.tagName).toBe('CANVAS');
+      expect(document.querySelectorAll('img')).toHaveLength(0);
+    });
+
+    it('sin closure_attachments.read: el aviso del rol y ninguna petición (m_sin_comprobar_permiso)', async () => {
+      const seen = serve();
+      const env = await fixture(['findings.read', 'evidence.read']);
+      env.responses.timeline = () => HttpResponse.json(withAttachments());
+      await opened(env);
+      const blocks = [...document.querySelectorAll('[data-part="attachments"]')];
+      expect(blocks).toHaveLength(2);
+      for (const block of blocks) {
+        expect(part(block, 'attachment_no_permission')?.textContent).toBe(
+          text('scr08.timeline.attachment_no_permission'),
+        );
+        expect(block.querySelectorAll('button, a, canvas, [data-part="attachment"]')).toHaveLength(
+          0,
+        );
+      }
+      expect(seen.requested).toEqual([]);
+    });
+
+    it('un hito sin adjuntos no pinta el bloque', async () => {
+      const env = await fixture(READER);
+      await opened(env);
+      expect(document.querySelectorAll('[data-part="attachments"]')).toHaveLength(0);
+    });
+
+    it('en «Cierre firmado», «Descripción del cierre» y sin el tipo de la acción', async () => {
+      const env = await fixture(READER);
+      await opened(env);
+      const closure = items().find((item) => item.getAttribute('data-kind') === 'closure');
+      if (closure === undefined) throw new Error('sin cierre');
+      const row = part(closure, 'detail_closure_description');
+      expect(row?.querySelector('dt')?.textContent).toBe(
+        text('scr08.timeline.closure_description'),
+      );
+      expect(row?.querySelector('dd')?.textContent).toBe(
+        'Cierre sintético verificado en el acceso.',
+      );
+      expect(part(closure, 'detail_description')).toBeNull();
+      expect(part(closure, 'detail_action_type')).toBeNull();
+      // Los demás hitos siguen con su etiqueta de siempre.
+      const assigned = items().find((item) => item.getAttribute('data-kind') === 'action_assigned');
+      if (assigned === undefined) throw new Error('sin acción');
+      expect(part(assigned, 'detail_description')?.querySelector('dt')?.textContent).toBe(
+        text('scr08.timeline.description'),
+      );
+      expect(part(assigned, 'detail_action_type')).not.toBeNull();
+    });
+
+    it('axe sin violaciones en la ficha con adjuntos, con y sin permiso', async () => {
+      serve();
+      const env = await fixture(READER);
+      env.responses.timeline = () => HttpResponse.json(withAttachments());
+      const view = await opened(env);
+      expect(await axe(view.container)).toHaveNoViolations();
+      view.unmount();
+      const other = await fixture(['findings.read']);
+      other.responses.timeline = () => HttpResponse.json(withAttachments());
+      const denied = await opened(other);
+      expect(await axe(denied.container)).toHaveNoViolations();
     });
   },
 );
