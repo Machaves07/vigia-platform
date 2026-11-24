@@ -22,6 +22,9 @@ solo hallazgos y detecciones (BR-GOB-92: los eventos describen al observador).
   umbrales iguales a los del catálogo en una detección. Si
   ninguna versión que lo cita los cumple, el campo de la **más nueva** (como la plataforma
   simulada de U-01); si ninguna lo cita, ``standard``;
+- ``accepted_version``: la misma búsqueda, para la lectura (TASK-595): la versión **más nueva**
+  vigente en la ventana que cita el estándar y concuerda con el registro, la que lo aceptó; de ella
+  salen el nombre de cada señal y de cada variable de proceso;
 - ``usage_approved_during``: la compuerta de uso estuvo ``approved`` en algún instante de la
   ventana (``GateStateHistory`` ``[effective_from, effective_until)``);
 - ``same_submission``: el registro aceptado, **sin** su ``receipt``, es exactamente la presentación
@@ -55,6 +58,7 @@ __all__ = [
     "GateSpan",
     "IngestKind",
     "IngestStep",
+    "accepted_version",
     "assigned_at",
     "catalog_violation",
     "cited_clip_ids",
@@ -367,6 +371,36 @@ def catalog_violation(
     ``window`` cita el estándar y concuerda con el registro."""
     if not kind.gated:
         return None
+    citing = _citing(versions, document, window)
+    if not citing:
+        return "standard"
+    fields = [_mismatch(item, document, kind) for item in citing]
+    if None in fields:
+        return None
+    return fields[0]
+
+
+def accepted_version(
+    versions: Sequence[CatalogVersionView],
+    document: Mapping[str, Any],
+    kind: IngestKind,
+    window: Window,
+) -> CatalogVersionView | None:
+    """La versión del paso 7 con la que se aceptó ``document``: la **más nueva** vigente en
+    ``window`` que cita su estándar y concuerda con él (la misma búsqueda que
+    ``catalog_violation``), o ``None`` si ninguna (un registro que ya no concuerda con ninguna
+    versión guardada: la lectura lo dice «sin declaración», nunca falla)."""
+    if not kind.gated:
+        return None
+    citing = _citing(versions, document, window)
+    return next((item for item in citing if _mismatch(item, document, kind) is None), None)
+
+
+def _citing(
+    versions: Sequence[CatalogVersionView], document: Mapping[str, Any], window: Window
+) -> list[CatalogVersionView]:
+    """Las versiones vigentes en ``window`` que citan el estándar de ``document``, la más nueva
+    primero."""
     standard = document["standard"]
     standard_id, version = _uuid(standard["standard_id"]), standard["version"]
     in_force = sorted(
@@ -374,17 +408,11 @@ def catalog_violation(
         key=lambda item: item.version,
         reverse=True,
     )
-    citing = [
+    return [
         item
         for item in in_force
         if standard_id is not None and type(version) is int and item.cites(standard_id, version)
     ]
-    if not citing:
-        return "standard"
-    fields = [_mismatch(item, document, kind) for item in citing]
-    if None in fields:
-        return None
-    return fields[0]
 
 
 # --- Paso 8: compuerta de uso --------------------------------------------------------------------

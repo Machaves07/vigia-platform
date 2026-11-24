@@ -469,6 +469,7 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
                   },
                 ],
                 photos: [],
+                process_context: null,
               },
             ],
           }),
@@ -561,6 +562,7 @@ describe(
         signals,
         clips: [],
         photos: [],
+        process_context: null,
       };
     }
 
@@ -583,6 +585,8 @@ describe(
                     value: 'asserted',
                     valid: true,
                     read_at: null,
+                    code: null,
+                    description_es: null,
                   },
                 ]),
                 signalRecord(0, [
@@ -592,6 +596,8 @@ describe(
                     value: 'asserted',
                     valid: true,
                     read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:07.000Z',
+                    code: null,
+                    description_es: null,
                   },
                   {
                     signal_id: null,
@@ -599,6 +605,8 @@ describe(
                     value: 'deasserted',
                     valid: false,
                     read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:09.250Z',
+                    code: null,
+                    description_es: null,
                   },
                 ]),
               ],
@@ -720,7 +728,15 @@ describe(
       const { section } = await open(false, [
         signalRecord(null, []),
         signalRecord(0, [
-          { signal_id: null, role: 'energy', value: 'asserted', valid: true, read_at: INSTANT },
+          {
+            signal_id: null,
+            role: 'energy',
+            value: 'asserted',
+            valid: true,
+            read_at: INSTANT,
+            code: null,
+            description_es: null,
+          },
         ]),
       ]);
       const record = text('scr08.detail.record');

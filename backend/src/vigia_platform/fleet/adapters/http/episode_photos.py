@@ -8,9 +8,10 @@ alcance, vencida o con la zona ya en ``productive`` responde ``not_found``, nunc
 - ``GET /zones/{zone_id}/episode-photos``: el listado por clave, la foto más reciente primero por el
   inicio del tramo (``started_at``), 50 por defecto y 200 como mucho; ``after`` es el
   ``next_after`` de la página anterior (el ``photo_id`` del último servido) y ``from``/``to``
-  acotan ``started_at`` (``[from, to)``). Solo metadatos e ``image_absent_reason``: **sin bytes,
-  suma ni URL**. Sin auditoría propia (bajo concesión, ``fleet_read`` como las demás lecturas del
-  proveedor).
+  acotan ``started_at`` (``[from, to)``). Solo metadatos, ``image_absent_reason`` y los valores
+  de proceso con el nombre de cada variable (``process_context``, A-129, Q6; ``null`` sin bloque):
+  **sin bytes, suma ni URL**. Sin auditoría propia (bajo concesión, ``fleet_read`` como las
+  demás lecturas del proveedor).
 - ``GET /episode-photos/{photo_id}/image``: el JPEG difuminado, del mismo origen que la aplicación
   (la política de contenido es ``img-src 'self'``), con ``Content-Type: image/jpeg``,
   ``Cache-Control: no-store``, ``X-Content-Type-Options: nosniff`` (de la cadena) y
@@ -26,11 +27,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
+from vigia_platform.fleet.adapters.http.process_context import (
+    ProcessContextOut,
+    process_context_out,
+)
 from vigia_platform.fleet.adapters.http.services import (
     FLEET_STATE_KEY,
     FleetHttp,
@@ -43,6 +49,10 @@ from vigia_platform.fleet.application.episode_photo_read import (
     MAX_PAGE_SIZE,
     EpisodePhotoIntegrityFailed,
     EpisodePhotosRequestInvalid,
+)
+from vigia_platform.fleet.domain.record_declarations import (
+    DeclaredCatalogVersion,
+    process_context_view,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -129,6 +139,9 @@ class EpisodePhotoOut(Strict):
     image_absent_reason: str | None
     """``frame_unavailable``, ``too_large``, ``disk_pressure`` o ``pending_cap`` (contrato
     v1.5.0), o ``null`` si hay imagen."""
+    process_context: ProcessContextOut | None
+    """Los valores de proceso del tramo con el nombre de cada variable (A-129, Q6); ``null`` si la
+    foto no los trae. Las horas, exactas como las demás de este listado."""
 
 
 class EpisodePhotosOut(Strict):
@@ -137,7 +150,11 @@ class EpisodePhotosOut(Strict):
     """Pásalo como ``after`` para la página siguiente; ``null`` si no hay más."""
 
 
-def _view(photo: EpisodePhotoSummary) -> EpisodePhotoOut:
+def _exact(moment: datetime) -> datetime:
+    return moment
+
+
+def _view(photo: EpisodePhotoSummary, declared: DeclaredCatalogVersion | None) -> EpisodePhotoOut:
     image = None
     if (
         photo.width is not None
@@ -171,6 +188,11 @@ def _view(photo: EpisodePhotoSummary) -> EpisodePhotoOut:
         frame_at=None if photo.frame_at is None else format_timestamp(photo.frame_at),
         image=image,
         image_absent_reason=photo.image_absent_reason,
+        process_context=process_context_out(
+            process_context_view(
+                photo.process_context, declared, started_at=photo.started_at, shown=_exact
+            )
+        ),
     )
 
 
@@ -245,7 +267,7 @@ def episode_photos_router() -> APIRouter:
         except EpisodePhotosRequestInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return EpisodePhotosOut(
-            photos=tuple(_view(photo) for photo in page.photos),
+            photos=tuple(_view(p, page.declarations.get(p.photo_id)) for p in page.photos),
             next_after=None if page.next_after is None else str(page.next_after),
         )
 

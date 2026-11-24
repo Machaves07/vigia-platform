@@ -62,6 +62,7 @@ function episode(overrides: Partial<EpisodePhoto> = {}): EpisodePhoto {
     frame_at: '2026-11-12T13:40:04.500Z',
     image: { width: 64, height: 48, size_bytes: 120, blur_params_version: 'blur-v1' },
     image_absent_reason: null,
+    process_context: null,
     ...overrides,
   };
 }

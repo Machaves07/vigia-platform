@@ -36,6 +36,13 @@
    no sirve) **y** la misma zona, episodio y tramo, por ``photo_index``. Solo metadatos (sin
    bytes, suma, tamaño ni URL) y **sin** entrada de auditoría propia: el detalle sigue dejando las
    suyas y nada más. La imagen se pide aparte (``loop.application.finding_photo``).
+7. **Nombre de cada señal y valores de proceso** (A-129, TASK-595) por ``RecordCatalogPort``
+   (``fleet``, sin SQL de ``catalog`` aquí), en **una** consulta para todos los registros leídos:
+   las versiones del catálogo de la zona vigentes en la ventana de esos registros; de cada uno, la
+   versión del paso 7 de la ingesta (``fleet.domain.record_declarations``), nunca la vigente hoy.
+   De ella salen ``code`` y ``description_es`` de cada señal y, por variable de proceso, el nombre,
+   la clase, la unidad, los decimales y el par de estados. Sin declaración, esos campos van
+   ``None`` (nunca un error); sin respuesta del puerto, igual. **Sin** auditoría propia.
 
 **A lo sumo tres llamadas a U-03** por detalle (NFR-LAZ-03): ``state_at``, ``standard_version``
 y ``nodes_by_zone``, una vez cada una y nunca dentro de un bucle. La ocupación unipersonal, el
@@ -84,6 +91,16 @@ from vigia_platform.fleet.application.finding_photos import (
     FindingPhotoKey,
     FindingPhotoPort,
 )
+from vigia_platform.fleet.application.record_declarations import RecordCatalogPort, RecordCatalogs
+from vigia_platform.fleet.domain.clock_tolerance import Window
+from vigia_platform.fleet.domain.record_declarations import (
+    DeclaredCatalogVersion,
+    ProcessContextView,
+    catalog_window,
+    process_context_view,
+    record_version,
+    started_at_of,
+)
 from vigia_platform.fleet.ports import FleetQueryPort, ZoneNode
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -122,6 +139,7 @@ __all__ = [
     "FindingPhotoView",
     "GateAtEvent",
     "NodeView",
+    "RecordFacts",
     "RecordReader",
     "RecordView",
     "ReviewResolutionView",
@@ -297,6 +315,9 @@ class SignalView:
     value: str
     valid: bool
     read_at: datetime | None
+    code: str | None = None
+    """El código de la señal en la versión del catálogo del registro (``None`` sin declaración)."""
+    description_es: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -359,6 +380,9 @@ class RecordView:
     clips: tuple[ClipView, ...]
     photos: tuple[FindingPhotoView, ...] = ()
     """Las fotos ``productive`` de este registro y su tramo, por ``photo_index`` (A-128)."""
+    process_context: ProcessContextView | None = None
+    """Los valores de proceso del tramo con su nombre (A-129); ``None`` si el registro no los
+    trae."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -510,6 +534,19 @@ class DetailInputs:
     analyses: Sequence[Mapping[str, Any]]
     photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
     """Las fotos del hallazgo por tramo de registro (``photo_key``), con las marcas exactas."""
+    declarations: Mapping[uuid.UUID, DeclaredCatalogVersion | None] = field(default_factory=dict)
+    """La versión del catálogo de cada registro leído, por ``record_id`` del expediente; un
+    registro que no está o con ``None`` va sin declaración."""
+
+
+@dataclass(frozen=True, slots=True)
+class RecordFacts:
+    """Lo que hace falta de un registro para buscar su versión del catálogo."""
+
+    record_id: uuid.UUID
+    record_type: str
+    document: Mapping[str, Any]
+    received_at: datetime
 
 
 # --- composición pura ------------------------------------------------------------------------
@@ -668,18 +705,27 @@ def _node(node: ZoneNode, shown: _Presenter) -> NodeView:
     )
 
 
-def _signals(document: Mapping[str, Any], shown: _Presenter) -> tuple[SignalView, ...]:
-    signals: Sequence[Mapping[str, Any]] = document.get("signals") or ()
-    return tuple(
-        SignalView(
-            signal_id=_optional_uuid(signal.get("signal_id")),
-            role=str(signal["role"]),
-            value=str(signal["value"]),
-            valid=bool(signal["valid"]),
-            read_at=shown.optional(_optional_instant(signal.get("read_at"))),
-        )
-        for signal in signals
+def _signal(
+    signal: Mapping[str, Any], shown: _Presenter, declared: DeclaredCatalogVersion | None
+) -> SignalView:
+    signal_id = _optional_uuid(signal.get("signal_id"))
+    name = None if declared is None or signal_id is None else declared.signals.get(signal_id)
+    return SignalView(
+        signal_id=signal_id,
+        role=str(signal["role"]),
+        value=str(signal["value"]),
+        valid=bool(signal["valid"]),
+        read_at=shown.optional(_optional_instant(signal.get("read_at"))),
+        code=None if name is None else name.code,
+        description_es=None if name is None else name.description_es,
     )
+
+
+def _signals(
+    document: Mapping[str, Any], shown: _Presenter, declared: DeclaredCatalogVersion | None
+) -> tuple[SignalView, ...]:
+    signals: Sequence[Mapping[str, Any]] = document.get("signals") or ()
+    return tuple(_signal(signal, shown, declared) for signal in signals)
 
 
 def _segment_index(document: Mapping[str, Any]) -> int | None:
@@ -764,6 +810,7 @@ def _record(
     read_urls: Mapping[uuid.UUID, str],
     shown: _Presenter,
     photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]],
+    declared: DeclaredCatalogVersion | None = None,
 ) -> RecordView:
     document = record.document()
     document = document if isinstance(document, Mapping) else {}
@@ -775,7 +822,7 @@ def _record(
         segment_index=_segment_index(document),
         received_at=shown(record.received_at),
         occurred_at=shown.optional(record.occurred_at),
-        signals=_signals(document, shown),
+        signals=_signals(document, shown, declared),
         clips=tuple(
             ClipView(
                 evidence_id=evidence.evidence_id,
@@ -794,6 +841,12 @@ def _record(
             for evidence in record.evidences
         ),
         photos=_photos(document, photos, shown),
+        process_context=process_context_view(
+            document.get("process_context"),
+            declared,
+            started_at=started_at_of(document),
+            shown=shown,
+        ),
     )
 
 
@@ -924,7 +977,10 @@ def finding_detail(inputs: DetailInputs) -> FindingDetail:
         ),
         nodes=None if inputs.nodes is None else tuple(_node(n, shown) for n in inputs.nodes),
         episode=None if inputs.episode is None else _episode(inputs.episode, shown),
-        records=tuple(_record(r, inputs.read_urls, shown, inputs.photos) for r in inputs.records),
+        records=tuple(
+            _record(r, inputs.read_urls, shown, inputs.photos, inputs.declarations.get(r.record_id))
+            for r in inputs.records
+        ),
         classifications=tuple(_classification(r, shown) for r in inputs.classifications),
         actions=tuple(_action(r, shown) for r in inputs.actions),
         analyses=tuple(_analysis(r, shown) for r in inputs.analyses),
@@ -955,6 +1011,7 @@ class FindingDetailService:
         fleet: FleetQueryPort,
         coverage: CoveragePort,
         photos: FindingPhotoPort,
+        catalogs: RecordCatalogPort | None = None,
     ) -> None:
         self._database = database
         self._authorizer = authorizer
@@ -965,6 +1022,7 @@ class FindingDetailService:
         self._fleet = fleet
         self._coverage = coverage
         self._photos = photos
+        self._catalogs = catalogs if catalogs is not None else RecordCatalogs(database=database)
 
     def __repr__(self) -> str:
         return "FindingDetailService()"
@@ -979,6 +1037,9 @@ class FindingDetailService:
         records, limited = await self._records(authorized, subject, episode)
         read_urls, urls_unavailable = await self._read_urls(authorized, records)
         photos = await self.record_photos(authorized, subject, (r.document() for r in records))
+        declarations = await self.record_declarations(
+            authorized, subject, (_facts(r) for r in records)
+        )
         return finding_detail(
             DetailInputs(
                 subject=subject,
@@ -995,8 +1056,47 @@ class FindingDetailService:
                 actions=actions,
                 analyses=analyses,
                 photos=photos,
+                declarations=declarations,
             )
         )
+
+    async def record_declarations(
+        self,
+        context: ScopeContext,
+        subject: Mapping[str, Any],
+        records: Iterable[RecordFacts],
+    ) -> dict[uuid.UUID, DeclaredCatalogVersion | None]:
+        """La versión del catálogo de cada registro de ``records`` (ya leídos y auditados), por
+        ``record_id``, en **una** consulta a las versiones de la zona del sujeto vigentes en sus
+        ventanas, sin auditoría propia. Sin respuesta del puerto, ninguna (los nombres van ``None``
+        y el detalle se sigue mostrando). También para la ficha de vida (TASK-595)."""
+        windows: dict[uuid.UUID, tuple[RecordFacts, Window]] = {}
+        for record in records:
+            window = catalog_window(record.document, record.received_at)
+            if window is not None:
+                windows[record.record_id] = (record, window)
+        if not windows:
+            return {}
+        span = Window(
+            min(window.start for _, window in windows.values()),
+            max(window.end for _, window in windows.values()),
+        )
+        try:
+            versions = await self._catalogs.versions(
+                context, zone_id=_uuid(subject["zone_id"]), window=span
+            )
+        except Exception:
+            _log.exception("versiones del catálogo no disponibles: nombres sin declaración")
+            return {}
+        return {
+            record_id: record_version(
+                versions,
+                record.document,
+                record_type=record.record_type,
+                received_at=record.received_at,
+            )
+            for record_id, (record, _) in windows.items()
+        }
 
     async def record_photos(
         self,
@@ -1205,6 +1305,16 @@ class FindingDetailService:
         except Exception:
             _log.exception("cobertura del instante no disponible")
             return None
+
+
+def _facts(record: LedgerRecordView) -> RecordFacts:
+    document = record.document()
+    return RecordFacts(
+        record_id=record.record_id,
+        record_type=record.record_type,
+        document=document if isinstance(document, Mapping) else {},
+        received_at=record.received_at,
+    )
 
 
 def _place(subject: Mapping[str, Any]) -> dict[str, Any]:

@@ -145,6 +145,7 @@ function milestone(
     details: NO_DETAILS,
     deadline: null,
     photos: [...photos],
+    process: [],
   };
 }
 

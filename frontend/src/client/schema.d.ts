@@ -4873,6 +4873,7 @@ export interface components {
       image: components['schemas']['EpisodePhotoImageOut'] | null;
       /** Image Absent Reason */
       image_absent_reason: string | null;
+      process_context: components['schemas']['ProcessContextOut'] | null;
     };
     /** EpisodePhotoStandardOut */
     EpisodePhotoStandardOut: {
@@ -7269,6 +7270,24 @@ export interface components {
       /** Recurrence After Days */
       recurrence_after_days?: number | null;
     };
+    /** ProcessAtEventOut */
+    ProcessAtEventOut: {
+      /** Value */
+      value: number | string | null;
+      /** Valid */
+      valid: boolean;
+      /** Offset Ms */
+      offset_ms: number;
+      /** Read At */
+      read_at: string | null;
+    };
+    /** ProcessChangeOut */
+    ProcessChangeOut: {
+      /** Offset Ms */
+      offset_ms: number;
+      /** Value */
+      value: string;
+    };
     /**
      * ProcessContextDeclaration
      * @description Variables de proceso de la zona y su ventana (A-129). Reglas que verifica el modelo: regla (7) del catálogo.
@@ -7278,6 +7297,25 @@ export interface components {
       before_ms: number;
       /** Variables */
       variables: components['schemas']['ProcessVariableDeclaration'][];
+    };
+    /**
+     * ProcessContextOut
+     * @description Los valores de proceso del tramo (A-129), de ``from_offset_ms`` a ``to_offset_ms``.
+     */
+    ProcessContextOut: {
+      /** From Offset Ms */
+      from_offset_ms: number;
+      /** To Offset Ms */
+      to_offset_ms: number;
+      /** Variables */
+      variables: components['schemas']['ProcessVariableOut'][];
+    };
+    /** ProcessSampleOut */
+    ProcessSampleOut: {
+      /** Offset Ms */
+      offset_ms: number;
+      /** Value */
+      value: number | null;
     };
     /**
      * ProcessScale
@@ -7327,6 +7365,68 @@ export interface components {
      * @enum {string}
      */
     ProcessVariableKind: 'analog' | 'binary';
+    /** ProcessVariableOut */
+    ProcessVariableOut: {
+      /**
+       * Variable Id
+       * Format: uuid
+       */
+      variable_id: string;
+      /** Kind */
+      kind: string;
+      /** Code */
+      code: string | null;
+      /** Description Es */
+      description_es: string | null;
+      /** Unit */
+      unit: string | null;
+      /** Decimals */
+      decimals: number | null;
+      /** States */
+      states: string | null;
+      at_event: components['schemas']['ProcessAtEventOut'];
+      /** Min */
+      min: number | null;
+      /** Max */
+      max: number | null;
+      /** Last */
+      last: number | null;
+      /** Samples */
+      samples: components['schemas']['ProcessSampleOut'][];
+      /** Changes */
+      changes: components['schemas']['ProcessChangeOut'][];
+      /** Truncated */
+      truncated: boolean | null;
+    };
+    /**
+     * ProcessVariableSummaryOut
+     * @description Una variable en el hito de detección de la ficha de vida: sin la serie.
+     */
+    ProcessVariableSummaryOut: {
+      /**
+       * Variable Id
+       * Format: uuid
+       */
+      variable_id: string;
+      /** Kind */
+      kind: string;
+      /** Code */
+      code: string | null;
+      /** Description Es */
+      description_es: string | null;
+      /** Unit */
+      unit: string | null;
+      /** Decimals */
+      decimals: number | null;
+      /** States */
+      states: string | null;
+      /** Value */
+      value: number | string | null;
+      /** Valid */
+      valid: boolean;
+      /** Read At */
+      read_at: string | null;
+    };
     /** ProfileBody */
     ProfileBody: {
       /** Display Name */
@@ -7540,6 +7640,7 @@ export interface components {
       clips: components['schemas']['ClipOut'][];
       /** Photos */
       photos: components['schemas']['FindingPhotoOut'][];
+      process_context: components['schemas']['ProcessContextOut'] | null;
     };
     /** RecurrenceEntryOut */
     RecurrenceEntryOut: {
@@ -8663,6 +8764,8 @@ export interface components {
       deadline: components['schemas']['TimelineDeadlineOut'] | null;
       /** Photos */
       photos: components['schemas']['FindingPhotoOut'][];
+      /** Process */
+      process: components['schemas']['ProcessVariableSummaryOut'][];
     };
     /** TimelineSummaryOut */
     TimelineSummaryOut: {
@@ -9408,6 +9511,10 @@ export interface components {
       valid: boolean;
       /** Read At */
       read_at: string | null;
+      /** Code */
+      code: string | null;
+      /** Description Es */
+      description_es: string | null;
     };
     /** AnalysisOut */
     vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut: {

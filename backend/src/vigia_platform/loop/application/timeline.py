@@ -38,6 +38,13 @@
   la ficha sigue con su única entrada). El tramo tardío toma el ``record_id`` del nodo de la
   recepción que cita (``segment_record_id``) si está en la ficha; si no, va sin fotos.
 
+- **Valores de proceso** (A-129, TASK-595): el hito de detección (``finding_received`` o la
+  recepción de una detección) lleva un resumen por variable del bloque de su registro: nombre,
+  unidad, decimales y par de estados de la versión del catálogo del registro (la del paso 7, por
+  ``FindingDetailService.record_declarations``: una consulta, sin auditoría propia) y el valor o
+  estado en el instante del hecho con su hora **presentada** (agregada en zona unipersonal). Sin
+  la serie ni los cambios: están en el detalle.
+
 ``loop.finding_state.classified_within_deadline`` **no** se usa: ningún código la rellena (O-12,
 verificado en TASK-585); la ficha aplica la regla de la métrica sobre el historial.
 """
@@ -51,6 +58,13 @@ from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
 
 from vigia_platform.fleet.application.finding_photos import FindingPhoto, FindingPhotoKey
+from vigia_platform.fleet.domain.record_declarations import (
+    DeclaredCatalogVersion,
+    ProcessVariableSummary,
+    process_context_view,
+    process_summary,
+    started_at_of,
+)
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.ledger.application.audit_writer import ResourceRef
 from vigia_platform.ledger.application.reader import (
@@ -62,6 +76,7 @@ from vigia_platform.loop.application.classification import SUBJECT_RESOURCE_KIND
 from vigia_platform.loop.application.detail import (
     FindingDetailService,
     FindingPhotoView,
+    RecordFacts,
     finding_photo_view,
     photo_key,
 )
@@ -77,6 +92,7 @@ from vigia_platform.shared.context import ScopeContext, repository
 __all__ = [
     "CONFIGURATION_RECORD_TYPE",
     "MAX_TIMELINE_MILESTONES",
+    "PROCESS_TYPES",
     "FindingTimeline",
     "FindingTimelineService",
     "Milestone",
@@ -89,6 +105,7 @@ __all__ = [
     "TimelineSummary",
     "finding_timeline",
     "photo_documents",
+    "process_records",
     "timeline_source",
 ]
 
@@ -181,6 +198,8 @@ class Milestone:
     deadline: MilestoneDeadline | None
     photos: tuple[FindingPhotoView, ...] = ()
     """Las fotos del tramo en ``finding_received`` y ``late_segment_attached`` (A-128)."""
+    process: tuple[ProcessVariableSummary, ...] = ()
+    """El resumen de los valores de proceso en el hito de detección (A-129); vacío si no."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -240,10 +259,30 @@ class TimelineInputs:
     """La zona horaria de la planta; ``None`` si no se sabe (tampoco el plazo de clasificación)."""
     photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
     """Las fotos del hallazgo por tramo (``detail.photo_key``), con las marcas exactas."""
+    declarations: Mapping[uuid.UUID, DeclaredCatalogVersion | None] = field(default_factory=dict)
+    """La versión del catálogo de cada hito de detección, por ``record_id`` (TASK-595)."""
 
 
 _PHOTO_TYPES: Final = frozenset({"finding_received", "late_segment_attached"})
 """Los hitos que llevan las fotos de su tramo (TASK-589)."""
+
+PROCESS_TYPES: Final = frozenset({"finding_received", "detection_for_review_received"})
+"""Los hitos de detección, que llevan el resumen de sus valores de proceso (TASK-595)."""
+
+
+def process_records(records: Sequence[TimelineSource]) -> tuple[RecordFacts, ...]:
+    """Los registros cuya versión del catálogo hace falta para el resumen de valores de proceso:
+    los hitos de detección que traen el bloque."""
+    return tuple(
+        RecordFacts(
+            record_id=r.record_id,
+            record_type=r.record_type,
+            document=r.document,
+            received_at=r.received_at,
+        )
+        for r in records
+        if r.record_type in PROCESS_TYPES and r.document.get("process_context") is not None
+    )
 
 
 def _segment_document(
@@ -501,6 +540,7 @@ class _Walk:
     classification_deadline: datetime | None
     photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
     receptions: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    declarations: Mapping[uuid.UUID, DeclaredCatalogVersion | None] = field(default_factory=dict)
     milestones: list[Milestone] = field(default_factory=list)
     first_classification: Milestone | None = None
 
@@ -513,6 +553,17 @@ class _Walk:
             finding_photo_view(photo, self.shown)
             for photo in sorted(found, key=lambda p: (p.photo_index, str(p.photo_id)))
         )
+
+    def process(self, item: TimelineSource) -> tuple[ProcessVariableSummary, ...]:
+        if item.record_type not in PROCESS_TYPES:
+            return ()
+        view = process_context_view(
+            item.document.get("process_context"),
+            self.declarations.get(item.record_id),
+            started_at=started_at_of(item.document),
+            shown=self.shown,
+        )
+        return process_summary(view)
 
     def deadline(self, item: TimelineSource) -> MilestoneDeadline | None:
         doc = item.document
@@ -547,6 +598,7 @@ class _Walk:
             details=_details(item, self.shown),
             deadline=self.deadline(item),
             photos=self.segment_photos(item),
+            process=self.process(item),
         )
         if item.record_type == "classification" and self.first_classification is None:
             self.first_classification = milestone
@@ -590,6 +642,7 @@ def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
         classification_deadline=rule.deadline() if finding else None,
         photos=inputs.photos,
         receptions=_receptions(inputs.records),
+        declarations=inputs.declarations,
     )
     for item in inputs.records:
         walk.add(item)
@@ -673,11 +726,15 @@ class FindingTimelineService:
             raise ResourceNotFound()
         records = tuple(timeline_source(r) for r in history.records)
         photos = await self._subjects.record_photos(authorized, subject, photo_documents(records))
+        declarations = await self._subjects.record_declarations(
+            authorized, subject, process_records(records)
+        )
         return finding_timeline(
             TimelineInputs(
                 subject=subject,
                 records=records,
                 photos=photos,
+                declarations=declarations,
                 truncated=history.truncated,
                 configuration=(
                     tuple(timeline_source(r) for r in history.preceding)
