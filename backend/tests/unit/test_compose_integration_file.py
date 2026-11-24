@@ -21,7 +21,10 @@ import base64
 import hashlib
 import importlib.util
 import json
+import os
 import re
+import shlex
+import subprocess
 import sys
 import threading
 import types
@@ -232,6 +235,64 @@ def test_the_store_relay_is_on_with_its_secret_and_no_store_origin_in_the_policy
 
 def environment_of(service: str) -> dict[str, str]:
     return {key: str(value) for key, value in SERVICES[service]["environment"].items()}
+
+
+def named_mounts(service: str) -> dict[str, list[str]]:
+    """Volumen con nombre → ``[destino, *opciones]`` de un servicio."""
+    found: dict[str, list[str]] = {}
+    for volume in SERVICES[service].get("volumes", []):
+        source, *rest = str(volume).split(":")
+        if not source.startswith((".", "/")):
+            found[source] = rest
+    return found
+
+
+def test_only_localstack_mounts_the_evidence_store_and_it_has_its_limit() -> None:
+    """TASK-608: el espejo de vigia-evidence vive en `almacen`, montado solo en LocalStack."""
+    assert "almacen" in COMPOSE["volumes"]
+    assert [name for name in SERVICES if "almacen" in named_mounts(name)] == ["localstack"]
+    assert named_mounts("localstack")["almacen"] == ["/almacen"], "lectura y escritura"
+    assert named_mounts("localstack")["estado"] == ["/state"], "un volumen aparte de los secretos"
+    environment = environment_of("localstack")
+    assert int(environment["VIGIA_ALMACEN_MAX_BYTES"]) == 2 * 1024**3
+    assert "VIGIA_ALMACEN_DIR" not in environment, "state.py usa /almacen, el punto de montaje"
+
+
+def test_the_boot_hook_clears_both_restore_marks(tmp_path: Path) -> None:
+    """TASK-608: sin la marca de las evidencias, el espejo no da de baja nada hasta restaurar."""
+    marks = {
+        "VIGIA_RESTORE_MARKER": tmp_path / "restaurado",
+        "VIGIA_EVIDENCE_RESTORE_MARKER": tmp_path / "evidencias-restauradas",
+    }
+    for path in marks.values():
+        path.write_text("restaurado")
+    hook = INTEGRATION / "localstack" / "boot.d" / "05-clear-marker.sh"
+    environment = {**os.environ, **{name: str(path) for name, path in marks.items()}}
+    subprocess.run(["/bin/sh", str(hook)], env=environment, check=True, timeout=30)
+    assert [path.exists() for path in marks.values()] == [False, False]
+
+
+def test_the_boot_hook_and_state_agree_on_the_default_marks(
+    state_module: types.ModuleType,
+) -> None:
+    hook = (INTEGRATION / "localstack" / "boot.d" / "05-clear-marker.sh").read_text("utf-8")
+    (command,) = [line for line in hook.splitlines() if line and not line.startswith("#")]
+    assert shlex.split(command) == [
+        "rm",
+        "-f",
+        "${VIGIA_RESTORE_MARKER:-" + str(state_module.MARKER) + "}",
+        "${VIGIA_EVIDENCE_RESTORE_MARKER:-" + str(state_module.EVIDENCE_MARKER) + "}",
+    ]
+
+
+def test_the_save_loop_sends_its_warnings_to_the_container_log() -> None:
+    """TASK-608: la salida de ``save`` se tira; ``almacen_lleno`` llega al registro."""
+    hook = (INTEGRATION / "localstack" / "ready.d" / "10-restore.sh").read_text("utf-8")
+    commands = [shlex.split(line) for line in hook.splitlines() if line.startswith("nohup")]
+    (loop,) = commands
+    inner = shlex.split(loop[loop.index("-c") + 1].replace(";", " ; "))
+    assert inner[inner.index("python3") - 1] == "VIGIA_EVENT_LOG=/proc/1/fd/2"
+    assert inner[inner.index("python3") :][:3] == ["python3", "/opt/vigia/state.py", "save"]
 
 
 def test_the_secrets_key_is_the_same_in_localstack_and_the_runtime() -> None:

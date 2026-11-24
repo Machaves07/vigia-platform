@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 from typing import Final
 
@@ -22,10 +23,19 @@ from vigia_platform.shared.clock import SystemClock
 INTEGRATION: Final = Path(__file__).resolve().parents[3] / "local" / "integration"
 FAKE_DOCKER: Final = """#!/usr/bin/env bash
 echo "$*" >> "$FAKE_LOG"
-if [ ! -t 0 ]; then cat >/dev/null 2>&1 || true; fi
-if [ -n "${FAKE_FAIL:-}" ] && [[ "$*" == *"$FAKE_FAIL"* ]]; then exit 1; fi
+if [ -n "${FAKE_FAIL:-}" ] && [[ "$*" == *"$FAKE_FAIL"* ]]; then
+  if [ ! -t 0 ]; then cat >/dev/null 2>&1 || true; fi
+  exit 1
+fi
+if [[ "$*" == *"tar -C /almacen -xf -"* ]]; then
+  n=$(ls "$FAKE_LOG".almacen-* 2>/dev/null | wc -l)
+  cat > "$FAKE_LOG.almacen-$n.tar"
+elif [ ! -t 0 ]; then cat >/dev/null 2>&1 || true; fi
 case "$*" in
   *pg_dump*) [ -n "${FAKE_EMPTY_DUMP:-}" ] || printf 'DUMP' ;;
+  *"tar -C /almacen"*"-cf - ."*)
+    if [ -n "${FAKE_BAD_ALMACEN:-}" ]; then printf 'no es un tar'
+    else tar -C "$FAKE_ALMACEN" -cf - .; fi ;;
   *"FROM identity.organization"*) printf '%s' "${FAKE_PROVIDER:-}" ;;
   *" run "*) echo "$FAKE_RUN_JSON" ;;
 esac
@@ -61,7 +71,12 @@ class Harness:
             VIGIA_INTEGRATION_ENV=str(tmp_path / "sin-env"),
             VIGIA_BACKUP_DIR=str(tmp_path / "copias"),
             VIGIA_INTEGRATION_CREDENTIALS=str(tmp_path / "credenciales" / "c.json"),
+            FAKE_ALMACEN=str(tmp_path / "almacen-vivo"),
         )
+        live = tmp_path / "almacen-vivo"
+        (live / "objetos").mkdir(parents=True)
+        (live / "objetos" / ("a" * 64)).write_bytes(b"clip sintetico")
+        (live / "indice.json").write_text('{"version": 1, "objetos": {}}')
 
     def run(
         self, script: str, *arguments: str, **environment: str
@@ -78,6 +93,10 @@ class Harness:
             timeout=60,
             check=False,
         )
+
+    def replaced(self) -> list[Path]:
+        """Los archivos que ``replace_almacen`` metió en el volumen, en orden."""
+        return sorted(self.tmp.glob("docker.log.almacen-*.tar"))
 
     def calls(self) -> list[str]:
         return [line for line in self.log.read_text().splitlines() if line]
@@ -203,6 +222,55 @@ def test_backup_deletes_only_the_copies_older_than_the_retention(harness: Harnes
     assert keep_one_day.returncode == 0
 
 
+def members(archive: Path) -> set[str]:
+    with tarfile.open(archive) as bundle:
+        return {member.name for member in bundle.getmembers() if member.isfile()}
+
+
+def test_backup_publishes_the_evidence_store_next_to_the_database(harness: Harness) -> None:
+    """TASK-608: el espejo de vigia-evidence va con la base, con el cerrojo de ``state.py``."""
+    result = harness.run("backup.sh")
+    assert result.returncode == 0, result.stderr
+    dump = Path(result.stdout.strip())
+    archive = dump.with_name(dump.name.removesuffix(".dump") + ".almacen.tar")
+    assert archive.stat().st_mode & 0o777 == 0o600
+    assert members(archive) == {"./indice.json", "./objetos/" + "a" * 64}
+    (copy,) = [line for line in harness.calls() if "tar -C /almacen" in line]
+    assert copy.split()[copy.split().index("exec") :][:5] == [
+        "exec",
+        "-T",
+        "localstack",
+        "flock",
+        "/almacen/.cerrojo",
+    ]
+    assert [p.name for p in harness.copies.iterdir() if p.name.startswith(".")] == []
+
+
+def test_backup_publishes_nothing_if_the_store_cannot_be_copied(harness: Harness) -> None:
+    result = harness.run("backup.sh", FAKE_FAIL="tar -C /almacen")
+    assert code(result) == "almacen_dump_failed" and result.returncode != 0
+    assert [p.name for p in harness.copies.iterdir()] == [], "ni la base ni temporales"
+
+
+def test_backup_refuses_a_store_copy_tar_cannot_read(harness: Harness) -> None:
+    result = harness.run("backup.sh", FAKE_BAD_ALMACEN="1")
+    assert code(result) == "almacen_unreadable"
+    assert [p.name for p in harness.copies.iterdir()] == []
+
+
+def test_backup_expires_store_copies_with_the_database_ones(harness: Harness) -> None:
+    harness.copies.mkdir()
+    old, recent = (
+        harness.copies / name for name in ("vigia-viejo.almacen.tar", "vigia-r.almacen.tar")
+    )
+    for path in (old, recent):
+        path.write_text("x")
+    long_ago = SystemClock().now().timestamp() - 20 * 86400
+    os.utime(old, (long_ago, long_ago))
+    assert harness.run("backup.sh").returncode == 0
+    assert not old.exists() and recent.exists()
+
+
 # --- restore.sh ---------------------------------------------------------------------------------
 
 
@@ -299,6 +367,79 @@ def test_a_failed_restore_brings_back_the_previous_database_and_the_apps(
     restores = [line for line in harness.calls() if "--create --clean" in line]
     assert len(restores) == 2, "el segundo intento es con la copia previa"
     assert harness.calls()[-1].endswith("up -d --wait") or "up -d --wait" in harness.calls()[-1]
+
+
+@pytest.fixture
+def store(dump: Path) -> Path:
+    """La copia del almacén de ``dump`` (TASK-608), con un blob distinto del vivo."""
+    source = dump.parent / "almacen-copia"
+    (source / "objetos").mkdir(parents=True)
+    (source / "objetos" / ("b" * 64)).write_bytes(b"adjunto sintetico")
+    archive = dump.with_name(dump.name.removesuffix(".dump") + ".almacen.tar")
+    with tarfile.open(archive, "w") as bundle:
+        bundle.add(source, arcname=".")
+    return archive
+
+
+def test_restore_without_a_store_copy_leaves_the_store_alone(harness: Harness, dump: Path) -> None:
+    result = harness.run("restore.sh", "--yes", str(dump))
+    assert result.returncode == 0, result.stderr
+    assert not harness.called("stop localstack") and harness.replaced() == []
+    assert not harness.called("tar -C /almacen")
+
+
+def test_a_store_copy_that_cannot_be_read_whole_touches_nothing(
+    harness: Harness, dump: Path, store: Path
+) -> None:
+    store.write_bytes(store.read_bytes()[:700])
+    result = harness.run("restore.sh", "--yes", str(dump))
+    assert code(result) == "almacen_unreadable"
+    assert not stops_or_drops(harness) and not harness.called("pg_dump")
+
+
+def test_restore_replaces_the_store_after_the_database_with_localstack_stopped(
+    harness: Harness, dump: Path, store: Path
+) -> None:
+    result = harness.run("restore.sh", "--yes", str(dump))
+    assert result.returncode == 0, result.stderr
+    calls = harness.calls()
+
+    def at(fragment: str) -> int:
+        return next(index for index, line in enumerate(calls) if fragment in line)
+
+    order = [
+        at("tar -C /almacen --exclude"),  # la copia previa del almacén vivo
+        at(" stop vigia-mtls-edge"),
+        at("pg_restore --create --clean --if-exists --exit-on-error"),
+        at("stop localstack"),
+        at("tar -C /almacen -xf -"),
+        at("--profile app up -d --wait"),
+    ]
+    assert order == sorted(order) and len(set(order)) == len(order)
+    (replaced,) = harness.replaced()
+    assert replaced.read_bytes() == store.read_bytes()
+    (previous,) = harness.copies.glob("previa-*.almacen.tar")
+    assert previous.stat().st_mode & 0o777 == 0o600
+    assert members(previous) == {"./indice.json", "./objetos/" + "a" * 64}
+
+
+def test_a_failed_store_replacement_brings_back_the_live_store(
+    harness: Harness, dump: Path, store: Path
+) -> None:
+    fake = harness.tmp / "bin" / "docker"
+    fake.write_text(
+        fake.read_text().replace(
+            'cat > "$FAKE_LOG.almacen-$n.tar"',
+            'cat > "$FAKE_LOG.almacen-$n.tar"; [ "$n" -gt 0 ] || exit 1',
+        )
+    )
+    result = harness.run("restore.sh", "--yes", str(dump))
+    assert code(result) == "almacen_restore_failed"
+    first, second = harness.replaced()
+    assert first.read_bytes() == store.read_bytes()
+    (previous,) = harness.copies.glob("previa-*.almacen.tar")
+    assert second.read_bytes() == previous.read_bytes(), "se devuelve el almacén vivo"
+    assert harness.calls()[-1].endswith("--profile app up -d --wait")
 
 
 # --- bootstrap.sh -------------------------------------------------------------------------------

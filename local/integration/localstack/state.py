@@ -21,31 +21,53 @@ cumplirlo sin pago ni AWS real, dentro del propio contenedor:
   copia por otra vacía. No hay gancho ``shutdown.d``: LocalStack ya no atiende la API cuando lo
   ejecuta (probado: 503 en ``ListSecrets``).
 
-Qué se pierde: los objetos de los depósitos que no son ``vigia-edge`` (clips, evidencias,
-archivo) y las versiones anteriores de un secreto. También lo escrito en los
+Espejo de ``vigia-evidence`` (TASK-608, A-130): los clips y los adjuntos del cierre viven en el
+volumen ``almacen`` (montado solo aquí, en ``/almacen``):
+
+- ``save`` copia, **solo** de las claves nuevas o cambiadas (``ETag`` y tamaño), la versión vigente
+  con ``ChecksumMode=ENABLED`` en ``/almacen/objetos/<sha256>`` (``0600``, atómica) tras comprobar
+  que su SHA-256 es la del almacén, y escribe ``/almacen/indice.json`` (``0600``, atómico) con la
+  suma, el tamaño, el tipo, los metadatos de usuario y el ``ETag`` de cada clave. Las bajas (una
+  clave que ya no está en LocalStack sale del índice y su blob, si nadie más lo usa, se borra) solo
+  ocurren con la restauración de este arranque terminada (``EVIDENCE_MARKER``). Con el tope
+  ``VIGIA_ALMACEN_MAX_BYTES`` (2 GiB) alcanzado no copia nada nuevo, no borra nada guardado y lo
+  deja en el registro (``almacen_lleno``). Ni ``vigia-edge``, ni ``vigia-archive``, ni el centinela.
+- ``restore``, antes de ``MARKER``, vuelve a subir cada clave del índice que falte con sus bytes,
+  ``ChecksumSHA256``, su tipo y sus metadatos; un blob cuya suma no es la del índice no se sube
+  (``objeto_corrupto``). La plataforma lee la versión vigente y verifica suma y tamaño, así que la
+  ``version_id`` nueva no le importa.
+
+Qué se pierde: los objetos de ``vigia-archive`` (los paquetes exportados se regeneran) y las
+versiones anteriores de un objeto o de un secreto. También lo escrito en los
 ``VIGIA_SAVE_SECONDS`` anteriores a un reinicio o una caída; ``bootstrap.sh`` y ``admin.sh``
 fuerzan un ``save`` al terminar, y los secretos solo cambian con una orden administrativa
 (``rotate-key``) o un ``bootstrap``. La clave de la autoridad de nodos no pasa por aquí: vive en su
 propio volumen (``VIGIA_NODE_CA_KEY_FILE``).
 
 Corre dentro del contenedor de LocalStack (``/usr/local/bin/python3`` con ``boto3``). Ningún
-valor de secreto sale por la salida estándar: solo nombres y recuentos.
+valor de secreto sale por la salida estándar: solo nombres y recuentos. Del espejo, solo
+recuentos: nunca una clave, un nombre de archivo ni un contenido.
 """
 
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
+import fcntl
+import hashlib
 import json
 import os
+import re
 import secrets
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, FlexibleChecksumError
 
 ENDPOINT: Final = os.environ.get("VIGIA_LOCALSTACK_ENDPOINT", "http://localhost:4566")
 STATE: Final = Path(os.environ.get("VIGIA_STATE_DIR", "/state"))
@@ -54,6 +76,15 @@ MARKER: Final = Path(os.environ.get("VIGIA_RESTORE_MARKER", "/tmp/vigia-restored
 MAX_OBJECT_BYTES: Final = 1024 * 1024
 SENTINEL_KEY: Final = "health/ready-sentinel"
 FORMAT_VERSION: Final = 1
+# Espejo de vigia-evidence (TASK-608).
+ALMACEN: Final = Path(os.environ.get("VIGIA_ALMACEN_DIR", "/almacen"))
+EVIDENCE_MARKER: Final = Path(
+    os.environ.get("VIGIA_EVIDENCE_RESTORE_MARKER", "/tmp/vigia-evidence-restored")  # noqa: S108
+)
+ALMACEN_MAX_BYTES: Final = 2 * 1024 * 1024 * 1024
+INDEX_VERSION: Final = 1
+_SHA256_HEX: Final = re.compile(r"[0-9a-f]{64}")
+_MISSING: Final = frozenset({"404", "NoSuchKey", "NotFound"})
 _CONFIG: Final = Config(
     connect_timeout=5, read_timeout=15, retries={"max_attempts": 3, "mode": "standard"}
 )
@@ -203,6 +234,10 @@ def restore() -> int:
             Body=base64.b64decode(item["body"]),
             ContentType=item["content_type"],
         )
+    # Antes de MARKER: el contenedor no da sano hasta que las evidencias han vuelto. Su marca propia
+    # habilita las bajas del espejo (``mirror_evidence``).
+    almacen = restore_evidence(s3, evidence)
+    EVIDENCE_MARKER.write_text("restaurado\n", encoding="ascii")
     derived = {
         _setting("VIGIA_DB_SECRET_NAME"): {
             "string": json.dumps(
@@ -232,6 +267,9 @@ def restore() -> int:
         f"restore: {len(snapshot['secrets'])} secretos y {len(snapshot['objects'])} objetos de la"
         f" copia, {created} secretos derivados"
     )
+    print(f"restore almacen: {_counts(almacen)}")
+    if almacen["objeto_corrupto"]:
+        _event("objeto_corrupto", {"objetos": almacen["objeto_corrupto"]})
     return 0
 
 
@@ -283,11 +321,17 @@ def write_atomically(path: Path, text: str) -> bool:
     with contextlib.suppress(FileNotFoundError):
         if path.read_text(encoding="utf-8") == text:
             return False
+    _publish(path, text.encode("utf-8"))
+    return True
+
+
+def _publish(path: Path, data: bytes) -> None:
+    """``data`` en ``path`` (``0600``): un temporal propio, ``fsync`` y ``os.replace``."""
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(4)}")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            output.write(text)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(data)
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
@@ -295,19 +339,285 @@ def write_atomically(path: Path, text: str) -> bool:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
         raise
+
+
+# --- Espejo de vigia-evidence (TASK-608) --------------------------------------------------------
+
+
+def _counts(counts: dict[str, int]) -> str:
+    return " ".join(f"{name}={value}" for name, value in counts.items())
+
+
+def _event(code: str, counts: dict[str, int]) -> None:
+    """Una línea para el registro del contenedor: un código cerrado y recuentos, nada más.
+
+    El bucle de ``ready.d`` tira la salida de ``save`` (cada 10 s) y pasa ``VIGIA_EVENT_LOG`` (el
+    ``stderr`` del proceso 1, el registro del contenedor); si no se puede abrir, solo ``stderr``.
+    """
+    line = f"{code}: {_counts(counts)}"
+    print(line, file=sys.stderr)
+    target = os.environ.get("VIGIA_EVENT_LOG", "").strip()
+    if target:
+        with contextlib.suppress(OSError), Path(target).open("a", encoding="utf-8") as output:
+            output.write(line + "\n")
+
+
+def _blobs() -> Path:
+    return ALMACEN / "objetos"
+
+
+def _index_path() -> Path:
+    return ALMACEN / "indice.json"
+
+
+@contextlib.contextmanager
+def _almacen_lock() -> Iterator[None]:
+    """Un solo ``save`` o ``restore`` (o una copia de ``backup.sh``) a la vez sobre ``/almacen``."""
+    ALMACEN.mkdir(parents=True, exist_ok=True)
+    _blobs().mkdir(mode=0o700, exist_ok=True)
+    _blobs().chmod(0o700)
+    descriptor = os.open(ALMACEN / ".cerrojo", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def max_bytes() -> int:
+    raw = os.environ.get("VIGIA_ALMACEN_MAX_BYTES", "").strip()
+    if not raw:
+        return ALMACEN_MAX_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit("VIGIA_ALMACEN_MAX_BYTES debe ser un número de bytes") from None
+    if value < 0:
+        raise SystemExit("VIGIA_ALMACEN_MAX_BYTES no puede ser negativo")
+    return value
+
+
+def load_index() -> dict[str, Any]:
+    path = _index_path()
+    if not path.exists():
+        return {"version": INDEX_VERSION, "objetos": {}, "rechazados": {}, "omitidos_por_tope": 0}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("version") != INDEX_VERSION:
+        raise SystemExit("el índice del almacén tiene un formato que no conozco")
+    return document  # type: ignore[no-any-return]
+
+
+def full_object_sha256(response: dict[str, Any]) -> str | None:
+    """La SHA-256 de objeto entero (hex) que declara el almacén, o ``None`` si no la tiene.
+
+    Como ``ObjectHead.full_object_sha256_hex`` de la plataforma: una suma compuesta (subida por
+    partes) no es la de los bytes.
+    """
+    if str(response.get("ChecksumType") or "FULL_OBJECT") != "FULL_OBJECT":
+        return None
+    try:
+        digest = base64.b64decode(str(response.get("ChecksumSHA256") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return digest.hex() if len(digest) == 32 else None
+
+
+def _object_exists(s3: Any, bucket: str, key: str) -> bool:
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+    except ClientError as error:
+        if _error_code(error) not in _MISSING:
+            raise
+        return False
     return True
+
+
+def _read_blob(entry: dict[str, Any]) -> bytes | None:
+    """Los bytes del blob de ``entry`` si su SHA-256 y su tamaño son los del índice."""
+    digest = str(entry.get("sha256", ""))
+    if not _SHA256_HEX.fullmatch(digest):
+        return None
+    try:
+        data = (_blobs() / digest).read_bytes()
+    except FileNotFoundError:
+        return None
+    if hashlib.sha256(data).hexdigest() != digest or len(data) != entry.get("size"):
+        return None
+    return data
+
+
+def restore_evidence(s3: Any, bucket: str) -> dict[str, int]:
+    """Sube cada clave del índice que falte en LocalStack; recuentos, nunca claves."""
+    counts = {"restaurados": 0, "presentes": 0, "objeto_corrupto": 0}
+    with _almacen_lock():
+        for key, entry in sorted(load_index()["objetos"].items()):
+            if _object_exists(s3, bucket, key):
+                counts["presentes"] += 1
+                continue
+            data = _read_blob(entry)
+            if data is None:
+                counts["objeto_corrupto"] += 1
+                continue
+            s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=data,
+                ContentType=entry["content_type"],
+                Metadata=dict(entry["metadata"]),
+                ChecksumSHA256=base64.b64encode(bytes.fromhex(entry["sha256"])).decode("ascii"),
+            )
+            counts["restaurados"] += 1
+    return counts
+
+
+def _listing(s3: Any, bucket: str) -> dict[str, list[Any]]:
+    """Clave → ``[ETag, tamaño]`` de las versiones vigentes, sin el centinela de salud."""
+    found: dict[str, list[Any]] = {}
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket):
+        for item in page.get("Contents", []):
+            if item["Key"] == SENTINEL_KEY:
+                continue
+            found[item["Key"]] = [str(item.get("ETag", "")), int(item["Size"])]
+    return found
+
+
+def _download(s3: Any, bucket: str, key: str) -> tuple[bytes | None, dict[str, Any]] | None:
+    """La versión vigente y su respuesta (``None`` si se borró entre el listado y la descarga).
+
+    ``botocore`` ya valida la suma al leer con ``ChecksumMode=ENABLED``: si falla, los bytes son
+    ``None`` (suma distinta) y no se guardan.
+    """
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key, ChecksumMode="ENABLED")
+    except ClientError as error:
+        if _error_code(error) not in _MISSING:
+            raise
+        return None
+    try:
+        body = response["Body"].read()
+    except FlexibleChecksumError:
+        return None, response
+    return body, response
+
+
+def _store_blob(digest: str, data: bytes) -> int:
+    """Guarda ``data`` como ``objetos/<digest>``; devuelve los bytes que ocupa de más."""
+    target = _blobs() / digest
+    with contextlib.suppress(FileNotFoundError):
+        if hashlib.sha256(target.read_bytes()).hexdigest() == digest:
+            return 0
+    _publish(target, data)
+    return len(data)
+
+
+def _stored_bytes() -> int:
+    return sum(
+        path.stat().st_size for path in _blobs().iterdir() if _SHA256_HEX.fullmatch(path.name)
+    )
+
+
+def mirror_evidence(s3: Any, bucket: str, *, restored: bool, limit: int) -> dict[str, int]:
+    """Copia incremental de ``bucket`` en ``/almacen``; recuentos, nunca claves.
+
+    Solo descarga las claves nuevas o con otro ``ETag`` o tamaño. El índice solo nombra blobs ya
+    publicados y verificados, así que, suba lo que suba la plataforma a la vez, o no tiene la clave
+    o la tiene con un blob cuya suma coincide. Las bajas, solo con ``restored``.
+    """
+    counts = dict.fromkeys(
+        ("nuevos", "sin_cambios", "bajas", "suma_distinta", "sin_suma", "omitidos_por_tope"), 0
+    )
+    with _almacen_lock():
+        document = load_index()
+        objects: dict[str, dict[str, Any]] = dict(document["objetos"])
+        previously_rejected: dict[str, list[Any]] = document.get("rechazados", {})
+        rejected: dict[str, list[Any]] = {}
+        listed = _listing(s3, bucket)
+        used = _stored_bytes()
+        for key, seen in sorted(listed.items()):
+            entry = objects.get(key)
+            if entry is not None and [entry["etag"], entry["size"]] == seen:
+                counts["sin_cambios"] += 1
+                continue
+            if previously_rejected.get(key) == seen:
+                rejected[key] = seen
+                continue
+            if used + seen[1] > limit:
+                counts["omitidos_por_tope"] += 1
+                continue
+            found = _download(s3, bucket, key)
+            if found is None:
+                continue
+            data, response = found
+            expected = full_object_sha256(response)
+            if expected is None:
+                counts["sin_suma"] += 1
+                rejected[key] = seen
+                continue
+            if (
+                data is None
+                or hashlib.sha256(data).hexdigest() != expected
+                or len(data) != response.get("ContentLength")
+            ):
+                counts["suma_distinta"] += 1
+                rejected[key] = seen
+                continue
+            digest = expected
+            used += _store_blob(digest, data)
+            objects[key] = {
+                "sha256": digest,
+                "size": len(data),
+                "content_type": str(response.get("ContentType") or "application/octet-stream"),
+                "metadata": {str(k): str(v) for k, v in (response.get("Metadata") or {}).items()},
+                "etag": str(response.get("ETag", "")),
+            }
+            counts["nuevos"] += 1
+        if restored:
+            for key in sorted(set(objects) - set(listed)):
+                del objects[key]
+                counts["bajas"] += 1
+        full = counts["omitidos_por_tope"]
+        index = {
+            "version": INDEX_VERSION,
+            "objetos": objects,
+            "rechazados": rejected,
+            "omitidos_por_tope": full,
+        }
+        # Primero el índice y después los huérfanos (los que ninguna clave nombra, también una
+        # versión sustituida o un temporal de un ``save`` que murió): nunca un índice que nombra un
+        # blob borrado. Sin ``restored`` ninguna clave sale del índice, y sus blobs siguen.
+        write_atomically(_index_path(), json.dumps(index, sort_keys=True))
+        referenced = {entry["sha256"] for entry in objects.values()}
+        for path in _blobs().iterdir():
+            if path.name not in referenced:
+                path.unlink()
+    if full and full != document.get("omitidos_por_tope", 0):
+        _event(
+            "almacen_lleno",
+            {"omitidos": full, "guardados": len(objects), "bytes": used, "tope": limit},
+        )
+    if counts["suma_distinta"]:
+        _event("objeto_no_guardado", {"suma_distinta": counts["suma_distinta"]})
+    return counts
 
 
 def save() -> int:
     if not MARKER.exists():
         print("save: sin restore terminado; no se escribe nada", file=sys.stderr)
         return 3
-    snapshot = collect(_client("secretsmanager"), _client("s3"), _setting("VIGIA_EDGE_BUCKET"))
+    s3 = _client("s3")
+    snapshot = collect(_client("secretsmanager"), s3, _setting("VIGIA_EDGE_BUCKET"))
     changed = write_atomically(SNAPSHOT, json.dumps(snapshot, sort_keys=True))
     print(
         f"save: {len(snapshot['secrets'])} secretos y {len(snapshot['objects'])} objetos"
         f" ({'escrita' if changed else 'sin cambios'})"
     )
+    almacen = mirror_evidence(
+        s3,
+        _setting("VIGIA_EVIDENCE_BUCKET"),
+        restored=EVIDENCE_MARKER.exists(),
+        limit=max_bytes(),
+    )
+    print(f"save almacen: {_counts(almacen)}")
     return 0
 
 
