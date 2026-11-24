@@ -7,6 +7,9 @@
  * - `POST /loop/attachments/{attachment_id}/read-url`: adjunto de cierre, vigente 15 minutos;
  *   se abre por navegación en pestaña nueva, nunca incrustado (nota U05-H-12).
  *
+ * - `readClosureAttachmentObject`: los bytes de una foto adjunta desde su URL firmada, con un
+ *   `GET` sin credenciales ni referente (TASK-609): la URL es la única autorización.
+ *
  * Ambas cuentan en el circuito `evidence_store` (PAT-APP-RES-01): un `storage_unavailable` degrada
  * el medio y nunca la plataforma.
  */
@@ -48,4 +51,18 @@ export async function readClosureAttachmentUrl(attachmentId: string): Promise<Re
       dependency: 'evidence_store',
     }),
   );
+}
+
+/** Los bytes de un adjunto de cierre desde su URL firmada (TASK-609), sin credenciales. */
+export async function readClosureAttachmentObject(url: string, signal: AbortSignal): Promise<Blob> {
+  const response = await globalThis.fetch(url, {
+    method: 'GET',
+    credentials: 'omit',
+    cache: 'no-store',
+    referrerPolicy: 'no-referrer',
+    redirect: 'error',
+    signal,
+  });
+  if (!response.ok) throw new TypeError('ports.upload: el almacén no entregó el adjunto.');
+  return response.blob();
 }

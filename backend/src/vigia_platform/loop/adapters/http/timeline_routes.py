@@ -42,7 +42,7 @@ from vigia_platform.loop.application.timeline import (
     MilestoneKind,
 )
 from vigia_platform.loop.detail_codes import HTTP_STATUS_BY_DETAIL_CODE, LoopDetailCode
-from vigia_platform.loop.domain.enums import AttachmentContentType, FindingLifecycleState
+from vigia_platform.loop.domain.enums import FindingLifecycleState
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError
 from vigia_platform.shared.api.middleware import request_context
@@ -106,7 +106,9 @@ class TimelineAttachmentOut(_Strict):
     """La referencia de un adjunto del cierre: lo justo para pintarlo o descargarlo a demanda."""
 
     attachment_id: uuid.UUID
-    content_type: AttachmentContentType
+    content_type: str
+    """El MIME del registro (``image/jpeg``, ``image/png`` o ``application/pdf``): de transporte,
+    sin etiqueta (A-42)."""
     size_bytes: int
 
 
@@ -218,7 +220,7 @@ def _milestone(milestone: Milestone) -> TimelineMilestoneOut:
         attachments=tuple(
             TimelineAttachmentOut(
                 attachment_id=attachment.attachment_id,
-                content_type=AttachmentContentType(attachment.content_type),
+                content_type=attachment.content_type,
                 size_bytes=attachment.size_bytes,
             )
             for attachment in milestone.attachments

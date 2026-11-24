@@ -21,7 +21,11 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { isPortError } from '@/ports/shared';
-import { readClosureAttachmentUrl, type ReadUrl } from '@/ports/upload';
+import {
+  readClosureAttachmentObject,
+  readClosureAttachmentUrl,
+  type ReadUrl,
+} from '@/ports/upload';
 import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
 
@@ -42,7 +46,7 @@ export interface AttachmentPreviewProps {
   readonly clock: Clock;
   /** Puerto de la URL; por omisión `readClosureAttachmentUrl` de `ports.upload`. */
   readonly requestUrl?: (attachmentId: string) => Promise<ReadUrl>;
-  /** Descarga de los bytes desde la URL firmada; por omisión, `fetch` sin credenciales. */
+  /** Bytes desde la URL firmada; por omisión `readClosureAttachmentObject` (sin credenciales). */
   readonly fetchObject?: (url: string, signal: AbortSignal) => Promise<Blob>;
   /** Decodificador; por omisión, `createImageBitmap` del navegador. */
   readonly decodeImage?: (blob: Blob) => Promise<ImageBitmap>;
@@ -63,19 +67,6 @@ function grantedUrl(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-async function fetchWithBrowser(url: string, signal: AbortSignal): Promise<Blob> {
-  const response = await globalThis.fetch(url, {
-    method: 'GET',
-    credentials: 'omit',
-    cache: 'no-store',
-    referrerPolicy: 'no-referrer',
-    redirect: 'error',
-    signal,
-  });
-  if (!response.ok) throw new TypeError('El almacén no entregó el adjunto.');
-  return response.blob();
 }
 
 function decodeWithBrowser(blob: Blob): Promise<ImageBitmap> {
@@ -108,7 +99,7 @@ export function AttachmentPreview({
   alt,
   clock,
   requestUrl = readClosureAttachmentUrl,
-  fetchObject = fetchWithBrowser,
+  fetchObject = readClosureAttachmentObject,
   decodeImage = decodeWithBrowser,
 }: AttachmentPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

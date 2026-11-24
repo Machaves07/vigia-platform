@@ -6635,14 +6635,6 @@
         - "attempt_count"
         - "draft"
       "title": "AssistantRequestOut"
-    "AttachmentContentType":
-      "type": "string"
-      "enum":
-        - "image/jpeg"
-        - "image/png"
-        - "application/pdf"
-      "title": "AttachmentContentType"
-      "description": "``attachment_content_type``: el tipo MIME de un adjunto de evidencia de cierre (§6.3)."
     "AuditCursorOut":
       "properties":
         "occurred_at":
@@ -16917,7 +16909,8 @@
           "format": "uuid"
           "title": "Attachment Id"
         "content_type":
-          "$ref": "#/components/schemas/AttachmentContentType"
+          "type": "string"
+          "title": "Content Type"
         "size_bytes":
           "type": "integer"
           "title": "Size Bytes"

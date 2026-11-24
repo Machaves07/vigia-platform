@@ -3002,12 +3002,6 @@ export interface components {
       attempt_count: number;
       draft: components['schemas']['DraftOut'] | null;
     };
-    /**
-     * AttachmentContentType
-     * @description ``attachment_content_type``: el tipo MIME de un adjunto de evidencia de cierre (§6.3).
-     * @enum {string}
-     */
-    AttachmentContentType: 'image/jpeg' | 'image/png' | 'application/pdf';
     /** AuditCursorOut */
     AuditCursorOut: {
       /** Occurred At */
@@ -8704,7 +8698,8 @@ export interface components {
        * Format: uuid
        */
       attachment_id: string;
-      content_type: components['schemas']['AttachmentContentType'];
+      /** Content Type */
+      content_type: string;
       /** Size Bytes */
       size_bytes: number;
     };

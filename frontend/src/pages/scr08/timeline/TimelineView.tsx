@@ -61,7 +61,7 @@ interface PhotoContext {
 type Attachment = TimelineMilestone['attachments'][number];
 
 /** Los adjuntos que se pintan en un lienzo; los demás (PDF) se descargan. */
-const PHOTO_TYPES: ReadonlySet<Attachment['content_type']> = new Set(['image/jpeg', 'image/png']);
+const PHOTO_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png']);
 
 import styles from './timeline.module.css';
 
