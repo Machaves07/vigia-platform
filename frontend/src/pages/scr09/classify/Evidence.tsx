@@ -11,11 +11,15 @@
  * Arriba, la foto del hallazgo con el aspecto de SCR-06 (TASK-590, A-128): la foto `0` del registro
  * ancla (el primer tramo), pedida **al montar**, una vez por apertura: al clasificar, la foto es lo
  * que se decide. Las demás fotos del tramo (la ráfaga, fase 2) solo con el gesto.
+ *
+ * Tras las señales, los valores de proceso de cada tramo (TASK-596, A-129): velocidad, metros y
+ * estados de la máquina con su hora, del mismo detalle; sin bloque en ningún tramo, nada.
  */
 import type { ReactNode } from 'react';
 import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
 import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { hasProcessValues, ProcessValues } from '@/pages/shared/ProcessValues';
 import { SignalReadings } from '@/pages/shared/SignalReadings';
 import { classifyClock, type FindingDetail } from '@/ports/scr09Classify';
 import { text } from '@/texts';
@@ -73,6 +77,37 @@ function EpisodeSignals({
           </div>
         ))
       )}
+    </section>
+  );
+}
+
+/** «Valores del proceso durante el episodio»: los tramos con bloque, en orden de tramo. */
+function EpisodeProcessValues({
+  records,
+  timeZone,
+  aggregated,
+}: {
+  readonly records: readonly FindingRecord[];
+  readonly timeZone: string;
+  readonly aggregated: boolean;
+}) {
+  const ordered = [...records].sort(bySegment).filter((r) => hasProcessValues(r.process_context));
+  if (ordered.length === 0) return null;
+  const instant = (value: string) => <TimestampWithOffset instant={value} timeZone={timeZone} />;
+  return (
+    <section aria-label={text('process_values.title')} data-part="episode_process_values">
+      <h2>{text('process_values.title')}</h2>
+      {ordered.map((record) => (
+        <div key={record.record_id} data-part="process_record">
+          {ordered.length > 1 && <h3>{recordName(record)}</h3>}
+          <ProcessValues
+            context={record.process_context}
+            name={recordName(record)}
+            instant={instant}
+            aggregated={aggregated}
+          />
+        </div>
+      ))}
     </section>
   );
 }
@@ -150,6 +185,11 @@ export function FindingEvidence({
         )}
       </section>
       <EpisodeSignals
+        records={detail.records}
+        timeZone={timeZone}
+        aggregated={detail.time_aggregated}
+      />
+      <EpisodeProcessValues
         records={detail.records}
         timeZone={timeZone}
         aggregated={detail.time_aggregated}

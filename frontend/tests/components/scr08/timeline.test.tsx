@@ -22,6 +22,7 @@ import { formatDuration } from '@/texts/duration';
 import { label, labelInline } from '@/texts/labels';
 import { server } from '../../msw/server';
 import { FakeClock } from '../../support/fakeClock';
+import { processSummary, requestsSeen, SUMMARY_LINE } from '../../support/processContext';
 import { settle } from '../../support/queryCache';
 import { meResponse } from '../../support/session';
 import { apiError, fixture as detailFixture, ZONE, ZONE_NAME } from './detail_support';
@@ -84,6 +85,7 @@ function milestone(
     details: { ...NO_DETAILS, ...details },
     deadline: null,
     photos: [],
+    process: [],
     ...changes,
   };
 }
@@ -529,3 +531,44 @@ describe('SCR-08 ficha de vida del hallazgo (TASK-585)', { timeout: 60_000 }, ()
     );
   });
 });
+
+describe(
+  'SCR-08 ficha de vida: valores de proceso en la detección (TASK-596)',
+  { timeout: 60_000 },
+  () => {
+    function withSummary(): FindingTimeline {
+      const [received, ...rest] = cycle();
+      if (received === undefined) throw new Error('Sin hito de detección.');
+      return timeline({ milestones: [{ ...received, process: processSummary() }, ...rest] });
+    }
+
+    it('una línea de resumen en el hito de detección, sin horas; los demás hitos sin ella', async () => {
+      const env = await fixture();
+      env.responses.timeline = () => HttpResponse.json(withSummary());
+      const view = await opened(env);
+      const found = items();
+      expect(found.map((item) => part(item, 'process_summary')?.textContent ?? null)).toEqual([
+        SUMMARY_LINE,
+        ...found.slice(1).map(() => null),
+      ]);
+      expect(part(found[0] ?? view.container, 'process_summary')?.querySelector('time')).toBeNull();
+      expect(await axe(view.container)).toHaveNoViolations();
+    });
+
+    it('sin lectura nueva: con el resumen, las mismas peticiones que sin él', async () => {
+      const before = requestsSeen();
+      const plain = await opened(await fixture());
+      const baseline = before.sorted();
+      plain.unmount();
+      const after = requestsSeen();
+      const env = await fixture();
+      env.responses.timeline = () => HttpResponse.json(withSummary());
+      await opened(env);
+      expect(document.querySelector('[data-part="process_summary"]')).not.toBeNull();
+      expect(after.sorted()).toEqual(baseline);
+      // Y lo de siempre, nombrado: una lectura que se hiciera con o sin bloque también caería aquí.
+      expect(baseline).toEqual(['GET /hierarchy', `GET /loop/findings/${FINDING}/timeline`]);
+      expect(env.calls.timeline).toBe(1);
+    });
+  },
+);

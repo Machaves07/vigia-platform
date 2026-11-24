@@ -146,7 +146,15 @@ export function detail(): FindingDetail {
         received_at: INSTANT,
         occurred_at: INSTANT,
         signals: [
-          { signal_id: null, role: 'energy', value: 'asserted', valid: true, read_at: INSTANT },
+          {
+            signal_id: null,
+            role: 'energy',
+            value: 'asserted',
+            valid: true,
+            read_at: INSTANT,
+            code: null,
+            description_es: null,
+          },
         ],
         clips: [
           {
@@ -165,6 +173,7 @@ export function detail(): FindingDetail {
           },
         ],
         photos: [],
+        process_context: null,
       },
     ],
     classifications: [],

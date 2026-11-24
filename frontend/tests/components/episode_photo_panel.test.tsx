@@ -145,6 +145,7 @@ function milestone(
     details: NO_DETAILS,
     deadline: null,
     photos: [...photos],
+    process: [],
   };
 }
 
@@ -721,5 +722,41 @@ describe('ficha de vida (SCR-08)', { timeout: TEST_TIMEOUT }, () => {
     fireEvent.click(within(received).getByRole('button', { name: SHOW() }));
     await screen.findByRole('img', { name: ALT_PEAK() }, WAIT);
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  it('el mismo botón abre y repliega sin perder el foco ni volver a pedir la imagen', async () => {
+    const traffic = serve();
+    const view = openTimeline(cycle());
+    const received = first(view.container);
+    const toggle = within(received).getByRole('button', { name: SHOW() });
+    toggle.focus();
+    fireEvent.click(toggle);
+    await screen.findByRole('img', { name: ALT_PEAK() }, WAIT);
+    await settle();
+    // El botón sigue montado (el foco no se pierde) y ahora repliega.
+    expect(toggle.isConnected).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe(text('episode_photo_panel.finding.hide'));
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toBe(SHOW());
+    expect(received.querySelector('[data-part="photo_fold"]')?.hasAttribute('hidden')).toBe(true);
+    fireEvent.click(toggle);
+    await settle();
+    expect(received.querySelector('[data-part="photo_fold"]')?.hasAttribute('hidden')).toBe(false);
+    expect(traffic.image.map((entry) => entry.photo)).toEqual([photoId(0)]);
+  });
+});
+
+describe('«Ver foto» de un tramo sin ancla (SCR-08)', { timeout: TEST_TIMEOUT }, () => {
+  it('al pulsarlo, el foco pasa a la zona de la foto y no al documento', async () => {
+    serve();
+    const view = openDetail(findingDetail([[photo(0)], [photo(0, { photo_id: photoId(50) })]]));
+    await screen.findByRole('img', { name: ALT_PEAK() }, WAIT);
+    const later = blocks(view.container)[0] ?? fail();
+    fireEvent.click(within(later).getByRole('button', { name: SHOW() }));
+    await settle();
+    expect(document.activeElement).toBe(later.querySelector('[data-part="photo_media"]'));
   });
 });

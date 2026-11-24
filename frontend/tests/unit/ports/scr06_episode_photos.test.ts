@@ -70,6 +70,7 @@ function photo(id: string): EpisodePhoto {
     frame_at: null,
     image: null,
     image_absent_reason: 'pending_cap',
+    process_context: null,
   };
 }
 

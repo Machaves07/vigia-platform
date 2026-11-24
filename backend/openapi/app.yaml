@@ -9974,6 +9974,10 @@
             - "type": "string"
             - "type": "null"
           "title": "Image Absent Reason"
+        "process_context":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessContextOut"
+            - "type": "null"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -9994,6 +9998,7 @@
         - "frame_at"
         - "image"
         - "image_absent_reason"
+        - "process_context"
       "title": "EpisodePhotoOut"
       "description": "Un episodio de la sombra: sus metadatos y la imagen o el motivo de su ausencia."
     "EpisodePhotoStandardOut":
@@ -14348,6 +14353,47 @@
         - "action_type"
         - "outcome"
       "title": "PreviousActionOut"
+    "ProcessAtEventOut":
+      "properties":
+        "value":
+          "anyOf":
+            - "type": "number"
+            - "type": "string"
+            - "type": "null"
+          "title": "Value"
+        "valid":
+          "type": "boolean"
+          "title": "Valid"
+        "offset_ms":
+          "type": "integer"
+          "title": "Offset Ms"
+        "read_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "value"
+        - "valid"
+        - "offset_ms"
+        - "read_at"
+      "title": "ProcessAtEventOut"
+    "ProcessChangeOut":
+      "properties":
+        "offset_ms":
+          "type": "integer"
+          "title": "Offset Ms"
+        "value":
+          "type": "string"
+          "title": "Value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "offset_ms"
+        - "value"
+      "title": "ProcessChangeOut"
     "ProcessContextBody":
       "properties":
         "before_ms":
@@ -14392,6 +14438,43 @@
         - "variables"
       "title": "ProcessContextDeclaration"
       "description": "Variables de proceso de la zona y su ventana (A-129). Reglas que verifica el modelo: regla (7) del catálogo."
+    "ProcessContextOut":
+      "properties":
+        "from_offset_ms":
+          "type": "integer"
+          "title": "From Offset Ms"
+        "to_offset_ms":
+          "type": "integer"
+          "title": "To Offset Ms"
+        "variables":
+          "items":
+            "$ref": "#/components/schemas/ProcessVariableOut"
+          "type": "array"
+          "title": "Variables"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from_offset_ms"
+        - "to_offset_ms"
+        - "variables"
+      "title": "ProcessContextOut"
+      "description": "Los valores de proceso del tramo (A-129), de ``from_offset_ms`` a ``to_offset_ms``."
+    "ProcessSampleOut":
+      "properties":
+        "offset_ms":
+          "type": "integer"
+          "title": "Offset Ms"
+        "value":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "offset_ms"
+        - "value"
+      "title": "ProcessSampleOut"
     "ProcessScale":
       "properties":
         "at_4_ma":
@@ -14492,6 +14575,153 @@
         - "binary"
       "title": "ProcessVariableKind"
       "description": "Clase de una variable de proceso de la zona (`ZoneCatalog.process_context`, v1.6.0, adenda A-129): analógica 4-20 mA o de estado sobre una señal declarada."
+    "ProcessVariableOut":
+      "properties":
+        "variable_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Variable Id"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Code"
+        "description_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Description Es"
+        "unit":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Unit"
+        "decimals":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Decimals"
+        "states":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "States"
+        "at_event":
+          "$ref": "#/components/schemas/ProcessAtEventOut"
+        "min":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Min"
+        "max":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Max"
+        "last":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Last"
+        "samples":
+          "items":
+            "$ref": "#/components/schemas/ProcessSampleOut"
+          "type": "array"
+          "title": "Samples"
+        "changes":
+          "items":
+            "$ref": "#/components/schemas/ProcessChangeOut"
+          "type": "array"
+          "title": "Changes"
+        "truncated":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Truncated"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "variable_id"
+        - "kind"
+        - "code"
+        - "description_es"
+        - "unit"
+        - "decimals"
+        - "states"
+        - "at_event"
+        - "min"
+        - "max"
+        - "last"
+        - "samples"
+        - "changes"
+        - "truncated"
+      "title": "ProcessVariableOut"
+    "ProcessVariableSummaryOut":
+      "properties":
+        "variable_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Variable Id"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Code"
+        "description_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Description Es"
+        "unit":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Unit"
+        "decimals":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Decimals"
+        "states":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "States"
+        "value":
+          "anyOf":
+            - "type": "number"
+            - "type": "string"
+            - "type": "null"
+          "title": "Value"
+        "valid":
+          "type": "boolean"
+          "title": "Valid"
+        "read_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "variable_id"
+        - "kind"
+        - "code"
+        - "description_es"
+        - "unit"
+        - "decimals"
+        - "states"
+        - "value"
+        - "valid"
+        - "read_at"
+      "title": "ProcessVariableSummaryOut"
+      "description": "Una variable en el hito de detección de la ficha de vida: sin la serie."
     "ProfileBody":
       "properties":
         "display_name":
@@ -14859,6 +15089,10 @@
             "$ref": "#/components/schemas/FindingPhotoOut"
           "type": "array"
           "title": "Photos"
+        "process_context":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessContextOut"
+            - "type": "null"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -14872,6 +15106,7 @@
         - "signals"
         - "clips"
         - "photos"
+        - "process_context"
       "title": "RecordOut"
     "RecurrenceEntryOut":
       "properties":
@@ -16910,6 +17145,11 @@
             "$ref": "#/components/schemas/FindingPhotoOut"
           "type": "array"
           "title": "Photos"
+        "process":
+          "items":
+            "$ref": "#/components/schemas/ProcessVariableSummaryOut"
+          "type": "array"
+          "title": "Process"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -16923,6 +17163,7 @@
         - "details"
         - "deadline"
         - "photos"
+        - "process"
       "title": "TimelineMilestoneOut"
     "TimelineSummaryOut":
       "properties":
@@ -18366,6 +18607,16 @@
             - "type": "string"
             - "type": "null"
           "title": "Read At"
+        "code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Code"
+        "description_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Description Es"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -18374,6 +18625,8 @@
         - "value"
         - "valid"
         - "read_at"
+        - "code"
+        - "description_es"
       "title": "SignalOut"
     "vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut":
       "properties":

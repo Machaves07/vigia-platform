@@ -19,6 +19,13 @@ import { apiError } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { openApiValidators, readAppYaml } from '../../support/openapiAjv';
 import {
+  analogParts,
+  processContext,
+  READ_AT,
+  requestsSeen,
+  STATES_LINE,
+} from '../../support/processContext';
+import {
   classification,
   detail,
   FINDING,
@@ -240,14 +247,18 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     expect(screen.queryByRole('form', { name: text('scr09.classify.form') })).toBeNull();
     // BR-APP-24: los únicos controles son actualizar y abrir la reclasificación; ningún editar o
     // borrar. Los enlaces, la navegación del hallazgo e «Ir al lazo». El bloque de la foto del
-    // hallazgo (TASK-590) solo ofrece gestos de lectura: ver, navegar y volver a pedir la imagen.
+    // hallazgo (TASK-590) solo ofrece gestos de lectura: ver, navegar y volver a pedir la imagen;
+    // se nombran aquí uno a uno, así que un editar o borrar en el bloque también haría caer esto.
     const allowed = new Set([
       text('scr09.classify.open_reclassification'),
       text('components_status.refresh.button'),
+      text('episode_photo_panel.finding.show'),
+      text('episode_photo_panel.finding.hide'),
+      text('episode_photo_panel.finding.previous'),
+      text('episode_photo_panel.finding.next'),
+      text('media.episode_photo.request_again'),
     ]);
-    const photoBlock = container.querySelector('[data-part="finding_photo"]');
     for (const button of screen.getAllByRole('button')) {
-      if (photoBlock?.contains(button) === true) continue;
       expect(allowed.has(button.textContent)).toBe(true);
     }
     for (const link of screen.getAllByRole('link'))
@@ -469,6 +480,7 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
                   },
                 ],
                 photos: [],
+                process_context: null,
               },
             ],
           }),
@@ -561,6 +573,7 @@ describe(
         signals,
         clips: [],
         photos: [],
+        process_context: null,
       };
     }
 
@@ -583,6 +596,8 @@ describe(
                     value: 'asserted',
                     valid: true,
                     read_at: null,
+                    code: null,
+                    description_es: null,
                   },
                 ]),
                 signalRecord(0, [
@@ -592,6 +607,8 @@ describe(
                     value: 'asserted',
                     valid: true,
                     read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:07.000Z',
+                    code: null,
+                    description_es: null,
                   },
                   {
                     signal_id: null,
@@ -599,6 +616,8 @@ describe(
                     value: 'deasserted',
                     valid: false,
                     read_at: aggregated ? '2026-01-01T12:00:00.000Z' : '2026-01-01T12:00:09.250Z',
+                    code: null,
+                    description_es: null,
                   },
                 ]),
               ],
@@ -720,7 +739,15 @@ describe(
       const { section } = await open(false, [
         signalRecord(null, []),
         signalRecord(0, [
-          { signal_id: null, role: 'energy', value: 'asserted', valid: true, read_at: INSTANT },
+          {
+            signal_id: null,
+            role: 'energy',
+            value: 'asserted',
+            valid: true,
+            read_at: INSTANT,
+            code: null,
+            description_es: null,
+          },
         ]),
       ]);
       const record = text('scr08.detail.record');
@@ -737,6 +764,115 @@ describe(
         text('signal_readings.none'),
       ]);
       expect(part(section, 'no_records')).toBeNull();
+    });
+
+    // --- TASK-596: valores de proceso del episodio --------------------------------------------
+
+    /** Un tramo con señales y con el bloque de valores de proceso (o sin él). */
+    function processRecord(
+      context: FindingDetail['records'][number]['process_context'] = processContext(),
+    ): FindingDetail['records'][number] {
+      return {
+        ...signalRecord(0, [
+          {
+            signal_id: null,
+            role: 'energy',
+            value: 'asserted',
+            valid: true,
+            read_at: INSTANT,
+            code: 'JUMBO-POS',
+            description_es: 'Jumbo en posición',
+          },
+        ]),
+        process_context: context,
+      };
+    }
+
+    function processSection(): HTMLElement {
+      return screen.getByRole('region', { name: text('process_values.title') });
+    }
+
+    it('valores del proceso: línea analógica con la hora del servidor y estados, tras las señales y antes de las tres salidas', async () => {
+      const { section, container } = await open(false, [processRecord()]);
+      const values = processSection();
+      expect(within(values).getByRole('heading', { level: 2 }).textContent).toBe(
+        text('process_values.title'),
+      );
+      // Un solo tramo: sin subtítulo de tramo, que sería ruido.
+      expect(values.querySelectorAll('h3')).toHaveLength(0);
+      expect(analogParts(values)).toEqual([
+        {
+          name: 'Velocidad de la máquina',
+          value: '1.350',
+          unit: 'm/min',
+          at: READ_AT,
+          aggregated: null,
+          min: '1.340',
+          max: '1.360',
+          noData: null,
+        },
+        {
+          name: 'Metros del jumbo',
+          value: null,
+          unit: null,
+          at: null,
+          aggregated: null,
+          min: null,
+          max: null,
+          noData: text('process_values.no_data'),
+        },
+      ]);
+      // La hora es `read_at` tal cual, en la zona de la planta; no el inicio del tramo más nada.
+      expect(READ_AT).not.toBe(INSTANT);
+      expect(values.querySelector('[data-part="process_at"] [data-part="zone"]')?.textContent).toBe(
+        '(America/Bogota, UTC-05:00)',
+      );
+      expect(values.querySelector('[data-part="process_states"]')?.textContent).toBe(STATES_LINE);
+      // La señal se lee por su nombre del catálogo; el rol queda como texto secundario.
+      const signal = section.querySelector('[data-part="signal"]');
+      expect(part(signal ?? section, 'signal_name')).toBe('Jumbo en posición');
+      expect(part(signal ?? section, 'signal_role')).toBe(label('signal_role', 'energy'));
+      const form = screen.getByRole('form', { name: text('scr09.classify.form') });
+      expect(
+        section.compareDocumentPosition(values) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(values.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it('zona unipersonal: la hora de los valores es la agregada del servidor, marcada', async () => {
+      const aggregatedAt = '2026-01-01T12:00:00.000Z';
+      await open(true, [processRecord(processContext(aggregatedAt))]);
+      const [speed] = analogParts(processSection());
+      expect(speed?.at).toBe(aggregatedAt);
+      expect(speed?.aggregated).toBe(text('process_values.aggregated'));
+    });
+
+    it('sin bloque de valores de proceso no hay sección', async () => {
+      await open(false, [processRecord(null)]);
+      expect(screen.queryByRole('region', { name: text('process_values.title') })).toBeNull();
+      expect(document.querySelector('[data-part="process_values"]')).toBeNull();
+    });
+
+    it('sin lectura nueva: con valores de proceso, las mismas peticiones que sin ellos', async () => {
+      const before = requestsSeen();
+      const plain = await open(false, [processRecord(null)]);
+      const baseline = before.sorted();
+      plain.unmount();
+      const after = requestsSeen();
+      const withValues = await open(false, [processRecord()]);
+      expect(processSection()).toBeDefined();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
+      expect(after.sorted()).toEqual(baseline);
+      // Y lo de siempre, nombrado: una lectura que se hiciera con o sin bloque también caería aquí.
+      expect(baseline).toEqual([
+        'GET /hierarchy',
+        `GET /loop/findings/${FINDING}`,
+        `GET /loop/findings/${FINDING}/classifications`,
+      ]);
+      expect(withValues.reads).toEqual({ detail: 1, history: 1 });
     });
   },
 );

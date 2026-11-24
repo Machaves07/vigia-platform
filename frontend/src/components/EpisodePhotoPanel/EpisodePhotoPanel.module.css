@@ -17,6 +17,12 @@
   }
 }
 
+/* Debajo de la foto y los datos, a todo el ancho (los valores de proceso de SCR-06, TASK-596). */
+.below {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .panel {
   display: flex;
   flex-direction: column;

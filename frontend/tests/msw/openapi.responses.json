@@ -8195,6 +8195,16 @@
               "type": "null"
             }
           ]
+        },
+        "process_context": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessContextOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -8216,7 +8226,8 @@
         "camera_id",
         "frame_at",
         "image",
-        "image_absent_reason"
+        "image_absent_reason",
+        "process_context"
       ]
     },
     "EpisodePhotoStandardOut": {
@@ -13620,6 +13631,63 @@
         "outcome"
       ]
     },
+    "ProcessAtEventOut": {
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "offset_ms": {
+          "type": "integer"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value",
+        "valid",
+        "offset_ms",
+        "read_at"
+      ]
+    },
+    "ProcessChangeOut": {
+      "properties": {
+        "offset_ms": {
+          "type": "integer"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "offset_ms",
+        "value"
+      ]
+    },
     "ProcessContextBody": {
       "properties": {
         "before_ms": {
@@ -13667,6 +13735,52 @@
       "required": [
         "before_ms",
         "variables"
+      ]
+    },
+    "ProcessContextOut": {
+      "properties": {
+        "from_offset_ms": {
+          "type": "integer"
+        },
+        "to_offset_ms": {
+          "type": "integer"
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessVariableOut"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "from_offset_ms",
+        "to_offset_ms",
+        "variables"
+      ]
+    },
+    "ProcessSampleOut": {
+      "properties": {
+        "offset_ms": {
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "offset_ms",
+        "value"
       ]
     },
     "ProcessScale": {
@@ -13807,6 +13921,241 @@
       "enum": [
         "analog",
         "binary"
+      ]
+    },
+    "ProcessVariableOut": {
+      "properties": {
+        "variable_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_es": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decimals": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "states": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at_event": {
+          "$ref": "#/components/schemas/ProcessAtEventOut"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessSampleOut"
+          },
+          "type": "array"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessChangeOut"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "variable_id",
+        "kind",
+        "code",
+        "description_es",
+        "unit",
+        "decimals",
+        "states",
+        "at_event",
+        "min",
+        "max",
+        "last",
+        "samples",
+        "changes",
+        "truncated"
+      ]
+    },
+    "ProcessVariableSummaryOut": {
+      "properties": {
+        "variable_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_es": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decimals": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "states": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "variable_id",
+        "kind",
+        "code",
+        "description_es",
+        "unit",
+        "decimals",
+        "states",
+        "value",
+        "valid",
+        "read_at"
       ]
     },
     "ProfileBody": {
@@ -14280,6 +14629,16 @@
             "$ref": "#/components/schemas/FindingPhotoOut"
           },
           "type": "array"
+        },
+        "process_context": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessContextOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -14294,7 +14653,8 @@
         "occurred_at",
         "signals",
         "clips",
-        "photos"
+        "photos",
+        "process_context"
       ]
     },
     "RecurrenceEntryOut": {
@@ -16982,6 +17342,12 @@
             "$ref": "#/components/schemas/FindingPhotoOut"
           },
           "type": "array"
+        },
+        "process": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessVariableSummaryOut"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -16996,7 +17362,8 @@
         "actor",
         "details",
         "deadline",
-        "photos"
+        "photos",
+        "process"
       ]
     },
     "TimelineSummaryOut": {
@@ -18872,6 +19239,26 @@
               "type": "null"
             }
           ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_es": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -18881,7 +19268,9 @@
         "role",
         "value",
         "valid",
-        "read_at"
+        "read_at",
+        "code",
+        "description_es"
       ]
     },
     "vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut": {

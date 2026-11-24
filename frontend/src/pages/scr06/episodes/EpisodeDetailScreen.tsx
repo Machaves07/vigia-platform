@@ -12,6 +12,8 @@
  *   de avisos (UI-19); volver a buscar o a pedir la imagen es siempre un gesto de la persona.
  * - La foto y sus datos van en el panel compartido `EpisodePhotoPanel` (TASK-590), en modo
  *   `commissioning`: las mismas filas, textos y orden que antes de extraerlo.
+ * - Bajo la foto, los valores de proceso del episodio (TASK-596, A-129 Q6), del mismo listado:
+ *   sin bloque, nada. Las horas, tal como las da el servidor.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
@@ -20,6 +22,7 @@ import { BlurredEpisodePhoto } from '@/components/BlurredEpisodePhoto/BlurredEpi
 import { EpisodePhotoPanel } from '@/components/EpisodePhotoPanel/EpisodePhotoPanel';
 import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import { useScreenNotices } from '@/pages/scr06/common/useScreenNotices';
+import { hasProcessValues, ProcessValues } from '@/pages/shared/ProcessValues';
 import { NotAvailableInScope, ScreenState } from '@/pages/shared/ScreenState';
 import { isPortError } from '@/ports/shared';
 import { findEpisodePhoto, type EpisodePhoto } from '@/ports/scr06EpisodePhotos';
@@ -131,6 +134,19 @@ export function EpisodeDetailScreen({
               notice="commissioning"
               onImageError={onImageError}
             />
+          }
+          below={
+            hasProcessValues(lookup.photo.process_context) ? (
+              <section aria-label={text('process_values.title')} data-part="episode_process_values">
+                <h2>{text('process_values.title')}</h2>
+                <ProcessValues
+                  context={lookup.photo.process_context}
+                  name={text('process_values.title')}
+                  instant={serverInstant}
+                  aggregated={false}
+                />
+              </section>
+            ) : null
           }
         />
       )}

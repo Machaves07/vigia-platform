@@ -1,0 +1,40 @@
+/*
+ * Valores de proceso del episodio (TASK-596): una línea por variable analógica y una sola línea
+ * para los estados. En móvil la línea se parte sin desbordar el ancho; la mini serie va al final.
+ */
+
+.values {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.secondary {
+  color: var(--color-text-muted);
+}
+
+.sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-inline-start: var(--space-2);
+  color: var(--color-text-muted);
+}

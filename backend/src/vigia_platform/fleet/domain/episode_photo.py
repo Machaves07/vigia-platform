@@ -84,6 +84,7 @@ __all__ = [
     "ImageViolation",
     "PhotoRole",
     "ZoneMode",
+    "accepted_version",
     "catalog_violation",
     "check_finding_retention_days",
     "check_retention_days",
@@ -278,20 +279,7 @@ def catalog_violation(
     valores de proceso de la **más nueva** de esas si ninguna concuerda con ellos (como el paso 7
     de los hallazgos).
     """
-    standard = document["standard"]
-    standard_id, version = _uuid(standard["standard_id"]), standard["version"]
-    citing = sorted(
-        (
-            item
-            for item in versions
-            if item.in_force_during(window)
-            and standard_id is not None
-            and type(version) is int
-            and item.cites(standard_id, version)
-        ),
-        key=lambda item: item.version,
-        reverse=True,
-    )
+    citing = _citing(versions, document, window)
     if not citing:
         return "standard"
     camera = document.get("camera_id")
@@ -303,6 +291,44 @@ def catalog_violation(
     if None in fields:
         return None
     return fields[0]
+
+
+def accepted_version(
+    versions: Sequence[CatalogVersionView], document: Mapping[str, Any], window: Window
+) -> CatalogVersionView | None:
+    """La versión del paso 7 con la que se aceptó la foto (la misma búsqueda que
+    ``catalog_violation``): la **más nueva** vigente en ``window`` que cita su estándar, declara
+    su cámara y concuerda con sus valores de proceso; ``None`` si ninguna (TASK-595)."""
+    camera = document.get("camera_id")
+    return next(
+        (
+            item
+            for item in _citing(versions, document, window)
+            if (camera is None or _uuid(camera) in item.cameras)
+            and process_context_violation(item, document) is None
+        ),
+        None,
+    )
+
+
+def _citing(
+    versions: Sequence[CatalogVersionView], document: Mapping[str, Any], window: Window
+) -> list[CatalogVersionView]:
+    """Las versiones vigentes en ``window`` que citan el estándar, la más nueva primero."""
+    standard = document["standard"]
+    standard_id, version = _uuid(standard["standard_id"]), standard["version"]
+    return sorted(
+        (
+            item
+            for item in versions
+            if item.in_force_during(window)
+            and standard_id is not None
+            and type(version) is int
+            and item.cites(standard_id, version)
+        ),
+        key=lambda item: item.version,
+        reverse=True,
+    )
 
 
 # --- Paso 9: la fila ----------------------------------------------------------------------------

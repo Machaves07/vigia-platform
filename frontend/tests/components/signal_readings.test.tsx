@@ -21,6 +21,8 @@ const SIGNALS: SignalReading[] = [
     value: 'asserted',
     valid: true,
     read_at: '2026-01-01T12:00:07.000Z',
+    code: null,
+    description_es: null,
   },
   {
     signal_id: null,
@@ -28,8 +30,18 @@ const SIGNALS: SignalReading[] = [
     value: 'deasserted',
     valid: false,
     read_at: '2026-01-01T12:00:09.250Z',
+    code: null,
+    description_es: null,
   },
-  { signal_id: null, role: 'start_command', value: 'asserted', valid: true, read_at: null },
+  {
+    signal_id: null,
+    role: 'start_command',
+    value: 'asserted',
+    valid: true,
+    read_at: null,
+    code: null,
+    description_es: null,
+  },
 ];
 
 function part(root: Element, name: string): Element | null {
@@ -115,5 +127,32 @@ describe('SignalReadings (TASK-587)', () => {
     );
     expect(container.querySelector('ul')).toBeNull();
     expect(part(container, 'no_signals')?.textContent).toBe(text('signal_readings.none'));
+  });
+  it('con description_es se lee por su nombre y el rol queda como texto secundario; sin él, por el rol (TASK-596)', () => {
+    const named = {
+      ...SIGNALS[0],
+      description_es: 'Jumbo en posición',
+      code: 'JUMBO-POS',
+    } as SignalReading;
+    const { container } = render(
+      <SignalReadings
+        signals={[named, ...SIGNALS.slice(1, 2)]}
+        name="Tramo sintético"
+        timeZone="America/Bogota"
+        aggregated={false}
+      />,
+    );
+    const [first, second] = items(container);
+    if (first === undefined || second === undefined) throw new Error('Faltan señales.');
+    expect(part(first, 'signal_name')?.textContent).toBe('Jumbo en posición');
+    expect(part(first, 'signal_role')?.textContent).toBe(label('signal_role', 'energy'));
+    expect(part(first, 'signal_value')?.textContent).toBe(label('signal_value', 'asserted'));
+    // El nombre va primero; el rol, entre paréntesis detrás.
+    expect(
+      (part(first, 'signal_name')?.compareDocumentPosition(part(first, 'signal_role') ?? first) ??
+        0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(part(second, 'signal_name')).toBeNull();
+    expect(part(second, 'signal_role')?.textContent).toBe(label('signal_role', 'guard'));
   });
 });

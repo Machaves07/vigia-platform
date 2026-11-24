@@ -24,10 +24,12 @@ El detalle y el historial (SUP-U05-02 y 04; LC-LAZ-06; ``loop.application.detail
 - ``GET /loop/findings/{finding_state_id}``: el hallazgo con su cita del estándar (texto y
   ``sha256``, o la sección degradada ``standard_text_unavailable``), la compuerta de uso del
   instante, la cobertura del instante, los nodos, el episodio, los registros del expediente
-  leídos (auditados) con sus señales y clips, las clasificaciones, las acciones, los análisis y
-  sus avisos (``FindingDetailNotice``). Sin compuerta legible, **503 ``temporarily_unavailable``
-  con ``loop_gate_state_unavailable``** y ``Retry-After``: el cuerpo es solo el error, ningún
-  campo del hallazgo (fallo cerrado, BR-LAZ-12);
+  leídos (auditados) con sus señales (con su código y su descripción en la versión del catálogo
+  del registro), sus clips, sus fotos y sus valores de proceso (``process_context``, A-129), las
+  clasificaciones, las acciones, los análisis y sus avisos (``FindingDetailNotice``). Sin
+  compuerta legible, **503 ``temporarily_unavailable`` con ``loop_gate_state_unavailable``** y
+  ``Retry-After``: el cuerpo es solo el error, ningún campo del hallazgo (fallo cerrado,
+  BR-LAZ-12);
 - ``GET /loop/findings/{finding_state_id}/classifications``: todas las clasificaciones del sujeto
   en orden, con motivo, categoría, autor y fecha; si el sujeto es una detección ya resuelta, también
   su resolución de la cola (``review_resolutions``), aparte porque no es una clasificación.
@@ -50,6 +52,10 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from vigia_contracts.models.enumerations import EvidenceTier, PredicateFamily
 
+from vigia_platform.fleet.adapters.http.process_context import (
+    ProcessContextOut,
+    process_context_out,
+)
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import (
     cursor_stamp,
@@ -326,6 +332,11 @@ class SignalOut(_Strict):
     value: str
     valid: bool
     read_at: str | None
+    code: str | None
+    """El código de la señal en la versión del catálogo con la que se aceptó el registro (nunca
+    la vigente hoy); ``null`` sin declaración."""
+    description_es: str | None
+    """Su descripción en esa versión («Jumbo en posición»); ``null`` sin declaración."""
 
 
 class ClipOut(_Strict):
@@ -389,6 +400,9 @@ class RecordOut(_Strict):
     photos: tuple[FindingPhotoOut, ...]
     """Las fotos de este registro y su tramo, por ``photo_index`` (A-128); en zona unipersonal,
     sus marcas agregadas como las del detalle."""
+    process_context: ProcessContextOut | None
+    """Los valores de proceso del tramo con el nombre de cada variable (A-129); ``null`` si el
+    registro no los trae."""
 
 
 class EpisodeOut(_Strict):
@@ -571,6 +585,8 @@ def _record_view(record: RecordView) -> RecordOut:
                 value=signal.value,
                 valid=signal.valid,
                 read_at=_stamp(signal.read_at),
+                code=signal.code,
+                description_es=signal.description_es,
             )
             for signal in record.signals
         ),
@@ -592,6 +608,7 @@ def _record_view(record: RecordView) -> RecordOut:
             for clip in record.clips
         ),
         photos=tuple(finding_photo_out(photo) for photo in record.photos),
+        process_context=process_context_out(record.process_context),
     )
 
 

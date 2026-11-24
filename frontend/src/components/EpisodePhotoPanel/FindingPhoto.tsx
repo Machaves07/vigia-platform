@@ -17,7 +17,7 @@
  *   a diferencia de SCR-06, no saca de la pantalla) y lo transitorio en la pila de UI-19, con
  *   «Volver a pedir la imagen» como gesto.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { BlurredEpisodePhoto } from '@/components/BlurredEpisodePhoto/BlurredEpisodePhoto';
 import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
@@ -174,6 +174,14 @@ export function FindingPhoto({
   const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
   const [notices, setNotices] = useState<readonly Notice[]>([]);
   const counter = useRef(0);
+  const mediaRef = useRef<HTMLDivElement>(null);
+  const focusMedia = useRef(false);
+
+  useEffect(() => {
+    if (!opened || !focusMedia.current) return;
+    focusMedia.current = false;
+    mediaRef.current?.focus();
+  }, [opened]);
 
   const requestImage = useCallback(
     (photoId: string, signal: AbortSignal) =>
@@ -207,24 +215,30 @@ export function FindingPhoto({
     );
   }
 
-  if (!unfolded) {
+  // Plegada (la ficha): el mismo botón abre y repliega, así que el foco no se pierde al pulsarlo.
+  // Replegada, el panel queda montado y oculto: volver a abrirla no pide la imagen otra vez.
+  const toggle = folded && (
+    <p>
+      <button
+        type="button"
+        className={styles.button}
+        data-part="show_photo"
+        aria-expanded={unfolded}
+        onClick={() => {
+          setUnfolded((previous) => !previous);
+          setOpened(true);
+        }}
+      >
+        {text(unfolded ? 'episode_photo_panel.finding.hide' : 'episode_photo_panel.finding.show')}
+      </button>
+    </p>
+  );
+
+  if (!unfolded && !opened) {
     return (
       <div className={styles.block} data-part="finding_photo">
         <Heading level={headingLevel}>{title}</Heading>
-        <p>
-          <button
-            type="button"
-            className={styles.button}
-            data-part="show_photo"
-            aria-expanded={false}
-            onClick={() => {
-              setUnfolded(true);
-              setOpened(true);
-            }}
-          >
-            {text('episode_photo_panel.finding.show')}
-          </button>
-        </p>
+        {toggle}
       </div>
     );
   }
@@ -254,6 +268,8 @@ export function FindingPhoto({
         className={styles.button}
         data-part="show_photo"
         onClick={() => {
+          // El botón desaparece con la foto: el foco pasa a la zona de la foto, no al documento.
+          focusMedia.current = true;
           setOpened(true);
         }}
       >
@@ -276,39 +292,50 @@ export function FindingPhoto({
     />
   );
 
+  const panel = (
+    <EpisodePhotoPanel
+      mode="finding"
+      photo={current}
+      segment={segment}
+      durationMs={current.episode_duration_ms}
+      instant={instant}
+      media={
+        <div className={styles.media} ref={mediaRef} tabIndex={-1} data-part="photo_media">
+          {sorted.length > 1 && (
+            <Navigation
+              photos={sorted}
+              index={Math.min(index, sorted.length - 1)}
+              timeZone={timeZone}
+              aggregated={aggregated}
+              onChange={setIndex}
+            />
+          )}
+          {slot}
+          {notices.length > 0 && (
+            <NoticeStack
+              notices={notices}
+              clock={clock}
+              onDismiss={(id) => {
+                setNotices((previous) => previous.filter((notice) => notice.id !== id));
+              }}
+            />
+          )}
+        </div>
+      }
+    />
+  );
+
   return (
     <div className={styles.block} data-part="finding_photo">
       <Heading level={headingLevel}>{title}</Heading>
-      <EpisodePhotoPanel
-        mode="finding"
-        photo={current}
-        segment={segment}
-        durationMs={current.episode_duration_ms}
-        instant={instant}
-        media={
-          <div className={styles.media}>
-            {sorted.length > 1 && (
-              <Navigation
-                photos={sorted}
-                index={Math.min(index, sorted.length - 1)}
-                timeZone={timeZone}
-                aggregated={aggregated}
-                onChange={setIndex}
-              />
-            )}
-            {slot}
-            {notices.length > 0 && (
-              <NoticeStack
-                notices={notices}
-                clock={clock}
-                onDismiss={(id) => {
-                  setNotices((previous) => previous.filter((notice) => notice.id !== id));
-                }}
-              />
-            )}
-          </div>
-        }
-      />
+      {toggle}
+      {folded ? (
+        <div hidden={!unfolded} data-part="photo_fold">
+          {panel}
+        </div>
+      ) : (
+        panel
+      )}
     </div>
   );
 }

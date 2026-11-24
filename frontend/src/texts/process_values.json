@@ -1,0 +1,14 @@
+{
+  "process_values.title": "Valores del proceso durante el episodio",
+  "process_values.short_title": "Valores del proceso",
+  "process_values.at": "a las",
+  "process_values.aggregated": "hora agregada",
+  "process_values.min": "mín",
+  "process_values.max": "máx",
+  "process_values.no_data": "sin dato",
+  "process_values.no_data_group": "Sin dato",
+  "process_values.change_at": "a",
+  "process_values.seconds": "s",
+  "process_values.more_changes": "y más cambios",
+  "process_values.undeclared": "Variable sin declaración"
+}
