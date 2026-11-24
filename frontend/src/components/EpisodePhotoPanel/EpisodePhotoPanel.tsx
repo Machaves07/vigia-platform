@@ -111,6 +111,8 @@ export interface EpisodePhotoPanelProps {
   readonly instant: InstantView;
   /** Lo que va a la izquierda: la foto (UI-26) o el aviso que la sustituye. */
   readonly media: ReactNode;
+  /** Lo que va debajo, a todo el ancho (los valores de proceso del episodio en SCR-06, TASK-596). */
+  readonly below?: ReactNode;
 }
 
 interface Row {
@@ -203,6 +205,11 @@ export function EpisodePhotoPanel(props: EpisodePhotoPanelProps) {
         // En el hallazgo hay un panel por tramo: un grupo, no una región repetida.
         <div className={styles.panel} role="group" aria-label={text('episode_photo_panel.facts')}>
           {facts}
+        </div>
+      )}
+      {props.below !== undefined && props.below !== null && (
+        <div className={styles.below} data-part="episode_photo_below">
+          {props.below}
         </div>
       )}
     </div>

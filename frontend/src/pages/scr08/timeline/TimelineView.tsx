@@ -13,10 +13,14 @@
  * «Hallazgo recibido» y cada tramo tardío llevan la foto del hallazgo con el aspecto de SCR-06
  * (TASK-590, A-128), plegada: la ficha es un repaso y no pide ninguna imagen al montar; cada foto
  * se pide solo con «Ver foto» (una entrada `finding_photo_read` por petición).
+ *
+ * El hito de detección resume en una línea los valores de proceso del instante del hecho
+ * (TASK-596, A-129; `process` del propio hito): sin serie, sin horas y sin lectura nueva.
  */
 import { useState, type ReactNode } from 'react';
 import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { ProcessSummary } from '@/pages/shared/ProcessValues';
 import { reasonList } from '@/ports/scr08Detail';
 import type {
   FindingTimeline,
@@ -293,6 +297,7 @@ function Milestone({
           </p>
         )}
         <MilestoneDetails milestone={milestone} timeZone={timeZone} />
+        <ProcessSummary variables={milestone.process} />
         {WITH_PHOTO.has(milestone.kind) && (
           <FindingPhoto
             findingStateId={photo.findingStateId}

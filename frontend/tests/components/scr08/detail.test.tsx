@@ -10,6 +10,13 @@ import { axe } from 'vitest-axe';
 import { text } from '@/texts';
 import { formatDuration } from '@/texts/duration';
 import { label } from '@/texts/labels';
+import {
+  analogParts,
+  processContext,
+  READ_AT,
+  requestsSeen,
+  STATES_LINE,
+} from '../../support/processContext';
 import { settle } from '../../support/queryCache';
 import {
   action,
@@ -22,6 +29,7 @@ import {
   STANDARD_TEXT,
   validFinding,
   WAIT,
+  ZONE,
   ZONE_NAME,
 } from './detail_support';
 
@@ -873,5 +881,109 @@ describe('SCR-08 detalle: lo que ya existe (TASK-584)', { timeout: 60_000 }, () 
       };
     });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SCR-08 detalle: valores de proceso del tramo (TASK-596)', { timeout: 60_000 }, () => {
+  async function openWith(change: (value: ReturnType<typeof detail>) => void) {
+    const env = await fixture();
+    const value = detail();
+    change(value);
+    env.responses.detail = () => HttpResponse.json(value);
+    const view = await opened(env);
+    return { env, view };
+  }
+
+  function withProcess(context = processContext()) {
+    return (value: ReturnType<typeof detail>) => {
+      const [first] = value.records;
+      if (first !== undefined) first.process_context = context;
+    };
+  }
+
+  it('cada tramo con bloque muestra sus valores tras las señales, con la hora del servidor', async () => {
+    const { view } = await openWith(withProcess());
+    const record = document.querySelector('[data-part="record"]');
+    if (record === null) throw new Error('Sin tramo.');
+    expect([...record.querySelectorAll('h4')].map((node) => node.textContent)).toContain(
+      text('process_values.title'),
+    );
+    expect(analogParts(record)).toEqual([
+      {
+        name: 'Velocidad de la máquina',
+        value: '1.350',
+        unit: 'm/min',
+        at: READ_AT,
+        aggregated: null,
+        min: '1.340',
+        max: '1.360',
+        noData: null,
+      },
+      {
+        name: 'Metros del jumbo',
+        value: null,
+        unit: null,
+        at: null,
+        aggregated: null,
+        min: null,
+        max: null,
+        noData: text('process_values.no_data'),
+      },
+    ]);
+    expect(record.querySelector('[data-part="process_states"]')?.textContent).toBe(STATES_LINE);
+    const signals = record.querySelector('[data-part="signal_readings"]');
+    const values = record.querySelector('[data-part="process_values"]');
+    expect(
+      (signals?.compareDocumentPosition(values ?? record) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  it('zona unipersonal: la hora de los valores es la agregada del servidor, marcada', async () => {
+    const aggregatedAt = '2026-01-01T12:00:00.000Z';
+    await openWith((value) => {
+      value.time_aggregated = true;
+      value.aggregation_window_minutes = 60;
+      withProcess(processContext(aggregatedAt))(value);
+    });
+    const [speed] = analogParts(document);
+    expect(speed?.at).toBe(aggregatedAt);
+    expect(speed?.aggregated).toBe(text('process_values.aggregated'));
+  });
+
+  it('sin bloque, ni título ni sección vacía', async () => {
+    await openWith(() => undefined);
+    const record = document.querySelector('[data-part="record"]');
+    expect(
+      [...(record?.querySelectorAll('h4') ?? [])].map((node) => node.textContent),
+    ).not.toContain(text('process_values.title'));
+    expect(document.querySelector('[data-part="process_values"]')).toBeNull();
+  });
+
+  it('sin lectura nueva: con valores de proceso, las mismas peticiones que sin ellos', async () => {
+    const before = requestsSeen();
+    const plain = await openWith(() => undefined);
+    await waitFor(() => {
+      expect(document.querySelector('[data-part="contract"]')).not.toBeNull();
+    }, WAIT);
+    const baseline = before.sorted();
+    plain.view.unmount();
+    const after = requestsSeen();
+    const withValues = await openWith(withProcess());
+    await waitFor(() => {
+      expect(document.querySelector('[data-part="contract"]')).not.toBeNull();
+    }, WAIT);
+    expect(document.querySelector('[data-part="process_values"]')).not.toBeNull();
+    expect(after.sorted()).toEqual(baseline);
+    // Y lo de siempre, nombrado: una lectura que se hiciera con o sin bloque también caería aquí.
+    const shown = detail();
+    expect(baseline).toEqual([
+      'GET /hierarchy',
+      `GET /ledger/records/${shown.records[0]?.record_id ?? ''}`,
+      `GET /loop/findings/${shown.finding_state_id}`,
+      `GET /loop/findings/${shown.finding_state_id}/classifications`,
+      `GET /zones/${ZONE}/coverage/at`,
+    ]);
+    expect([withValues.env.calls.detail, withValues.env.calls.record]).toEqual([1, 1]);
   });
 });
