@@ -115,7 +115,7 @@ export function processDraft(initial: Catalog): ProcessDraft {
 }
 
 /** Una variable nueva prellenada: el lector y el canal siguiente de la última analógica. */
-export function newVariable(
+function newVariable(
   draft: ProcessDraft,
   signals: readonly DeclaredSignal[],
   variableId: string,

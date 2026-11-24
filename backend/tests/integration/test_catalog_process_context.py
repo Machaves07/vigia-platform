@@ -4,7 +4,8 @@ La aplicación real (cadena fija de middleware, ``ContextAuthorizer``) con
 ``CatalogPublicationService`` y el ``RegressionService`` real como marcador, sobre la base migrada
 como ``vigia_app`` (``tests.catalog_routes_support``):
 
-- **Permiso y motivo**: sin ``catalog.manage`` se deniega; sin motivo o con menos de 10
+- **Permiso y motivo**: sin ``catalog.manage`` se deniega igual que una zona inexistente
+  (``not_found``; BR-NUC-09: nunca ``forbidden`` por la clave); sin motivo o con menos de 10
   caracteres, ``400``; con los dos, ``200`` y la versión ``n + 1`` firmada con
   ``process_context``. ``variables: []`` retira el bloque; cualquier otro cambio lo conserva.
 - **Reglas** (regla 7 del catálogo): una variable de estado sobre una señal no declarada, un
@@ -146,8 +147,11 @@ def test_without_catalog_manage_it_is_denied_and_writes_nothing(
     reader = routes.member(site, role, level)
 
     denied = _put(routes, zone, reader, {**POPE, "reason_es": REASON})
+    unknown = _put(routes, uuid.uuid4(), reader, {**POPE, "reason_es": REASON})
 
-    assert _code(denied) == (403, "forbidden", None)
+    # Sin la clave, igual que inexistente: ``not_found``, nunca ``forbidden`` (BR-NUC-09).
+    assert _code(denied) == (404, "not_found", None)
+    assert _code(unknown) == _code(denied)
     assert routes.written(zone) == before
 
 
