@@ -239,13 +239,17 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     // Registrada, la reclasificación se pliega (VIG-365): volver a reclasificar exige abrirla.
     expect(screen.queryByRole('form', { name: text('scr09.classify.form') })).toBeNull();
     // BR-APP-24: los únicos controles son actualizar y abrir la reclasificación; ningún editar o
-    // borrar. Los enlaces, la navegación del hallazgo e «Ir al lazo».
+    // borrar. Los enlaces, la navegación del hallazgo e «Ir al lazo». El bloque de la foto del
+    // hallazgo (TASK-590) solo ofrece gestos de lectura: ver, navegar y volver a pedir la imagen.
     const allowed = new Set([
       text('scr09.classify.open_reclassification'),
       text('components_status.refresh.button'),
     ]);
-    for (const button of screen.getAllByRole('button'))
+    const photoBlock = container.querySelector('[data-part="finding_photo"]');
+    for (const button of screen.getAllByRole('button')) {
+      if (photoBlock?.contains(button) === true) continue;
       expect(allowed.has(button.textContent)).toBe(true);
+    }
     for (const link of screen.getAllByRole('link'))
       expect([
         text('scr09.classify.title'),

@@ -9,8 +9,13 @@
  * Selección explícita de campos (BR-APP-40): ningún componente serializa el objeto recibido. Toda
  * hora y todo tiempo se muestran tal como los da el servidor, agregados en una zona unipersonal
  * (BR-LAZ-06): la consola no recalcula nada. Nunca compara personas ni ordena por quién.
+ *
+ * «Hallazgo recibido» y cada tramo tardío llevan la foto del hallazgo con el aspecto de SCR-06
+ * (TASK-590, A-128), plegada: la ficha es un repaso y no pide ninguna imagen al montar; cada foto
+ * se pide solo con «Ver foto» (una entrada `finding_photo_read` por petición).
  */
 import { useState, type ReactNode } from 'react';
+import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { reasonList } from '@/ports/scr08Detail';
 import type {
@@ -19,9 +24,24 @@ import type {
   TimelineMilestone,
   TimelineSummary,
 } from '@/ports/scr08Timeline';
+import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
 import { formatDuration } from '@/texts/duration';
 import { hasLabel, label, labelInline } from '@/texts/labels';
+
+/** Los hitos de un tramo del episodio: los que traen su foto (A-128). */
+const WITH_PHOTO: ReadonlySet<MilestoneKind> = new Set([
+  'finding_received',
+  'late_segment_attached',
+]);
+
+/** Lo que la foto de un hito necesita de la ficha. */
+interface PhotoContext {
+  readonly findingStateId: string;
+  readonly canView: boolean;
+  readonly aggregated: boolean;
+  readonly clock: Clock;
+}
 
 import styles from './timeline.module.css';
 
@@ -216,9 +236,11 @@ function RecordId({ recordId }: { readonly recordId: string }) {
 function Milestone({
   milestone,
   timeZone,
+  photo,
 }: {
   readonly milestone: TimelineMilestone;
   readonly timeZone: string;
+  readonly photo: PhotoContext;
 }) {
   const { deadline, actor } = milestone;
   const title = label('milestone_kind', milestone.kind);
@@ -271,6 +293,20 @@ function Milestone({
           </p>
         )}
         <MilestoneDetails milestone={milestone} timeZone={timeZone} />
+        {WITH_PHOTO.has(milestone.kind) && (
+          <FindingPhoto
+            findingStateId={photo.findingStateId}
+            photos={milestone.photos}
+            segment={null}
+            canView={photo.canView}
+            request="on_gesture"
+            folded
+            timeZone={timeZone}
+            aggregated={photo.aggregated}
+            clock={photo.clock}
+            headingLevel={4}
+          />
+        )}
         <RecordId recordId={milestone.record_id} />
       </div>
     </li>
@@ -334,10 +370,21 @@ function Summary({ summary }: { readonly summary: TimelineSummary }) {
 export function TimelineView({
   timeline,
   timeZone,
+  canViewPhoto,
+  clock,
 }: {
   readonly timeline: FindingTimeline;
   readonly timeZone: string;
+  /** La sesión tiene `evidence.read`: sin él, la foto da el aviso del rol y no se pide. */
+  readonly canViewPhoto: boolean;
+  readonly clock: Clock;
 }) {
+  const photo: PhotoContext = {
+    findingStateId: timeline.finding_state_id,
+    canView: canViewPhoto,
+    aggregated: timeline.time_aggregated,
+    clock,
+  };
   return (
     <>
       <Summary summary={timeline.summary} />
@@ -352,7 +399,12 @@ export function TimelineView({
         <h2>{text('scr08.timeline.milestones')}</h2>
         <ol className={styles.timeline}>
           {timeline.milestones.map((milestone) => (
-            <Milestone key={milestone.record_id} milestone={milestone} timeZone={timeZone} />
+            <Milestone
+              key={milestone.record_id}
+              milestone={milestone}
+              timeZone={timeZone}
+              photo={photo}
+            />
           ))}
         </ol>
         {timeline.truncated && (

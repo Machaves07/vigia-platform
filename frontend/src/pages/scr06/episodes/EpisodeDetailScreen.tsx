@@ -10,13 +10,15 @@
  * - `not_found` del listado o de la imagen (zona en `productive`, foto vencida o purgada, fuera de
  *   alcance): la pantalla entera pasa a «no disponible en su alcance». Lo transitorio va a la pila
  *   de avisos (UI-19); volver a buscar o a pedir la imagen es siempre un gesto de la persona.
+ * - La foto y sus datos van en el panel compartido `EpisodePhotoPanel` (TASK-590), en modo
+ *   `commissioning`: las mismas filas, textos y orden que antes de extraerlo.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 
 import { BlurredEpisodePhoto } from '@/components/BlurredEpisodePhoto/BlurredEpisodePhoto';
+import { EpisodePhotoPanel } from '@/components/EpisodePhotoPanel/EpisodePhotoPanel';
 import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
-import { ServerTimestamp } from '@/pages/scr06/common/ServerTimestamp';
 import { useScreenNotices } from '@/pages/scr06/common/useScreenNotices';
 import { NotAvailableInScope, ScreenState } from '@/pages/shared/ScreenState';
 import { isPortError } from '@/ports/shared';
@@ -24,16 +26,7 @@ import { findEpisodePhoto, type EpisodePhoto } from '@/ports/scr06EpisodePhotos'
 import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
 
-import {
-  cameraOf,
-  confidenceOf,
-  durationOf,
-  familyOf,
-  FrameTime,
-  PhotoState,
-  standardOf,
-  wouldHaveBeen,
-} from './format';
+import { durationMsOf, serverInstant } from './format';
 import { isNotFound } from './notFound';
 import { episodesPath } from './paths';
 import styles from './episodes.module.css';
@@ -55,48 +48,6 @@ type Lookup =
   | { readonly kind: 'found'; readonly photo: EpisodePhoto }
   | { readonly kind: 'not_found' }
   | { readonly kind: 'failed' };
-
-function Facts({ photo }: { readonly photo: EpisodePhoto }) {
-  const rows: readonly (readonly [string, ReactNode])[] = [
-    [text('scr06_episodes.col.frame_at'), <FrameTime key="frame" photo={photo} />],
-    [text('scr06_episodes.col.camera'), cameraOf(photo)],
-    [text('scr06_episodes.col.would_have_been'), wouldHaveBeen(photo)],
-    [text('scr06_episodes.col.family'), familyOf(photo)],
-    [text('scr06_episodes.col.standard'), standardOf(photo)],
-    [text('scr06_episodes.col.max_confidence'), confidenceOf(photo)],
-    [text('scr06_episodes.detail.segment'), String(photo.segment_index)],
-    [
-      text('scr06_episodes.detail.started_at'),
-      <ServerTimestamp key="start" instant={photo.started_at} />,
-    ],
-    [
-      text('scr06_episodes.detail.ended_at'),
-      <ServerTimestamp key="end" instant={photo.ended_at} />,
-    ],
-    [text('scr06_episodes.col.duration'), durationOf(photo)],
-    [
-      text('scr06_episodes.detail.received_at'),
-      <ServerTimestamp key="received" instant={photo.received_at} />,
-    ],
-    [
-      text('scr06_episodes.col.expires_at'),
-      <ServerTimestamp key="expires" instant={photo.expires_at} />,
-    ],
-    [text('scr06_episodes.col.photo'), <PhotoState key="photo" photo={photo} />],
-  ];
-  return (
-    <section className={styles.panel} aria-label={text('scr06_episodes.detail.facts')}>
-      <dl className={styles.facts}>
-        {rows.map(([name, value]) => (
-          <div key={name} className={styles.fact}>
-            <dt>{name}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-}
 
 export function EpisodeDetailScreen({
   zoneId,
@@ -165,16 +116,23 @@ export function EpisodeDetailScreen({
           }}
         />
       ) : (
-        <div className={styles.detail}>
-          <BlurredEpisodePhoto
-            photoId={lookup.photo.photo_id}
-            hasImage={lookup.photo.image !== null}
-            absentReason={lookup.photo.image_absent_reason}
-            alt={text('scr06_episodes.detail.photo_alt')}
-            onImageError={onImageError}
-          />
-          <Facts photo={lookup.photo} />
-        </div>
+        <EpisodePhotoPanel
+          mode="commissioning"
+          photo={{ ...lookup.photo, has_image: lookup.photo.image !== null }}
+          segment={lookup.photo.segment_index}
+          durationMs={durationMsOf(lookup.photo)}
+          instant={serverInstant}
+          media={
+            <BlurredEpisodePhoto
+              photoId={lookup.photo.photo_id}
+              hasImage={lookup.photo.image !== null}
+              absentReason={lookup.photo.image_absent_reason}
+              alt={text('scr06_episodes.detail.photo_alt')}
+              notice="commissioning"
+              onImageError={onImageError}
+            />
+          }
+        />
       )}
     </main>
   );

@@ -84,6 +84,7 @@ function mount(props: Partial<BlurredEpisodePhotoProps> = {}, strict = true) {
       hasImage
       absentReason={null}
       alt={ALT}
+      notice="commissioning"
       {...props}
       requestImage={requestImage}
       decodeImage={decodeImage}
@@ -207,7 +208,14 @@ describe('una petición por apertura (A-112)', () => {
       Promise.resolve(asBitmap(blob.size === 1 ? stale : fresh)),
     );
     const other = '0190a1b2-0000-7000-8000-000000000202';
-    const props = { hasImage: true, absentReason: null, alt: ALT, requestImage, decodeImage };
+    const props = {
+      hasImage: true,
+      absentReason: null,
+      alt: ALT,
+      notice: 'commissioning' as const,
+      requestImage,
+      decodeImage,
+    };
     const view = render(<BlurredEpisodePhoto photoId={PHOTO} {...props} />);
     view.rerender(<BlurredEpisodePhoto photoId={other} {...props} />);
     await act(async () => {
