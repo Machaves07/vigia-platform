@@ -13602,6 +13602,169 @@
         "outcome"
       ]
     },
+    "ProcessContextDeclaration": {
+      "properties": {
+        "before_ms": {
+          "type": "integer",
+          "maximum": 120000,
+          "minimum": 0
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessVariableDeclaration"
+          },
+          "type": "array",
+          "maxItems": 12,
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "before_ms",
+        "variables"
+      ]
+    },
+    "ProcessScale": {
+      "properties": {
+        "at_4_ma": {
+          "type": "number",
+          "maximum": 1000000000000,
+          "minimum": -1000000000000
+        },
+        "at_20_ma": {
+          "type": "number",
+          "maximum": 1000000000000,
+          "minimum": -1000000000000
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "at_4_ma",
+        "at_20_ma"
+      ]
+    },
+    "ProcessStatePair": {
+      "type": "string",
+      "enum": [
+        "closed_open",
+        "in_position_out",
+        "at_rest_moving",
+        "home_away",
+        "on_off",
+        "yes_no"
+      ]
+    },
+    "ProcessUnit": {
+      "type": "string",
+      "enum": [
+        "m_per_min",
+        "m",
+        "percent",
+        "rpm",
+        "deg_c",
+        "bar",
+        "kg",
+        "ampere",
+        "count"
+      ]
+    },
+    "ProcessVariableDeclaration": {
+      "properties": {
+        "variable_id": {
+          "$ref": "#/components/schemas/UUID"
+        },
+        "code": {
+          "$ref": "#/components/schemas/Code"
+        },
+        "kind": {
+          "$ref": "#/components/schemas/ProcessVariableKind"
+        },
+        "description_es": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/SignalSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessUnit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessScale"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decimals": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "maximum": 3,
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal_id": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessStatePair"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "variable_id",
+        "code",
+        "kind",
+        "description_es"
+      ]
+    },
+    "ProcessVariableKind": {
+      "type": "string",
+      "enum": [
+        "analog",
+        "binary"
+      ]
+    },
     "ProfileBody": {
       "properties": {
         "display_name": {
@@ -18495,6 +18658,16 @@
         "commissioning_watermark": {
           "type": "boolean",
           "const": true
+        },
+        "process_context": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ProcessContextDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,

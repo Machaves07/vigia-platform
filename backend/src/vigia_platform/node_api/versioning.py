@@ -63,15 +63,16 @@ toda respuesta a un nodo (BR-CTR-18)."""
 
 OLDEST_ACCEPTED_MINOR: Final = 0
 """La menor más antigua de la mayor vigente que la plataforma acepta. Con ``v1.1.0`` (A-63) la
-ventana de dos menores aceptaba ``1.0.x`` y ``1.1.x``; al adoptar ``v1.4.0`` (TASK-571) siguen
-aceptándose: ninguna se anunció para retiro (BR-CTR-21) y la ventana puede ampliarse, nunca
-reducirse (NFR-CTR-40)."""
+ventana de dos menores aceptaba ``1.0.x`` y ``1.1.x``; al adoptar ``v1.4.0`` (TASK-571),
+``v1.5.0`` (TASK-572) y ``v1.6.0`` (TASK-593) siguen aceptándose: ninguna se anunció para retiro
+(BR-CTR-21) y la ventana puede ampliarse, nunca reducirse (NFR-CTR-40)."""
 
 PLATFORM_CONTRACT_WINDOW: Final = max(
     DEFAULT_WINDOW, CONTRACT_VERSION.minor - OLDEST_ACCEPTED_MINOR
 )
 """Menores anteriores a la vigente que se aceptan: de ``OLDEST_ACCEPTED_MINOR`` a la vigente, y al
-menos las dos de BR-CTR-19 (4 con ``v1.4.0``: de ``1.0.x`` a ``1.4.x``)."""
+menos las dos de BR-CTR-19 (6 con ``v1.6.0``: de ``1.0.x`` a ``1.6.x``; ``1.7.x`` es
+``rejected_newer``)."""
 
 
 @dataclass(frozen=True, slots=True)

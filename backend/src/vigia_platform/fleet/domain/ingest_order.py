@@ -17,8 +17,9 @@ solo hallazgos y detecciones (BR-GOB-92: los eventos describen al observador).
   catálogo vigente en la ventana (BR-CTR-08) y, con ella, las señales son todas las declaradas,
   cada una una vez y con su rol (BR-CTR-04), ninguna lectura válida de una señal declarada
   ``no_data`` (A-77; como la plataforma simulada desde v1.2.0, seguimiento de VIG-449) y los
-  umbrales son coherentes (BR-CTR-10): publicación en un hallazgo por umbral, y los dos umbrales
-  iguales a los del catálogo en una detección. Si
+  valores de proceso concuerdan con la versión (``process_context_violation``, v1.6.0, A-129) y
+  los umbrales son coherentes (BR-CTR-10): publicación en un hallazgo por umbral, y los dos
+  umbrales iguales a los del catálogo en una detección. Si
   ninguna versión que lo cita los cumple, el campo de la **más nueva** (como la plataforma
   simulada de U-01); si ninguna lo cita, ``standard``;
 - ``usage_approved_during``: la compuerta de uso estuvo ``approved`` en algún instante de la
@@ -57,6 +58,7 @@ __all__ = [
     "assigned_at",
     "catalog_violation",
     "cited_clip_ids",
+    "process_context_violation",
     "same_submission",
     "usage_approved_during",
 ]
@@ -205,6 +207,12 @@ class CatalogVersionView:
     """Las cámaras declaradas (la foto del episodio cita una, A-112)."""
     no_data: frozenset[uuid.UUID] = frozenset()
     """Las señales declaradas sin dato (v1.2.0, A-77): su lectura nunca es válida."""
+    process_variables: Mapping[uuid.UUID, str] = MappingProxyType({})
+    """``variable_id`` → ``kind`` de ``process_context.variables`` (v1.6.0, A-129); vacío si la
+    versión no declara el bloque."""
+    process_no_data: frozenset[uuid.UUID] = frozenset()
+    """Las variables de estado (``binary``) que citan una señal ``no_data``: su lectura en el
+    instante del hecho nunca es válida y sus cambios son ``unknown`` (A-77)."""
 
     @classmethod
     def from_payload(
@@ -236,6 +244,15 @@ class CatalogVersionView:
                 for item in payload["signals"]
                 if item.get("no_data") is True
             )
+            declared = (payload.get("process_context") or {}).get("variables", ())
+            process_variables = MappingProxyType(
+                {uuid.UUID(str(item["variable_id"])): str(item["kind"]) for item in declared}
+            )
+            process_no_data = frozenset(
+                uuid.UUID(str(item["variable_id"]))
+                for item in declared
+                if item["kind"] == "binary" and uuid.UUID(str(item["signal_id"])) in no_data
+            )
         except (KeyError, TypeError, ValueError, AttributeError):
             raise CatalogUnreadable("versión del catálogo ilegible") from None
         return cls(
@@ -248,6 +265,8 @@ class CatalogVersionView:
             publication,
             cameras,
             no_data,
+            process_variables,
+            process_no_data,
         )
 
     def in_force_during(self, window: Window) -> bool:
@@ -281,6 +300,9 @@ def _mismatch(
         seen.add(signal_id)
     if seen != set(catalog.signals):
         return "signals"
+    process = process_context_violation(catalog, document)
+    if process is not None:
+        return process
     if kind is IngestKind.FINDING:
         trigger = document["automatic_classification"]["trigger"]
         if trigger == "publication_threshold" and document["max_confidence"] < catalog.publication:
@@ -290,6 +312,48 @@ def _mismatch(
             return "review_threshold"
         if document["publication_threshold"] != catalog.publication:
             return "publication_threshold"
+    return None
+
+
+def process_context_violation(
+    catalog: CatalogVersionView, document: Mapping[str, Any]
+) -> str | None:
+    """El campo del bloque ``process_context`` de ``document`` que no concuerda con ``catalog``
+    (paso 7 de BR-GOB-84; v1.6.0, A-129), o nada si concuerda o no lo lleva.
+
+    El bloque es opcional siempre (TASK-592): sin él no hay nada que comprobar, aunque la versión
+    declare variables. Con él, cada variable que declara la versión aparece **exactamente una vez**
+    y con su ``kind``: una no declarada, repetida o de otra clase da
+    ``process_context.variables[i]``; si falta alguna, ``process_context.variables``. Una de estado
+    sobre una señal ``no_data`` lleva ``at_event.valid = false`` y ningún cambio distinto de
+    ``unknown`` (como ``signals[i].valid``, A-77). Es la regla ``process_context_mismatch`` de la
+    plataforma simulada del contrato, con los mismos ``field``.
+    """
+    reading = document.get("process_context")
+    if reading is None:
+        return None
+    seen: set[uuid.UUID] = set()
+    for index, variable in enumerate(reading["variables"]):
+        here = f"process_context.variables[{index}]"
+        variable_id = _uuid(variable["variable_id"])
+        if (
+            variable_id is None
+            or variable_id not in catalog.process_variables
+            or variable_id in seen
+            or variable["kind"] != catalog.process_variables[variable_id]
+        ):
+            return here
+        seen.add(variable_id)
+        if variable_id not in catalog.process_no_data:
+            continue
+        # Variable de estado sobre una señal sin dato (A-77): el nodo no la lee.
+        if variable["at_event"]["valid"] is not False:
+            return f"{here}.at_event.valid"
+        for position, change in enumerate(variable.get("changes", ())):
+            if change["value"] != "unknown":
+                return f"{here}.changes[{position}].value"
+    if seen != set(catalog.process_variables):
+        return "process_context.variables"
     return None
 
 

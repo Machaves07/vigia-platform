@@ -12,7 +12,9 @@ impide arrancar (``LabelsInvalid``), igual que un archivo que falta.
 etiqueta (nunca devuelve el valor crudo ni una cadena vacía), y ``require_complete`` impide
 arrancar si a un miembro de una enumeración del código le falta su etiqueta. ``load`` rechaza un
 archivo mal formado: claves que no son ``snake_case``, etiquetas vacías, demasiado largas o con
-caracteres de control.
+caracteres de control. Un valor admite además un único sufijo ``.asserted`` o ``.deasserted``:
+la etiqueta de cada lado de un par de estados (``process_state_pair``, copiada de
+``labels.es.json`` del contrato v1.6.0, A-129).
 """
 
 from __future__ import annotations
@@ -46,6 +48,8 @@ DEFAULT_EXTENSION_LABELS_PATHS: Final[tuple[Path, ...]] = (DEFAULT_LOOP_LABELS_P
 MAX_LABEL_CHARS: Final = 256
 _MAX_FILE_BYTES: Final = 256 * 1024
 _KEY: Final = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_VALUE: Final = re.compile(r"[a-z][a-z0-9_]{0,63}(?:\.(?:asserted|deasserted))?")
+"""Un valor: ``snake_case``, con a lo sumo el lado de un par de estados (``on_off.asserted``)."""
 
 
 class LabelsInvalid(Exception):
@@ -81,7 +85,7 @@ class PlatformLabels:
                 problems.append(f"la enumeración «{enumeration}» no tiene valores")
                 continue
             for value, text in values.items():
-                if not isinstance(value, str) or _KEY.fullmatch(value) is None:
+                if not isinstance(value, str) or _VALUE.fullmatch(value) is None:
                     problems.append(f"valor con nombre no válido en «{enumeration}»: {value!r}")
                 elif not _valid_label(text):
                     problems.append(f"etiqueta vacía o no válida en «{enumeration}.{value}»")

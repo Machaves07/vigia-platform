@@ -3670,7 +3670,7 @@
     "post":
       "tags":
         - "commissioning"
-      "summary": "Presentación de la foto de un episodio de la sombra (v1.5.0)."
+      "summary": "Presentación de la foto de un episodio (v1.5.0; en productive desde v1.6.0)."
       "operationId": "post_episode_photo"
       "responses":
         "200":
@@ -14314,6 +14314,127 @@
         - "action_type"
         - "outcome"
       "title": "PreviousActionOut"
+    "ProcessContextDeclaration":
+      "properties":
+        "before_ms":
+          "type": "integer"
+          "maximum": 120000.0
+          "minimum": 0.0
+          "title": "Before Ms"
+        "variables":
+          "items":
+            "$ref": "#/components/schemas/ProcessVariableDeclaration"
+          "type": "array"
+          "maxItems": 12
+          "minItems": 1
+          "title": "Variables"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "before_ms"
+        - "variables"
+      "title": "ProcessContextDeclaration"
+      "description": "Variables de proceso de la zona y su ventana (A-129). Reglas que verifica el modelo: regla (7) del catálogo."
+    "ProcessScale":
+      "properties":
+        "at_4_ma":
+          "type": "number"
+          "maximum": 1000000000000.0
+          "minimum": -1000000000000.0
+          "title": "At 4 Ma"
+        "at_20_ma":
+          "type": "number"
+          "maximum": 1000000000000.0
+          "minimum": -1000000000000.0
+          "title": "At 20 Ma"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "at_4_ma"
+        - "at_20_ma"
+      "title": "ProcessScale"
+      "description": "Escala lineal 4-20 mA: el valor en unidades de ingeniería a 4 mA y a 20 mA; distintos entre sí (verificado en el modelo)."
+    "ProcessStatePair":
+      "type": "string"
+      "enum":
+        - "closed_open"
+        - "in_position_out"
+        - "at_rest_moving"
+        - "home_away"
+        - "on_off"
+        - "yes_no"
+      "title": "ProcessStatePair"
+      "description": "Par de etiquetas de una variable de proceso de estado (v1.6.0, adenda A-129): la del valor `asserted` de la señal citada y la del `deasserted`, separadas por « / ». `labels.es.json` publica además cada una con las claves `<par>.asserted` y `<par>.deasserted`."
+    "ProcessUnit":
+      "type": "string"
+      "enum":
+        - "m_per_min"
+        - "m"
+        - "percent"
+        - "rpm"
+        - "deg_c"
+        - "bar"
+        - "kg"
+        - "ampere"
+        - "count"
+      "title": "ProcessUnit"
+      "description": "Unidad de ingeniería de una variable de proceso analógica (v1.6.0, adenda A-129)."
+    "ProcessVariableDeclaration":
+      "properties":
+        "variable_id":
+          "$ref": "#/components/schemas/UUID"
+        "code":
+          "$ref": "#/components/schemas/Code"
+        "kind":
+          "$ref": "#/components/schemas/ProcessVariableKind"
+        "description_es":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Description Es"
+        "source":
+          "anyOf":
+            - "$ref": "#/components/schemas/SignalSource"
+            - "type": "null"
+        "unit":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessUnit"
+            - "type": "null"
+        "scale":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessScale"
+            - "type": "null"
+        "decimals":
+          "anyOf":
+            - "type": "integer"
+              "maximum": 3.0
+              "minimum": 0.0
+            - "type": "null"
+          "title": "Decimals"
+        "signal_id":
+          "anyOf":
+            - "$ref": "#/components/schemas/UUID"
+            - "type": "null"
+        "states":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessStatePair"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "variable_id"
+        - "code"
+        - "kind"
+        - "description_es"
+      "title": "ProcessVariableDeclaration"
+      "description": "Variable de proceso declarada. `analog`: lector y canal 4-20 mA (`source`), `unit`, `scale` y `decimals`. `binary`: la `signal_id` de una señal de `signals` (verificado en el modelo) y el par de etiquetas `states`; la variable no repite la fuente, toma la lectura ya interpretada de la señal."
+    "ProcessVariableKind":
+      "type": "string"
+      "enum":
+        - "analog"
+        - "binary"
+      "title": "ProcessVariableKind"
+      "description": "Clase de una variable de proceso de la zona (`ZoneCatalog.process_context`, v1.6.0, adenda A-129): analógica 4-20 mA o de estado sobre una señal declarada."
     "ProfileBody":
       "properties":
         "display_name":
@@ -18067,6 +18188,10 @@
           "type": "boolean"
           "const": true
           "title": "Commissioning Watermark"
+        "process_context":
+          "anyOf":
+            - "$ref": "#/components/schemas/ProcessContextDeclaration"
+            - "type": "null"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -18085,7 +18210,7 @@
         - "episode"
         - "commissioning_watermark"
       "title": "ZoneCatalog"
-      "description": "Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen."
+      "description": "Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda); (7) desde v1.6.0, en `process_context.variables`, `variable_id` y `code` únicos, toda `signal_id` de una variable `binary` es una señal de `signals` y en una `analog` `scale.at_4_ma ≠ scale.at_20_ma` (entrada A-129 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen."
     "vigia_contracts__models__zone_catalog__SignedEnvelope":
       "properties":
         "payload":

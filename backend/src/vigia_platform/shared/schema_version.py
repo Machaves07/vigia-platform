@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 45
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0045`` (``zone_mode``,
+MINIMUM_SCHEMA_VERSION: Final = 46
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0046`` (la columna
+``process_context`` de ``fleet.episode_photo``, que la ingesta de la foto escribe, TASK-593), que
+incluye ``gob_0045`` (``zone_mode``,
 ``record_id``, ``photo_index`` y ``photo_role`` de ``fleet.episode_photo``, que la lectura de la
 instaladora y la purga filtran por modo y la ingesta escribe, TASK-588), que incluye ``laz_0044``
 (el índice de los hallazgos cerrados), que incluye ``gob_0043`` (el ``DELETE`` de
