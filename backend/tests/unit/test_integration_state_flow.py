@@ -750,8 +750,10 @@ def test_an_upload_between_the_listing_and_the_download_keeps_the_index_coherent
             cloud.delete_object(Bucket=bucket, Key=key)
 
     cloud.before_get = platform_writes
-    state.mirror_evidence(cloud, EVIDENCE, restored=True, limit=state.max_bytes())
+    counts = state.mirror_evidence(cloud, EVIDENCE, restored=True, limit=state.max_bytes())
     cloud.before_get = None
+    assert (counts["nuevos"], counts["sin_suma"], counts["suma_distinta"]) == (1, 0, 0)
+    assert json.loads((state.ALMACEN / "indice.json").read_text())["rechazados"] == {}
     entries = index(state)
     assert set(entries) == {ATTACHMENT_KEY}, "una clave borrada a medias no entra"
     assert entries[ATTACHMENT_KEY]["sha256"] == hashlib.sha256(newer).hexdigest()
@@ -845,7 +847,8 @@ def test_restore_leaves_what_localstack_already_has_alone(
 @pytest.mark.parametrize(
     "tamper",
     [
-        pytest.param({"sha256": "../../state/app.pw"}, id="suma-que-no-es-hex"),
+        # Otra ruta: aquí un directorio, que ni siquiera se puede leer; nunca se abre.
+        pytest.param({"sha256": "../objetos"}, id="suma-que-no-es-hex"),
         pytest.param({"sha256": "f" * 64}, id="blob-que-no-existe"),
         pytest.param({"size": len(CLIP) + 1}, id="tamano-distinto"),
     ],
@@ -908,3 +911,19 @@ def test_room_again_copies_what_the_full_store_left_out_without_a_warning(
     assert set(index(state)) == {CLIP_KEY, ATTACHMENT_KEY}
     assert capsys.readouterr().err == ""
     assert cloud.gets[EVIDENCE] == 2
+
+
+def test_a_download_whose_size_is_not_the_declared_one_is_not_saved(
+    state: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cloud = started(state, monkeypatch)
+    original = cloud.get_object
+
+    def short(**arguments: Any) -> dict[str, Any]:
+        response = original(**arguments)
+        response["ContentLength"] += 1
+        return response
+
+    monkeypatch.setattr(cloud, "get_object", short)
+    counts = state.mirror_evidence(cloud, EVIDENCE, restored=True, limit=state.max_bytes())
+    assert counts["suma_distinta"] == 2 and index(state) == {} and blobs(state) == set()

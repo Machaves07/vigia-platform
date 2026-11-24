@@ -553,11 +553,15 @@ def mirror_evidence(s3: Any, bucket: str, *, restored: bool, limit: int) -> dict
                 counts["sin_suma"] += 1
                 rejected[key] = seen
                 continue
-            digest = "" if data is None else hashlib.sha256(data).hexdigest()
-            if data is None or digest != expected or len(data) != response.get("ContentLength"):
+            if (
+                data is None
+                or hashlib.sha256(data).hexdigest() != expected
+                or len(data) != response.get("ContentLength")
+            ):
                 counts["suma_distinta"] += 1
                 rejected[key] = seen
                 continue
+            digest = expected
             used += _store_blob(digest, data)
             objects[key] = {
                 "sha256": digest,
