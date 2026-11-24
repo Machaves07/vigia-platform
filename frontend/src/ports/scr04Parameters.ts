@@ -14,7 +14,10 @@ export type Vocabulary = components['schemas']['VocabularyOut'];
 export type VocabularyChange = components['schemas']['VocabularyChangeBody'];
 export type Camera = components['schemas']['CameraBody'];
 export type Signal = components['schemas']['SignalDeclaration'];
-export type ParameterKind = 'cameras' | 'minimum_coverage' | 'signals' | 'thresholds' | 'windows';
+export type ProcessUnit = components['schemas']['ProcessUnit'];
+export type ProcessStatePair = components['schemas']['ProcessStatePair'];
+export type ParameterKind =
+  'cameras' | 'minimum_coverage' | 'signals' | 'thresholds' | 'windows' | 'process_context';
 
 export const parametersPort = defineScreenPort('SCR-04', {
   catalog: {
@@ -59,6 +62,12 @@ export const parametersPort = defineScreenPort('SCR-04', {
     permission: 'catalog.manage',
     operationId: 'windows_zones__zone_id__windows_put',
   },
+  process_context: {
+    kind: 'write',
+    status: 'fixed',
+    permission: 'catalog.manage',
+    operationId: 'process_context_zones__zone_id__process_context_put',
+  },
   admissions: {
     kind: 'read',
     status: 'fixed',
@@ -93,7 +102,28 @@ export const PARAMETER_OPERATIONS = {
   signals: 'signals_zones__zone_id__signals_put',
   thresholds: 'thresholds_zones__zone_id__thresholds_put',
   windows: 'windows_zones__zone_id__windows_put',
+  process_context: 'process_context_zones__zone_id__process_context_put',
 } as const;
+/** Listas cerradas de v1.6.0 (A-129); sus etiquetas vienen de `labels.platform.es.json`. */
+export const PROCESS_UNITS: readonly ProcessUnit[] = [
+  'm_per_min',
+  'm',
+  'percent',
+  'rpm',
+  'deg_c',
+  'bar',
+  'kg',
+  'ampere',
+  'count',
+];
+export const PROCESS_STATE_PAIRS: readonly ProcessStatePair[] = [
+  'in_position_out',
+  'closed_open',
+  'at_rest_moving',
+  'home_away',
+  'on_off',
+  'yes_no',
+];
 
 /** Los cuerpos no publican longitudes; pruebas contrastan estos límites con el corpus dueño. */
 export const parameterReasonLimits = { minLength: 10, maxLength: 500 } as const;

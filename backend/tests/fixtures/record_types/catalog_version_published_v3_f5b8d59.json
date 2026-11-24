@@ -1,0 +1,1115 @@
+{
+ "generated_from": {
+  "commit": "f5b8d592297e9f394031a51d545d4a36009b870e",
+  "contract": "vigia-contracts v1.6.0",
+  "how": "record_type_registry(registered_units()).get('catalog_version_published', schema_version=3).to_persisted()",
+  "repository": "vigia-platform"
+ },
+ "rows": [
+  {
+   "chain_follows_scope": false,
+   "chain_level": "plant",
+   "content_schema": {
+    "$defs": {
+     "CameraRoleInZone": {
+      "description": "Rol de una cámara dentro de su zona.",
+      "enum": [
+       "primary",
+       "redundant"
+      ],
+      "title": "CameraRoleInZone",
+      "type": "string"
+     },
+     "CatalogCamera": {
+      "additionalProperties": false,
+      "description": "Cámara declarada en el catálogo de la zona.",
+      "properties": {
+       "camera_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "code": {
+        "$ref": "#/$defs/Code"
+       },
+       "declared_min_fps": {
+        "maximum": 60.0,
+        "minimum": 1.0,
+        "title": "Declared Min Fps",
+        "type": "number"
+       },
+       "role_in_zone": {
+        "$ref": "#/$defs/CameraRoleInZone"
+       }
+      },
+      "required": [
+       "camera_id",
+       "code",
+       "role_in_zone",
+       "declared_min_fps"
+      ],
+      "title": "CatalogCamera",
+      "type": "object"
+     },
+     "CatalogChangedField": {
+      "description": "Qué cambió de una versión del catálogo a la siguiente.",
+      "enum": [
+       "standards",
+       "cameras",
+       "minimum_coverage",
+       "signals",
+       "thresholds",
+       "clip_window",
+       "episode",
+       "single_occupancy"
+      ],
+      "title": "CatalogChangedField",
+      "type": "string"
+     },
+     "ClipWindow": {
+      "additionalProperties": false,
+      "description": "Segundos de video antes y después del tramo que cubren los clips (BR-CTR-39); 10 y 10 por defecto.",
+      "properties": {
+       "post_seconds": {
+        "maximum": 30,
+        "minimum": 5,
+        "title": "Post Seconds",
+        "type": "integer"
+       },
+       "pre_seconds": {
+        "maximum": 30,
+        "minimum": 5,
+        "title": "Pre Seconds",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pre_seconds",
+       "post_seconds"
+      ],
+      "title": "ClipWindow",
+      "type": "object"
+     },
+     "Code": {
+      "maxLength": 32,
+      "minLength": 2,
+      "pattern": "^[A-Z0-9-]{2,32}$",
+      "title": "Code",
+      "type": "string"
+     },
+     "CoexistencePredicate": {
+      "additionalProperties": false,
+      "description": "Plantilla `coexistence`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms = 0`; desde v1.2.0, `guard_conditions` opcional exige además una señal `guard` concreta afirmada o no afirmada (por ejemplo, uso indebido con el jumbo en posición o fuera de ella).",
+      "properties": {
+       "all_of": {
+        "items": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/PresenceCondition"
+          },
+          {
+           "$ref": "#/$defs/EnergyAsserted"
+          }
+         ]
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "title": "All Of",
+        "type": "array"
+       },
+       "guard_conditions": {
+        "anyOf": [
+         {
+          "items": {
+           "$ref": "#/$defs/GuardSignalCondition"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Guard Conditions"
+       },
+       "min_duration_ms": {
+        "maximum": 0,
+        "minimum": 0,
+        "title": "Min Duration Ms",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "all_of",
+       "min_duration_ms"
+      ],
+      "title": "CoexistencePredicate",
+      "type": "object"
+     },
+     "ConditionSignalValue": {
+      "description": "Valor de señal que exige una condición de la gramática de predicados (`SignalCondition.value`): subconjunto de `signal_value` sin `unknown` (A-42).",
+      "enum": [
+       "asserted",
+       "deasserted"
+      ],
+      "title": "ConditionSignalValue",
+      "type": "string"
+     },
+     "DeclaredBy": {
+      "additionalProperties": false,
+      "description": "Firmante responsable de un estándar: usuario de la plataforma, no persona observada. `display_name` es uno de los textos libres admitidos por BR-CTR-13; `role` es un identificador técnico (código de rol de la plataforma) para cumplir la metapropiedad de BR-CTR-13.",
+      "properties": {
+       "display_name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Display Name",
+        "type": "string"
+       },
+       "role": {
+        "$ref": "#/$defs/TechnicalId"
+       },
+       "user_id": {
+        "$ref": "#/$defs/UUID"
+       }
+      },
+      "required": [
+       "user_id",
+       "display_name",
+       "role"
+      ],
+      "title": "DeclaredBy",
+      "type": "object"
+     },
+     "DeclaredStandard": {
+      "additionalProperties": false,
+      "description": "Estándar de seguridad tal como la planta lo declaró (domain-entities.md §3.2). Viaja dentro de `ZoneCatalog.standards`. Cada cambio de texto, predicado o parámetro produce una versión nueva; una versión emitida nunca se edita. `declared_text` es el único texto libre del contrato escrito por la planta. El predicado sigue la gramática booleana cerrada de §3.2.1 y su forma depende de `family`: el esquema empareja cada familia con su plantilla (`oneOf`), así que un predicado con la forma de otra familia es inválido. La gramática no puede expresar, por construcción, ausencia de personas ni negación de presencia (P2), disyunciones, comparaciones o conteos de personas, velocidades, tiempos de ciclo ni ninguna magnitud de productividad (P7).",
+      "properties": {
+       "declared_by": {
+        "$ref": "#/$defs/DeclaredBy"
+       },
+       "declared_text": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Declared Text",
+        "type": "string"
+       },
+       "effective_from": {
+        "$ref": "#/$defs/Timestamp"
+       },
+       "family": {
+        "$ref": "#/$defs/PredicateFamily"
+       },
+       "predicate": {
+        "$ref": "#/$defs/Predicate"
+       },
+       "standard_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "tier_policy": {
+        "const": "tier_1_when_signal_valid",
+        "title": "Tier Policy",
+        "type": "string"
+       },
+       "title_es": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Title Es",
+        "type": "string"
+       },
+       "version": {
+        "maximum": 2147483647,
+        "minimum": 1,
+        "title": "Version",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "standard_id",
+       "version",
+       "family",
+       "title_es",
+       "declared_text",
+       "declared_by",
+       "effective_from",
+       "tier_policy",
+       "predicate"
+      ],
+      "title": "DeclaredStandard",
+      "type": "object"
+     },
+     "DwellPredicate": {
+      "additionalProperties": false,
+      "description": "Plantilla `dwell`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms` entre 1 000 y 3 600 000.",
+      "properties": {
+       "all_of": {
+        "items": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/PresenceCondition"
+          },
+          {
+           "$ref": "#/$defs/EnergyAsserted"
+          }
+         ]
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "title": "All Of",
+        "type": "array"
+       },
+       "min_duration_ms": {
+        "maximum": 3600000,
+        "minimum": 1000,
+        "title": "Min Duration Ms",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "all_of",
+       "min_duration_ms"
+      ],
+      "title": "DwellPredicate",
+      "type": "object"
+     },
+     "EnergyAsserted": {
+      "additionalProperties": false,
+      "description": "Condición `{signal_role: energy, value: asserted}`: máquina energizada.",
+      "properties": {
+       "signal_role": {
+        "const": "energy",
+        "title": "condition_signal_role",
+        "type": "string"
+       },
+       "value": {
+        "const": "asserted",
+        "title": "condition_signal_value",
+        "type": "string"
+       }
+      },
+      "required": [
+       "signal_role",
+       "value"
+      ],
+      "title": "EnergyAsserted",
+      "type": "object"
+     },
+     "EnergyDeasserted": {
+      "additionalProperties": false,
+      "description": "Condición `{signal_role: energy, value: deasserted}`: máquina en reposo (arranque desde reposo).",
+      "properties": {
+       "signal_role": {
+        "const": "energy",
+        "title": "condition_signal_role",
+        "type": "string"
+       },
+       "value": {
+        "const": "deasserted",
+        "title": "condition_signal_value",
+        "type": "string"
+       }
+      },
+      "required": [
+       "signal_role",
+       "value"
+      ],
+      "title": "EnergyDeasserted",
+      "type": "object"
+     },
+     "EpisodeParameters": {
+      "additionalProperties": false,
+      "description": "Agrupación de observaciones en episodios de zona y tope de duración de cada tramo (BR-CTR-33, BR-CTR-34).",
+      "properties": {
+       "grouping_window_ms": {
+        "maximum": 300000,
+        "minimum": 1000,
+        "title": "Grouping Window Ms",
+        "type": "integer"
+       },
+       "max_segment_ms": {
+        "maximum": 3600000,
+        "minimum": 60000,
+        "title": "Max Segment Ms",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "grouping_window_ms",
+       "max_segment_ms"
+      ],
+      "title": "EpisodeParameters",
+      "type": "object"
+     },
+     "GuardAsserted": {
+      "additionalProperties": false,
+      "description": "Condición `{signal_role: guard, value: asserted}`: resguardo en su nivel afirmado (declarado cerrado).",
+      "properties": {
+       "signal_role": {
+        "const": "guard",
+        "title": "condition_signal_role",
+        "type": "string"
+       },
+       "value": {
+        "const": "asserted",
+        "title": "condition_signal_value",
+        "type": "string"
+       }
+      },
+      "required": [
+       "signal_role",
+       "value"
+      ],
+      "title": "GuardAsserted",
+      "type": "object"
+     },
+     "GuardBypassPredicate": {
+      "additionalProperties": false,
+      "description": "Plantilla `guard_bypass`: `all_of` contiene presencia y resguardo afirmado (declarado cerrado con persona dentro) y, opcionalmente, energía afirmada; en cualquier orden y sin repetir; `min_duration_ms = 0`.",
+      "properties": {
+       "all_of": {
+        "items": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/PresenceCondition"
+          },
+          {
+           "$ref": "#/$defs/GuardAsserted"
+          },
+          {
+           "$ref": "#/$defs/EnergyAsserted"
+          }
+         ]
+        },
+        "maxItems": 3,
+        "minItems": 2,
+        "title": "All Of",
+        "type": "array"
+       },
+       "min_duration_ms": {
+        "maximum": 0,
+        "minimum": 0,
+        "title": "Min Duration Ms",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "all_of",
+       "min_duration_ms"
+      ],
+      "title": "GuardBypassPredicate",
+      "type": "object"
+     },
+     "GuardSignalCondition": {
+      "additionalProperties": false,
+      "description": "Condición de resguardo sobre **una** señal declarada (v1.2.0, entrada A-77 de la adenda): exige que la señal `signal_id` del catálogo de la zona valga `value`. A diferencia de `SignalCondition`, no mira el valor agregado del rol `guard` (BR-BOR-13), sino solo esa señal, así que las demás señales `guard` de la zona no la afectan. `signal_id` debe ser una señal del mismo `ZoneCatalog` con rol `guard` (regla (6) del catálogo, verificada en el modelo). Si esa señal es inválida en el instante evaluado, o se declaró `no_data`, la condición es desconocida y el predicado es `undeterminable` (BR-BOR-29), nunca `true` ni `false`.",
+      "properties": {
+       "signal_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "value": {
+        "$ref": "#/$defs/ConditionSignalValue"
+       }
+      },
+      "required": [
+       "signal_id",
+       "value"
+      ],
+      "title": "GuardSignalCondition",
+      "type": "object"
+     },
+     "KeyId": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+      "title": "KeyId",
+      "type": "string"
+     },
+     "MinimumCoverage": {
+      "additionalProperties": false,
+      "description": "Cobertura mínima (RF-CTR-03, RF-BOR-07; entradas A-03 y A-06 de la adenda): la zona la conserva cuando **todas** las cámaras de `required_camera_ids` están observables **y** al menos `required_count` cámaras de la zona están observables en total; una cámara `degraded` o `not_observable` cuenta como no observable. Restricciones que verifica el modelo: `len(required_camera_ids) ≤ required_count ≤ len(cameras)` y toda cámara requerida está en `cameras` (pendiente nº 34).",
+      "properties": {
+       "required_camera_ids": {
+        "items": {
+         "$ref": "#/$defs/UUID"
+        },
+        "maxItems": 8,
+        "minItems": 0,
+        "title": "Required Camera Ids",
+        "type": "array"
+       },
+       "required_count": {
+        "maximum": 8,
+        "minimum": 1,
+        "title": "Required Count",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "required_count",
+       "required_camera_ids"
+      ],
+      "title": "MinimumCoverage",
+      "type": "object"
+     },
+     "Payload": {
+      "additionalProperties": false,
+      "description": "Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda); (7) desde v1.6.0, en `process_context.variables`, `variable_id` y `code` únicos, toda `signal_id` de una variable `binary` es una señal de `signals` y en una `analog` `scale.at_4_ma ≠ scale.at_20_ma` (entrada A-129 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen.",
+      "properties": {
+       "cameras": {
+        "items": {
+         "$ref": "#/$defs/CatalogCamera"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "title": "Cameras",
+        "type": "array"
+       },
+       "clip_window": {
+        "$ref": "#/$defs/ClipWindow"
+       },
+       "commissioning_watermark": {
+        "const": true,
+        "title": "Commissioning Watermark",
+        "type": "boolean"
+       },
+       "episode": {
+        "$ref": "#/$defs/EpisodeParameters"
+       },
+       "issued_at": {
+        "$ref": "#/$defs/Timestamp"
+       },
+       "minimum_coverage": {
+        "$ref": "#/$defs/MinimumCoverage"
+       },
+       "organization_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "plant_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "process_context": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ProcessContextDeclaration"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "signals": {
+        "items": {
+         "$ref": "#/$defs/SignalDeclaration"
+        },
+        "maxItems": 32,
+        "minItems": 0,
+        "title": "Signals",
+        "type": "array"
+       },
+       "standards": {
+        "items": {
+         "$ref": "#/$defs/DeclaredStandard"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "title": "Standards",
+        "type": "array"
+       },
+       "thresholds": {
+        "$ref": "#/$defs/Thresholds"
+       },
+       "version": {
+        "maximum": 2147483647,
+        "minimum": 1,
+        "title": "Version",
+        "type": "integer"
+       },
+       "zone_code": {
+        "$ref": "#/$defs/Code"
+       },
+       "zone_id": {
+        "$ref": "#/$defs/UUID"
+       }
+      },
+      "required": [
+       "zone_id",
+       "zone_code",
+       "plant_id",
+       "organization_id",
+       "version",
+       "issued_at",
+       "cameras",
+       "minimum_coverage",
+       "signals",
+       "standards",
+       "thresholds",
+       "clip_window",
+       "episode",
+       "commissioning_watermark"
+      ],
+      "title": "ZoneCatalog",
+      "type": "object"
+     },
+     "Predicate": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/CoexistencePredicate"
+       },
+       {
+        "$ref": "#/$defs/GuardBypassPredicate"
+       },
+       {
+        "$ref": "#/$defs/DwellPredicate"
+       },
+       {
+        "$ref": "#/$defs/StartupTransitionPredicate"
+       }
+      ],
+      "title": "Predicate"
+     },
+     "PredicateFamily": {
+      "description": "Familia del predicado de un estándar declarado.",
+      "enum": [
+       "coexistence",
+       "guard_bypass",
+       "dwell",
+       "startup_transition"
+      ],
+      "title": "PredicateFamily",
+      "type": "string"
+     },
+     "PresenceCondition": {
+      "additionalProperties": false,
+      "description": "Condición de presencia en la zona. Solo admite `true`: la gramática no puede afirmar ausencia (P2).",
+      "properties": {
+       "presence": {
+        "const": true,
+        "title": "Presence",
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "presence"
+      ],
+      "title": "PresenceCondition",
+      "type": "object"
+     },
+     "ProcessContextDeclaration": {
+      "additionalProperties": false,
+      "description": "Variables de proceso de la zona y su ventana (A-129). Reglas que verifica el modelo: regla (7) del catálogo.",
+      "properties": {
+       "before_ms": {
+        "maximum": 120000,
+        "minimum": 0,
+        "title": "Before Ms",
+        "type": "integer"
+       },
+       "variables": {
+        "items": {
+         "$ref": "#/$defs/ProcessVariableDeclaration"
+        },
+        "maxItems": 12,
+        "minItems": 1,
+        "title": "Variables",
+        "type": "array"
+       }
+      },
+      "required": [
+       "before_ms",
+       "variables"
+      ],
+      "title": "ProcessContextDeclaration",
+      "type": "object"
+     },
+     "ProcessScale": {
+      "additionalProperties": false,
+      "description": "Escala lineal 4-20 mA: el valor en unidades de ingeniería a 4 mA y a 20 mA; distintos entre sí (verificado en el modelo).",
+      "properties": {
+       "at_20_ma": {
+        "maximum": 1000000000000.0,
+        "minimum": -1000000000000.0,
+        "title": "At 20 Ma",
+        "type": "number"
+       },
+       "at_4_ma": {
+        "maximum": 1000000000000.0,
+        "minimum": -1000000000000.0,
+        "title": "At 4 Ma",
+        "type": "number"
+       }
+      },
+      "required": [
+       "at_4_ma",
+       "at_20_ma"
+      ],
+      "title": "ProcessScale",
+      "type": "object"
+     },
+     "ProcessStatePair": {
+      "description": "Par de etiquetas de una variable de proceso de estado (v1.6.0, adenda A-129): la del valor `asserted` de la señal citada y la del `deasserted`, separadas por « / ». `labels.es.json` publica además cada una con las claves `<par>.asserted` y `<par>.deasserted`.",
+      "enum": [
+       "closed_open",
+       "in_position_out",
+       "at_rest_moving",
+       "home_away",
+       "on_off",
+       "yes_no"
+      ],
+      "title": "ProcessStatePair",
+      "type": "string"
+     },
+     "ProcessUnit": {
+      "description": "Unidad de ingeniería de una variable de proceso analógica (v1.6.0, adenda A-129).",
+      "enum": [
+       "m_per_min",
+       "m",
+       "percent",
+       "rpm",
+       "deg_c",
+       "bar",
+       "kg",
+       "ampere",
+       "count"
+      ],
+      "title": "ProcessUnit",
+      "type": "string"
+     },
+     "ProcessVariableDeclaration": {
+      "additionalProperties": false,
+      "description": "Variable de proceso declarada. `analog`: lector y canal 4-20 mA (`source`), `unit`, `scale` y `decimals`. `binary`: la `signal_id` de una señal de `signals` (verificado en el modelo) y el par de etiquetas `states`; la variable no repite la fuente, toma la lectura ya interpretada de la señal.",
+      "properties": {
+       "code": {
+        "$ref": "#/$defs/Code"
+       },
+       "decimals": {
+        "anyOf": [
+         {
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Decimals"
+       },
+       "description_es": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Description Es",
+        "type": "string"
+       },
+       "kind": {
+        "$ref": "#/$defs/ProcessVariableKind"
+       },
+       "scale": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ProcessScale"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "signal_id": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/UUID"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "source": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/SignalSource"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "states": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ProcessStatePair"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "unit": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/ProcessUnit"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "variable_id": {
+        "$ref": "#/$defs/UUID"
+       }
+      },
+      "required": [
+       "variable_id",
+       "code",
+       "kind",
+       "description_es"
+      ],
+      "title": "ProcessVariableDeclaration",
+      "type": "object"
+     },
+     "ProcessVariableKind": {
+      "description": "Clase de una variable de proceso de la zona (`ZoneCatalog.process_context`, v1.6.0, adenda A-129): analógica 4-20 mA o de estado sobre una señal declarada.",
+      "enum": [
+       "analog",
+       "binary"
+      ],
+      "title": "ProcessVariableKind",
+      "type": "string"
+     },
+     "Sha256Hex": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256Hex",
+      "type": "string"
+     },
+     "SignalDeclaration": {
+      "additionalProperties": false,
+      "description": "Señal declarada de la zona. El nodo convierte el nivel físico leído en `asserted` o `deasserted` comparándolo con `asserted_level`. Desde v1.2.0, `no_data: true` declara una señal sin dato (sin cableado o sin canal útil todavía): el nodo no la lee y la trata siempre como `valid = false`, `value = unknown` (BR-BOR-12).",
+      "properties": {
+       "asserted_level": {
+        "$ref": "#/$defs/SignalLevel"
+       },
+       "code": {
+        "$ref": "#/$defs/Code"
+       },
+       "description_es": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Description Es",
+        "type": "string"
+       },
+       "no_data": {
+        "anyOf": [
+         {
+          "const": true,
+          "type": "boolean"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "No Data"
+       },
+       "role": {
+        "$ref": "#/$defs/SignalRole"
+       },
+       "signal_id": {
+        "$ref": "#/$defs/UUID"
+       },
+       "source": {
+        "$ref": "#/$defs/SignalSource"
+       }
+      },
+      "required": [
+       "signal_id",
+       "code",
+       "role",
+       "asserted_level",
+       "source",
+       "description_es"
+      ],
+      "title": "SignalDeclaration",
+      "type": "object"
+     },
+     "SignalLevel": {
+      "description": "Nivel físico de una señal.",
+      "enum": [
+       "high",
+       "low"
+      ],
+      "title": "SignalLevel",
+      "type": "string"
+     },
+     "SignalRole": {
+      "description": "Rol de una señal declarada en el catálogo de la zona.",
+      "enum": [
+       "energy",
+       "guard",
+       "start_command",
+       "auxiliary"
+      ],
+      "title": "SignalRole",
+      "type": "string"
+     },
+     "SignalSource": {
+      "additionalProperties": false,
+      "description": "Lector y canal de los que el nodo toma la señal.",
+      "properties": {
+       "channel": {
+        "maximum": 255,
+        "minimum": 0,
+        "title": "Channel",
+        "type": "integer"
+       },
+       "reader": {
+        "maxLength": 32,
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_.-]{0,31}$",
+        "title": "Reader",
+        "type": "string"
+       }
+      },
+      "required": [
+       "reader",
+       "channel"
+      ],
+      "title": "SignalSource",
+      "type": "object"
+     },
+     "SignedEnvelope": {
+      "additionalProperties": false,
+      "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga.",
+      "properties": {
+       "key_id": {
+        "$ref": "#/$defs/KeyId"
+       },
+       "payload": {
+        "$ref": "#/$defs/Payload"
+       },
+       "payload_canonical_sha256": {
+        "$ref": "#/$defs/Sha256Hex"
+       },
+       "signature": {
+        "maxLength": 88,
+        "minLength": 88,
+        "pattern": "^[A-Za-z0-9+/]{86}==$",
+        "title": "Signature",
+        "type": "string"
+       },
+       "signed_at": {
+        "$ref": "#/$defs/Timestamp"
+       }
+      },
+      "required": [
+       "payload",
+       "payload_canonical_sha256",
+       "signature",
+       "key_id",
+       "signed_at"
+      ],
+      "title": "SignedEnvelope",
+      "type": "object"
+     },
+     "StartCommandAsserted": {
+      "additionalProperties": false,
+      "description": "Condición `{signal_role: start_command, value: asserted}`: mando de arranque activo.",
+      "properties": {
+       "signal_role": {
+        "const": "start_command",
+        "title": "condition_signal_role",
+        "type": "string"
+       },
+       "value": {
+        "const": "asserted",
+        "title": "condition_signal_value",
+        "type": "string"
+       }
+      },
+      "required": [
+       "signal_role",
+       "value"
+      ],
+      "title": "StartCommandAsserted",
+      "type": "object"
+     },
+     "StartupTransitionPredicate": {
+      "additionalProperties": false,
+      "description": "Plantilla `startup_transition`: `all_of` contiene presencia y mando de arranque afirmado y, opcionalmente, energía no afirmada (arranque desde reposo); en cualquier orden y sin repetir; `min_duration_ms` entre 0 y 60 000; desde v1.2.0, `guard_conditions` opcional exige además una señal `guard` concreta afirmada o no afirmada (por ejemplo, arranque con el jumbo en posición).",
+      "properties": {
+       "all_of": {
+        "items": {
+         "anyOf": [
+          {
+           "$ref": "#/$defs/PresenceCondition"
+          },
+          {
+           "$ref": "#/$defs/StartCommandAsserted"
+          },
+          {
+           "$ref": "#/$defs/EnergyDeasserted"
+          }
+         ]
+        },
+        "maxItems": 3,
+        "minItems": 2,
+        "title": "All Of",
+        "type": "array"
+       },
+       "guard_conditions": {
+        "anyOf": [
+         {
+          "items": {
+           "$ref": "#/$defs/GuardSignalCondition"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Guard Conditions"
+       },
+       "min_duration_ms": {
+        "maximum": 60000,
+        "minimum": 0,
+        "title": "Min Duration Ms",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "all_of",
+       "min_duration_ms"
+      ],
+      "title": "StartupTransitionPredicate",
+      "type": "object"
+     },
+     "TechnicalId": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
+      "title": "TechnicalId",
+      "type": "string"
+     },
+     "Thresholds": {
+      "additionalProperties": false,
+      "description": "Umbrales de confianza: `0 < review < publication ≤ 1`. El esquema acota cada umbral; la comparación `review < publication` la verifica el modelo.",
+      "properties": {
+       "publication": {
+        "exclusiveMinimum": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Publication",
+        "type": "number"
+       },
+       "review": {
+        "exclusiveMaximum": 1.0,
+        "exclusiveMinimum": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Review",
+        "type": "number"
+       }
+      },
+      "required": [
+       "review",
+       "publication"
+      ],
+      "title": "Thresholds",
+      "type": "object"
+     },
+     "Timestamp": {
+      "maxLength": 24,
+      "minLength": 24,
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "title": "Timestamp",
+      "type": "string"
+     },
+     "UUID": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "UUID",
+      "type": "string"
+     }
+    },
+    "additionalProperties": false,
+    "description": "Una versión del catálogo de una zona con su sobre firmado conservado (BR-NUC-87).",
+    "properties": {
+     "catalog_version": {
+      "maximum": 2147483647,
+      "minimum": 1,
+      "title": "Catalog Version",
+      "type": "integer"
+     },
+     "changed_fields": {
+      "items": {
+       "$ref": "#/$defs/CatalogChangedField"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Changed Fields",
+      "type": "array"
+     },
+     "envelope": {
+      "$ref": "#/$defs/SignedEnvelope"
+     },
+     "reason_es": {
+      "maxLength": 500,
+      "minLength": 10,
+      "title": "Reason Es",
+      "type": "string"
+     },
+     "source_key": {
+      "maxLength": 47,
+      "minLength": 38,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[1-9][0-9]{0,9}$",
+      "title": "Source Key",
+      "type": "string"
+     },
+     "zone_id": {
+      "$ref": "#/$defs/UUID"
+     }
+    },
+    "required": [
+     "source_key",
+     "zone_id",
+     "catalog_version",
+     "changed_fields",
+     "reason_es",
+     "envelope"
+    ],
+    "title": "CatalogVersionPublished",
+    "type": "object"
+   },
+   "evidence_paths": [],
+   "free_text_paths": [
+    "/reason_es",
+    "/envelope/payload/standards[*]/title_es",
+    "/envelope/payload/standards[*]/declared_text",
+    "/envelope/payload/standards[*]/declared_by/display_name",
+    "/envelope/payload/signals[*]/description_es",
+    "/envelope/key_id",
+    "/envelope/payload/process_context/variables[*]/description_es"
+   ],
+   "label_rule": null,
+   "outbox_events": [
+    "catalog_updated",
+    "regression_marked"
+   ],
+   "record_type": "catalog_version_published",
+   "schema_version": 3,
+   "source_key_path": "/source_key",
+   "writer_unit": "U-03"
+  }
+ ]
+}

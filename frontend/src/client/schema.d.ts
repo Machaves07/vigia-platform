@@ -1009,6 +1009,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/zones/{zone_id}/process-context': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Variables de proceso de la zona: versión nueva del catálogo sin regresión */
+    put: operations['process_context_zones__zone_id__process_context_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/zones/{zone_id}/regression': {
     parameters: {
       query?: never;
@@ -3221,6 +3238,9 @@ export interface components {
     /**
      * CatalogChangedField
      * @description Qué cambió de una versión del catálogo a la siguiente.
+     *
+     *     ``process_context`` desde la versión 4 de ``catalog_version_published`` (TASK-594, A-129): las
+     *     variables de proceso de la zona; nunca marca la regresión (BR-GOB-52, Q7).
      * @enum {string}
      */
     CatalogChangedField:
@@ -3231,7 +3251,8 @@ export interface components {
       | 'thresholds'
       | 'clip_window'
       | 'episode'
-      | 'single_occupancy';
+      | 'single_occupancy'
+      | 'process_context';
     /** CatalogHistoryOut */
     CatalogHistoryOut: {
       /** Versions */
@@ -7268,6 +7289,15 @@ export interface components {
       closed_at?: string | null;
       /** Recurrence After Days */
       recurrence_after_days?: number | null;
+    };
+    /** ProcessContextBody */
+    ProcessContextBody: {
+      /** Before Ms */
+      before_ms: number;
+      /** Variables */
+      variables: components['schemas']['ProcessVariableDeclaration'][];
+      /** Reason Es */
+      reason_es: string;
     };
     /**
      * ProcessContextDeclaration
@@ -11547,6 +11577,41 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['WindowsBody'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CatalogVersionOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  process_context_zones__zone_id__process_context_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        zone_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProcessContextBody'];
       };
     };
     responses: {

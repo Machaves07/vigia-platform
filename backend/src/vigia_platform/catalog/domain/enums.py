@@ -146,7 +146,11 @@ class DocumentKind(enum.StrEnum):
 
 
 class CatalogChangedField(enum.StrEnum):
-    """Qué cambió de una versión del catálogo a la siguiente."""
+    """Qué cambió de una versión del catálogo a la siguiente.
+
+    ``process_context`` desde la versión 4 de ``catalog_version_published`` (TASK-594, A-129): las
+    variables de proceso de la zona; nunca marca la regresión (BR-GOB-52, Q7).
+    """
 
     STANDARDS = "standards"
     CAMERAS = "cameras"
@@ -156,6 +160,7 @@ class CatalogChangedField(enum.StrEnum):
     CLIP_WINDOW = "clip_window"
     EPISODE = "episode"
     SINGLE_OCCUPANCY = "single_occupancy"
+    PROCESS_CONTEXT = "process_context"
 
 
 CATALOG_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {

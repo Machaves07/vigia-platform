@@ -40,6 +40,7 @@ export type BodyOperationId =
   | 'new_standard_zones__zone_id__standards_post'
   | 'open_regression_rerun_zones__zone_id__walk_tests_regression_rerun_post'
   | 'open_walk_test_zones__zone_id__walk_tests_post'
+  | 'process_context_zones__zone_id__process_context_put'
   | 'publish_target_version_fleet_target_versions_post'
   | 'put_plant_fleet_thresholds_plants__plant_id__fleet_thresholds_put'
   | 'put_signatory_policy_plants__plant_id__signatory_policy_put'

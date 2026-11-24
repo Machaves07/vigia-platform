@@ -3,12 +3,14 @@
 Trece de los veintiséis tipos de U-03; los otros trece (ingesta, alta, credenciales y versiones
 de flota) están en ``fleet.record_types``. Todos los escribe U-03, en la cadena de **planta** y en
 su versión 1 (``walk_test_result`` también en la 2, TASK-216; ``catalog_version_published`` en la
-2 desde VIG-457, con el sobre del contrato v1.5.0, y en la 3 desde TASK-593, con el de v1.6.0), con
-un modelo de contenido estricto (``ContentModel``). Retirar un tipo o una
+2 desde VIG-457, con el sobre del contrato v1.5.0, en la 3 desde TASK-593, con el de v1.6.0, y
+en la 4 desde TASK-594, con ``process_context`` en ``changed_fields``), con un modelo de contenido
+estricto (``ContentModel``). Retirar un tipo o una
 versión está prohibido (BR-NUC-52): una versión nueva solo amplía. Las versiones 1 y 2 de
 ``catalog_version_published`` quedan **congeladas** en ``record_types_frozen`` (VIG-457: el sobre
 del contrato v1.1.0 que persistió ``f64df12``) y ``record_types_frozen_v1_5`` (TASK-593: el de
-v1.5.0), para que el contrato vigente no las cambie.
+v1.5.0), y la 3 en ``CatalogVersionPublishedV3`` (los ocho ``changed_fields`` de la 1), para que el
+contrato vigente no las cambie.
 
 - **Texto libre** (A-45): solo en las rutas declaradas de ``free_text_paths``; pasa la política
   base de U-02 y el validador mínimo de U-03 (D-7). Ningún campo identifica a una persona
@@ -44,6 +46,7 @@ from vigia_platform.catalog.domain.enums import (
     StepKind,
     WalkTestKind,
 )
+from vigia_platform.catalog.record_types_frozen import CatalogChangedField as ChangedFieldV1
 from vigia_platform.catalog.record_types_frozen import CatalogVersionPublishedV1
 from vigia_platform.catalog.record_types_frozen_v1_5 import CatalogVersionPublishedV2
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
@@ -160,6 +163,19 @@ class CatalogVersionPublished(ContentModel):
         if payload.zone_id != self.zone_id or payload.version != self.catalog_version:
             raise ValueError("el sobre firmado es de otra zona o de otra versión del catálogo")
         return self
+
+
+class CatalogVersionPublishedV3(CatalogVersionPublished):
+    """Versión 3 congelada (TASK-593): el sobre de v1.6.0 con los ocho ``changed_fields`` de la 1.
+
+    La 4 (TASK-594) solo añade ``process_context`` a la lista; sin congelar la 3, una base que ya
+    la persistió no arrancaría (BR-NUC-52). ``tests/unit/test_record_types_frozen_v1_6.py`` la
+    compara con el esquema que persistía ``f5b8d59``.
+    """
+
+    changed_fields: Annotated[  # type: ignore[assignment]
+        tuple[ChangedFieldV1, ...], Field(min_length=1, max_length=8)
+    ]
 
 
 class CatalogStandardRetired(ContentModel):
@@ -734,7 +750,7 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
     _catalog(
         "catalog_version_published",
-        CatalogVersionPublished,
+        CatalogVersionPublishedV3,
         source_key_path="/source_key",
         free_text_paths=(
             "/reason_es",
@@ -743,6 +759,18 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         ),
         outbox_events=("catalog_updated", "regression_marked"),
         schema_version=3,
+    ),
+    _catalog(
+        "catalog_version_published",
+        CatalogVersionPublished,
+        source_key_path="/source_key",
+        free_text_paths=(
+            "/reason_es",
+            *ENVELOPE_FREE_TEXT_PATHS,
+            PROCESS_VARIABLE_FREE_TEXT_PATH,
+        ),
+        outbox_events=("catalog_updated", "regression_marked"),
+        schema_version=4,
     ),
     _catalog(
         "standard_admission_test",
@@ -833,10 +861,11 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     ),
 )
 """Los trece tipos del catálogo, en versión 1 (domain-entities §5), y la versión 2 de
-``walk_test_result`` (TASK-216) y las 2 y 3 de ``catalog_version_published`` (VIG-457 y TASK-593:
-los sobres de los contratos v1.5.0, congelado en ``record_types_frozen_v1_5``, y v1.6.0; la 1,
-congelada en ``record_types_frozen``), cada una justo después de la anterior: las versiones se
-registran en orden."""
+``walk_test_result`` (TASK-216) y las 2, 3 y 4 de ``catalog_version_published`` (VIG-457,
+TASK-593 y TASK-594: los sobres de los contratos v1.5.0, congelado en ``record_types_frozen_v1_5``,
+y v1.6.0, con ocho ``changed_fields`` en la 3 y ``process_context`` en la 4; la 1, congelada en
+``record_types_frozen``), cada una justo después de la anterior: las versiones se registran en
+orden."""
 
 
 def register_catalog_record_types(registry: RecordTypeRegistry) -> None:

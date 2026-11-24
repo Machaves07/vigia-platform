@@ -12,7 +12,11 @@ que los escribe ahora.
 
 ``ledger_record_type_18981b6.json`` es la misma tabla con vigia-platform ``18981b6`` (contrato
 v1.5.0), la que dejó la plataforma de integración antes de adoptar v1.6.0; ``V1_6_UPGRADED_TYPES``
-es su oráculo: los tres tipos cuyo esquema amplía v1.6.0 (TASK-593).
+es su oráculo: los tres tipos cuyo esquema amplía v1.6.0 (TASK-593; ``catalog_version_published``
+llega a la 4 con ``process_context`` en ``changed_fields``, TASK-594).
+
+``catalog_version_published_v3_f5b8d59.json`` es la fila de la versión 3 que persistía
+vigia-platform ``f5b8d59`` (TASK-593, contrato v1.6.0) antes de que TASK-594 subiera el tipo a la 4.
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ F64DF12_FIXTURE: Final = (
 F64DF12_COMMIT: Final = "f64df12ad91deb1e6457fa5d4db4afe15290a99c"
 
 UPGRADED_TYPES: Final = {
-    "catalog_version_published": 3,
+    "catalog_version_published": 4,
     "ingest_rejected": 2,
     "finding_received": 2,
     "detection_for_review_received": 2,
@@ -54,7 +58,7 @@ V1_5_FIXTURE: Final = F64DF12_FIXTURE.with_name("ledger_record_type_18981b6.json
 V1_5_COMMIT: Final = "18981b64c94cb68a3b03d66b11babe9f8db0e808"
 
 V1_6_UPGRADED_TYPES: Final = {
-    "catalog_version_published": 3,
+    "catalog_version_published": 4,
     "finding_received": 2,
     "detection_for_review_received": 2,
 }

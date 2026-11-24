@@ -95,7 +95,11 @@ afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
 });
 
-export async function renderPage(element: ReactNode, path = `/zones/${ZONE}/catalog/parameters`) {
+export async function renderPage(
+  element: ReactNode,
+  path = `/zones/${ZONE}/catalog/parameters`,
+  current: Catalog = catalog(),
+) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
@@ -119,7 +123,7 @@ export async function renderPage(element: ReactNode, path = `/zones/${ZONE}/cata
   await session.load();
   installTransport(createTransport({ clock, connection, origin: 'http://localhost' }));
   server.use(
-    http.get('http://localhost/zones/:zone/catalog', () => HttpResponse.json(catalog())),
+    http.get('http://localhost/zones/:zone/catalog', () => HttpResponse.json(current)),
     http.get('http://localhost/zones/:zone/regression', () =>
       HttpResponse.json({ zone_id: ZONE, state: 'pending' }),
     ),

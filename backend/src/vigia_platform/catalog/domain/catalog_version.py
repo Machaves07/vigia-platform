@@ -11,7 +11,8 @@ catalog_version``) y dice qué versiones de estándar nacen, cuáles se cierran 
 cambiaron. Las variantes de cambio son las de S-PLA-04 y las rutas de parámetros (nota de
 business-rules §1): estándar nuevo (el primero de la zona crea la versión 1 con
 ``InitialZoneParameters``), versión nueva de un estándar, retiro, cámaras, cobertura mínima,
-señales, umbrales, ventanas y marca unipersonal.
+señales, umbrales, ventanas, marca unipersonal y variables de proceso (v1.6.0, A-129; las conserva
+cualquier otro cambio).
 
 ``single_occupancy`` y ``aggregation_window_minutes`` (15 a 480, 60 por defecto) se versionan con
 el catálogo pero **nunca** entran en el ``ZoneCatalog`` firmado (BR-GOB-10, NFR-GOB-38): el
@@ -65,6 +66,7 @@ __all__ = [
     "RetireStandard",
     "SetCameras",
     "SetMinimumCoverage",
+    "SetProcessContext",
     "SetSignals",
     "SetSingleOccupancy",
     "SetThresholds",
@@ -83,8 +85,11 @@ AGGREGATION_WINDOW_MIN: Final = 15
 AGGREGATION_WINDOW_MAX: Final = 480
 AGGREGATION_WINDOW_DEFAULT: Final = 60
 """``aggregation_window_minutes``: de 15 a 480, 60 por defecto `[estimación propia]` (BR-GOB-10)."""
-ALL_CHANGED_FIELDS: Final = tuple(CatalogChangedField)
-"""Lo que declara la versión 1 de una zona: todo el catálogo y la marca unipersonal."""
+ALL_CHANGED_FIELDS: Final = tuple(
+    field for field in CatalogChangedField if field is not CatalogChangedField.PROCESS_CONTEXT
+)
+"""Lo que declara la versión 1 de una zona: todo el catálogo y la marca unipersonal. Las variables
+de proceso son opcionales y nunca nacen con la zona: llegan después con ``SetProcessContext``."""
 MAX_CHANGED_FIELDS: Final = 8
 
 
@@ -278,6 +283,21 @@ class SetWindows:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SetProcessContext:
+    """``PUT /zones/{zone_id}/process-context`` (v1.6.0, A-129): las variables de proceso.
+
+    ``variables`` son ``ProcessVariableDeclaration`` del contrato (de 1 a 12); vacías, la versión
+    nueva sale **sin** el bloque. Las reglas son las del modelo del contrato (regla 7 del
+    catálogo: binaria sobre una señal declarada de la misma versión, ``variable_id`` y ``code``
+    únicos, escala no plana) y las comprueba el lector estricto al componer. Son contexto: nunca
+    entran en un predicado, así que no marcan la regresión (BR-GOB-52, Q7).
+    """
+
+    before_ms: int
+    variables: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SetSingleOccupancy:
     """``PUT .../single-occupancy``: la marca unipersonal y su ventana de agregación."""
 
@@ -295,6 +315,7 @@ CatalogChange = (
     | SetThresholds
     | SetWindows
     | SetSingleOccupancy
+    | SetProcessContext
 )
 
 
@@ -563,6 +584,17 @@ def plan_publication(
             window = minutes
             declared_occupancy = True
             changed = (CatalogChangedField.SINGLE_OCCUPANCY,)
+        case SetProcessContext(before_ms=before_ms, variables=variables):
+            if type(before_ms) is not int or not isinstance(variables, tuple):
+                raise CatalogRuleViolated(CatalogViolation.REQUEST_INVALID)
+            if variables:
+                base["process_context"] = {
+                    "before_ms": before_ms,
+                    "variables": [_mapping(v) for v in variables],
+                }
+            else:
+                base.pop("process_context", None)
+            changed = (CatalogChangedField.PROCESS_CONTEXT,)
         case _:
             raise TypeError("cambio de catálogo desconocido")
 
@@ -610,6 +642,9 @@ def _compose(
             "episode": dict(base["episode"]),
             "commissioning_watermark": True,
         }
+        if base.get("process_context") is not None:
+            # Opcional (v1.6.0): cualquier otro cambio lo conserva tal cual (A-129).
+            document["process_context"] = dict(base["process_context"])
         coverage = MinimumCoverage(
             required_count=document["minimum_coverage"]["required_count"],
             required_camera_ids=tuple(

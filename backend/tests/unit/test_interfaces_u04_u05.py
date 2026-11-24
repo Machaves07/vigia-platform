@@ -526,6 +526,12 @@ WITHDRAWN_ROUTES: Final = {
 }
 
 ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, str]]] = {
+    ("PUT", "/zones/{zone_id}/process-context"): (
+        "catalog.manage",
+        "A-129 (TASK-594, Q8): variables de proceso de la zona en SCR-04, versión nueva del "
+        "catálogo firmado sin regresión (Q7), posterior a la interfaz v1.5; la interfaz no la "
+        "lista",
+    ),
     ("POST", "/zones/{zone_id}/framing-recaptures"): (
         "commissioning.run",
         "A-55: recaptura del encuadre (precisión (c) de v1.5), marca la regresión con "

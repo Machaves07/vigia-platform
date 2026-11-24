@@ -67,6 +67,7 @@ from vigia_platform.catalog.application.publication import (
 )
 from vigia_platform.catalog.detail_codes import CatalogDetailCode
 from vigia_platform.catalog.domain.catalog_version import (
+    ALL_CHANGED_FIELDS,
     CatalogState,
     InitialZoneParameters,
     NewStandard,
@@ -519,7 +520,7 @@ def test_the_first_publication_writes_version_standard_records_cameras_and_one_e
 
     version = catalogs.publish(admin, zone, _first(single_occupancy=True))
 
-    assert version.catalog_version == 1 and version.changed_fields == tuple(CatalogChangedField)
+    assert version.catalog_version == 1 and version.changed_fields == ALL_CHANGED_FIELDS
     (row,) = catalogs.versions(zone)
     assert row["superseded_at"] is None and row["single_occupancy"] is True
     assert row["aggregation_window_minutes"] == 60 and row["role_in_use"] == "administrator"
@@ -557,7 +558,7 @@ def test_the_first_publication_writes_version_standard_records_cameras_and_one_e
         "catalog_version": 1,
         "changed_fields": [f.value for f in CatalogChangedField],
     }
-    assert catalogs.marker.calls[-1] == (zone, None, 1, tuple(CatalogChangedField))
+    assert catalogs.marker.calls[-1] == (zone, None, 1, ALL_CHANGED_FIELDS)
 
 
 def test_a_sequence_of_changes_numbers_without_gaps_and_closes_exactly_the_previous(
