@@ -24,5 +24,11 @@ installTransport(
 const root = document.getElementById('root');
 if (root === null) throw new Error('Falta #root en el arnés');
 createRoot(root).render(
-  <BlurredEpisodePhoto photoId={PHOTO_ID} hasImage absentReason={null} alt={ALT} />,
+  <BlurredEpisodePhoto
+    photoId={PHOTO_ID}
+    hasImage
+    absentReason={null}
+    alt={ALT}
+    notice="commissioning"
+  />,
 );

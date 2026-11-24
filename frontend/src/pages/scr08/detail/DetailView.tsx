@@ -10,11 +10,15 @@
  * Todas las fechas se muestran tal como las da el servidor, agregadas en una zona unipersonal
  * (BR-LAZ-06): la consola no recalcula ninguna hora. Ninguna sección nueva tiene botones de editar
  * ni de borrar (BR-APP-24).
+ *
+ * Cada tramo lleva la foto del hallazgo con el aspecto de SCR-06 (TASK-590, A-128): la del
+ * registro ancla (el primer tramo) se pide al abrir el detalle y la de los demás con «Ver foto».
  */
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import platform from '../../../../../backend/resources/labels.platform.es.json';
 import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
+import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { causeLabel } from '@/components/ObservabilityBadge/encoding';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
@@ -558,6 +562,15 @@ function Clips({
   );
 }
 
+type DetailRecord = FindingDetail['records'][number];
+
+/** Orden de tramo; un registro sin tramo va después, en el orden en que llega (orden estable). */
+function bySegment(a: DetailRecord, b: DetailRecord): number {
+  return (
+    (a.segment_index ?? Number.POSITIVE_INFINITY) - (b.segment_index ?? Number.POSITIVE_INFINITY)
+  );
+}
+
 function Records({
   detail,
   records,
@@ -572,6 +585,9 @@ function Records({
   readonly canViewClips: boolean;
 }) {
   if (detail.records.length === 0) return null;
+  // El registro ancla (el primer tramo): su foto se pide al abrir el detalle; la de los demás
+  // tramos, solo con «Ver foto» (TASK-590, A-128).
+  const anchor = [...detail.records].sort(bySegment)[0]?.record_id ?? null;
   return (
     <section aria-label={text('scr08.detail.records')}>
       <h2>{text('scr08.detail.records')}</h2>
@@ -602,6 +618,19 @@ function Records({
           return (
             <li key={record.record_id} data-part="record">
               <h3>{title}</h3>
+              {clock !== null && (
+                <FindingPhoto
+                  findingStateId={detail.finding_state_id}
+                  photos={record.photos}
+                  segment={record.segment_index === null ? null : record.segment_index + 1}
+                  canView={canViewClips}
+                  request={record.record_id === anchor ? 'on_mount' : 'on_gesture'}
+                  timeZone={timeZone}
+                  aggregated={detail.time_aggregated}
+                  clock={clock}
+                  headingLevel={4}
+                />
+              )}
               {contract === undefined && (
                 <p>
                   {text('scr08.detail.received_at')}:{' '}

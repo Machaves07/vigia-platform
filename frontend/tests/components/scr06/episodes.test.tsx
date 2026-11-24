@@ -189,12 +189,12 @@ describe('listado', { timeout: TEST_TIMEOUT }, () => {
     expect(cell(0, 'would_have_been')).toBe(label('record_kind', 'finding'));
     expect(cell(0, 'family')).toBe(label('predicate_family', 'dwell'));
     expect(cell(0, 'camera')).toBe(CAMERA);
-    expect(cell(0, 'standard')).toBe(`${text('scr06_episodes.standard_version')} 3`);
+    expect(cell(0, 'standard')).toBe(`${text('episode_photo_panel.standard_version')} 3`);
     expect(cell(0, 'max_confidence')).toBe('0,91');
     expect(cell(0, 'duration')).toBe('4 s');
-    expect(cell(0, 'photo')).toBe(text('scr06_episodes.with_photo'));
+    expect(cell(0, 'photo')).toBe(text('episode_photo_panel.with_photo'));
     expect(cell(1, 'would_have_been')).toBe(label('record_kind', 'detection_for_review'));
-    expect(cell(1, 'camera')).toBe(text('scr06_episodes.no_camera'));
+    expect(cell(1, 'camera')).toBe(text('episode_photo_panel.no_camera'));
     expect(rows[1]?.querySelector('[data-part="absent_reason"]')?.textContent).toBe(
       label('image_absent_reason', 'disk_pressure'),
     );

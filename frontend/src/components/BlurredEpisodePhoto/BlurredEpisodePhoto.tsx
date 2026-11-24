@@ -16,10 +16,15 @@
  *   y el menú contextual no se abre sobre la foto.
  *   Una capa transparente cubre el lienzo: el menú nativo de Firefox (Mayús + clic derecho) no
  *   cae sobre él.
- * - **Textos.** Aviso fijo de material de puesta en marcha, siempre. Con imagen, la superposición
- *   «Imagen difuminada automáticamente» (nunca «por construcción»: un tercero no detectado puede
- *   salir nítido, riesgo R1). Sin imagen, el motivo etiquetado (`image_absent_reason`), sin la
- *   superposición (no hay imagen; decisión de la torre en A-112) y ninguna petición.
+ * - **Textos.** Con `notice="commissioning"` (SCR-06), el aviso fijo de material de puesta en
+ *   marcha, siempre; con `notice="finding"` (la foto del hallazgo, A-128), ninguno: ahí la foto sí
+ *   es la evidencia del hallazgo. Con imagen, la superposición «Imagen difuminada
+ *   automáticamente» (nunca «por construcción»: un tercero no detectado puede salir nítido, riesgo
+ *   R1). Sin imagen, el motivo etiquetado (`image_absent_reason`), sin la superposición (no hay
+ *   imagen; decisión de la torre en A-112) y ninguna petición.
+ * - **Dos puertos.** Por omisión, la imagen del episodio de la sombra (`readEpisodePhotoImage`);
+ *   la foto del hallazgo inyecta la suya (`readFindingPhotoImage`, TASK-590), con la misma
+ *   política: una petición, sin reintentos ni caché.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -42,6 +47,11 @@ export interface BlurredEpisodePhotoProps {
   readonly absentReason: string | null;
   /** Texto alternativo del lienzo, ya resuelto por la pantalla. */
   readonly alt: string;
+  /**
+   * Aviso fijo sobre la foto: `commissioning` (SCR-06) pone el de material de puesta en marcha;
+   * `finding` (la foto del hallazgo, A-128), ninguno.
+   */
+  readonly notice: 'commissioning' | 'finding';
   /** Puerto de la imagen; por omisión, `readEpisodePhotoImage` (una petición, sin reintentos). */
   readonly requestImage?: (photoId: string, signal: AbortSignal) => Promise<Blob>;
   /** Decodificador; por omisión, `createImageBitmap` del navegador. */
@@ -72,6 +82,7 @@ export function BlurredEpisodePhoto({
   hasImage,
   absentReason,
   alt,
+  notice,
   requestImage = readEpisodePhotoImage,
   decodeImage = decodeWithBrowser,
   onImageError,
@@ -152,9 +163,11 @@ export function BlurredEpisodePhoto({
 
   return (
     <figure className={styles.photo} aria-label={text('media.episode_photo.label')}>
-      <p className={styles.notice} data-text-key="media.episode_photo.commissioning_notice">
-        {text('media.episode_photo.commissioning_notice')}
-      </p>
+      {notice === 'commissioning' ? (
+        <p className={styles.notice} data-text-key="media.episode_photo.commissioning_notice">
+          {text('media.episode_photo.commissioning_notice')}
+        </p>
+      ) : null}
       <div ref={frameRef} className={styles.frame} data-part="photo_frame">
         {hasImage ? (
           <canvas

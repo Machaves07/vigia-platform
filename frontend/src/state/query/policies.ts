@@ -124,8 +124,9 @@ export const UNCACHED_READS: Readonly<Record<string, string>> = {
     'imagen por fetch del transporte (X-Vigia-Concession) pintada en un canvas, una petición por ' +
     'apertura del detalle y sin reintentos (no-store, auditada en cada petición), nunca en caché',
   'GET /loop/findings/{finding_state_id}/photos/{photo_id}/image':
-    'imagen de la foto del hallazgo (TASK-589) por fetch pintada en un canvas, sin reintentos ' +
-    '(private, no-store, auditada en cada petición), nunca en caché',
+    'imagen de la foto del hallazgo (TASK-589) por fetch pintada en un canvas (TASK-590), una ' +
+    'petición por apertura o por «Ver foto» y sin reintentos (private, no-store, auditada en ' +
+    'cada petición), nunca en caché',
 };
 
 export const READ_POLICIES: Readonly<Record<ReadOperation, QueryPolicy>> = Object.fromEntries(

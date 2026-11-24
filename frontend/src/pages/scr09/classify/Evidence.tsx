@@ -7,9 +7,14 @@
  *
  * Junto al resumen, las señales de cada tramo durante el episodio (TASK-587, O-2 paso a): se
  * clasifica con el estado de la máquina a la vista, desde el mismo detalle, sin lectura nueva.
+ *
+ * Arriba, la foto del hallazgo con el aspecto de SCR-06 (TASK-590, A-128): la foto `0` del registro
+ * ancla (el primer tramo), pedida **al montar**, una vez por apertura: al clasificar, la foto es lo
+ * que se decide. Las demás fotos del tramo (la ráfaga, fase 2) solo con el gesto.
  */
 import type { ReactNode } from 'react';
 import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
+import { FindingPhoto } from '@/components/EpisodePhotoPanel/FindingPhoto';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { SignalReadings } from '@/pages/shared/SignalReadings';
 import { classifyClock, type FindingDetail } from '@/ports/scr09Classify';
@@ -87,8 +92,22 @@ export function FindingEvidence({
     record.clips.map((clip) => ({ clip, segment: record.segment_index })),
   );
   const standard = detail.standard;
+  const anchor = [...detail.records].sort(bySegment)[0];
   return (
     <>
+      <FindingPhoto
+        findingStateId={detail.finding_state_id}
+        photos={anchor?.photos ?? []}
+        segment={
+          anchor === undefined || anchor.segment_index === null ? null : anchor.segment_index + 1
+        }
+        canView={canViewClips}
+        request="on_mount"
+        timeZone={timeZone}
+        aggregated={detail.time_aggregated}
+        clock={classifyClock()}
+        headingLevel={2}
+      />
       <section aria-label={text('scr08.detail.summary')} data-part="finding_evidence">
         <h2>{text('scr08.detail.summary')}</h2>
         <dl>

@@ -117,7 +117,12 @@ export default function Page() {
       ) : data === undefined ? (
         <ScreenState state="loading" />
       ) : (
-        <TimelineView timeline={data} timeZone={plant?.timezone ?? 'UTC'} />
+        <TimelineView
+          timeline={data}
+          timeZone={plant?.timezone ?? 'UTC'}
+          canViewPhoto={principal?.effective_permissions.includes('evidence.read') ?? false}
+          clock={detailClock()}
+        />
       )}
     </main>
   );

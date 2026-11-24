@@ -14,18 +14,8 @@
   "scr06_episodes.col.expires_at": "Vencimiento",
   "scr06_episodes.col.photo": "Foto",
   "scr06_episodes.col.open": "Detalle",
-  "scr06_episodes.segment_start": "inicio del tramo, sin cuadro",
-  "scr06_episodes.no_camera": "Sin cámara",
-  "scr06_episodes.standard_version": "Versión",
-  "scr06_episodes.with_photo": "Con foto",
-  "scr06_episodes.without_photo": "Sin foto",
   "scr06_episodes.open": "Ver el episodio",
   "scr06_episodes.detail.title": "Episodio de la sombra",
   "scr06_episodes.detail.back": "Volver a los episodios de la sombra",
-  "scr06_episodes.detail.facts": "Datos del episodio",
-  "scr06_episodes.detail.segment": "Tramo del episodio",
-  "scr06_episodes.detail.started_at": "Inicio del tramo",
-  "scr06_episodes.detail.ended_at": "Fin del tramo",
-  "scr06_episodes.detail.received_at": "Recibido en la plataforma",
   "scr06_episodes.detail.photo_alt": "Foto difuminada del cuadro de mayor confianza del episodio"
 }
