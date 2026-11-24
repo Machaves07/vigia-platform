@@ -370,3 +370,90 @@ describe('almacén no disponible (BR-APP-58, BR-APP-74)', () => {
     expect(seen).toEqual([`POST /evidence/${EVIDENCE_ID}/read-url`]);
   });
 });
+
+describe('un clip que no carga (O-15, TASK-609)', () => {
+  async function playing() {
+    serveReadUrl();
+    const rendered = renderPlayer();
+    fireEvent.click(screen.getByRole('button', { name: t('media.clip.play') }));
+    await waitFor(() => {
+      expect(rendered.video.getAttribute('src')).toBe(issued[0]);
+    }, WAIT);
+    return rendered;
+  }
+
+  function failure(): HTMLElement | null {
+    return document.querySelector('[data-text-key="media.clip.load_failed"]');
+  }
+
+  it('el error del <video> da «No se pudo cargar el clip» con «Reintentar», sin pedir otra URL', async () => {
+    const { video } = await playing();
+    fireEvent.error(video);
+    const alert = await screen.findByRole('alert', {}, WAIT);
+    expect(alert.getAttribute('data-text-key')).toBe('media.clip.load_failed');
+    expect(alert.querySelector('p')?.textContent).toBe(t('media.clip.load_failed'));
+    expect(screen.getByRole('button', { name: t('media.clip.retry') })).toBeDefined();
+    // La URL que falló sale del elemento; el resto de la pantalla sigue.
+    expect(video.hasAttribute('src')).toBe(false);
+    expect(screen.getByTestId('resto').textContent).toBe('Resto de la pantalla');
+    // m_reintento_automatico: ni en 10 minutos simulados se pide otra sin gesto.
+    await act(async () => {
+      clock.advance(10 * 60_000);
+      await Promise.resolve();
+    });
+    expect(requested).toEqual([EVIDENCE_ID]);
+  });
+
+  it('«Reintentar» pide una URL nueva por el gesto y la pone en el src', async () => {
+    const { video } = await playing();
+    fireEvent.error(video);
+    await screen.findByRole('alert', {}, WAIT);
+    fireEvent.click(screen.getByRole('button', { name: t('media.clip.retry') }));
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe(issued[1]);
+    }, WAIT);
+    expect(requested).toEqual([EVIDENCE_ID, EVIDENCE_ID]);
+    expect(issued[1]).not.toBe(issued[0]);
+    expect(failure()).toBeNull();
+  });
+
+  it('stalled sin datos durante 10 s también falla; antes de los 10 s, no', async () => {
+    const { video } = await playing();
+    expect(video.readyState).toBe(0);
+    fireEvent(video, new Event('stalled'));
+    await act(async () => {
+      clock.advance(9_999);
+      await Promise.resolve();
+    });
+    expect(failure()).toBeNull();
+    await act(async () => {
+      clock.advance(1);
+      await Promise.resolve();
+    });
+    expect(failure()).not.toBeNull();
+    expect(requested).toEqual([EVIDENCE_ID]);
+  });
+
+  it('stalled con datos que llegan antes de los 10 s no falla', async () => {
+    const { video } = await playing();
+    fireEvent(video, new Event('stalled'));
+    fireEvent(video, new Event('loadeddata'));
+    await act(async () => {
+      clock.advance(60_000);
+      await Promise.resolve();
+    });
+    expect(failure()).toBeNull();
+    expect(video.getAttribute('src')).toBe(issued[0]);
+  });
+
+  it('un error sin URL en el elemento (antes de pulsar) no dice nada', async () => {
+    serveReadUrl();
+    const { video } = renderPlayer();
+    fireEvent.error(video);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(failure()).toBeNull();
+    expect(screen.getByRole('button', { name: t('media.clip.play') })).toBeDefined();
+  });
+});

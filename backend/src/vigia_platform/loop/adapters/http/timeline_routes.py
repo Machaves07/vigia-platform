@@ -6,7 +6,10 @@ del expediente (``ledger_detail_read``, BR-LAZ-09), con un hito por registro en 
 expediente, la hora presentada (agregada en zona unipersonal, BR-LAZ-06), el tiempo desde el hito
 anterior, quién (rol y nombre del usuario de la plataforma, solo si el registro lo trae), los
 campos elegidos de cada registro y el plazo que aplica con si se cumplió; arriba, el resumen. El
-hito de detección lleva el resumen de sus valores de proceso (``process``, A-129, TASK-595).
+hito de detección lleva el resumen de sus valores de proceso (``process``, A-129, TASK-595). Cada
+evidencia y cada cierre llevan las referencias de sus adjuntos (``attachments``, TASK-609):
+``attachment_id``, tipo y tamaño, sin URL, ``storage_key``, suma ni ``filename``; la URL se pide
+al abrir el adjunto (``POST /loop/attachments/{attachment_id}/read-url``, auditada aparte).
 
 Inexistente, de otra organización, fuera del alcance o en una zona sin compuerta de uso aprobada
 en el instante del hecho: ``not_found``. Sin compuerta legible, **503 ``temporarily_unavailable``
@@ -99,6 +102,16 @@ class TimelineDetailsOut(_Strict):
     review_note: str | None
 
 
+class TimelineAttachmentOut(_Strict):
+    """La referencia de un adjunto del cierre: lo justo para pintarlo o descargarlo a demanda."""
+
+    attachment_id: uuid.UUID
+    content_type: str
+    """El MIME del registro (``image/jpeg``, ``image/png`` o ``application/pdf``): de transporte,
+    sin etiqueta (A-42)."""
+    size_bytes: int
+
+
 class TimelineMilestoneOut(_Strict):
     kind: MilestoneKind
     record_type: str
@@ -118,6 +131,10 @@ class TimelineMilestoneOut(_Strict):
     """En el hito de detección, una entrada por variable de proceso del registro (A-129): nombre,
     unidad, decimales, par de estados y el valor o estado en el instante del hecho con su hora
     (agregada en zona unipersonal); sin la serie. Vacía en los demás hitos."""
+    attachments: tuple[TimelineAttachmentOut, ...]
+    """En ``action_evidence_added``, sus adjuntos en el orden del registro; en ``closure``, los
+    que cierra, sin repetir (TASK-609). Sin URL: se pide al abrir, con su propia auditoría. Vacía
+    en los demás hitos."""
 
 
 class TimelineSummaryOut(_Strict):
@@ -200,6 +217,14 @@ def _milestone(milestone: Milestone) -> TimelineMilestoneOut:
         ),
         photos=tuple(finding_photo_out(photo) for photo in milestone.photos),
         process=process_summary_out(milestone.process),
+        attachments=tuple(
+            TimelineAttachmentOut(
+                attachment_id=attachment.attachment_id,
+                content_type=attachment.content_type,
+                size_bytes=attachment.size_bytes,
+            )
+            for attachment in milestone.attachments
+        ),
     )
 
 

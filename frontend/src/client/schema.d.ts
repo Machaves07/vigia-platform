@@ -8718,6 +8718,21 @@ export interface components {
       /** Display Name */
       display_name: string;
     };
+    /**
+     * TimelineAttachmentOut
+     * @description La referencia de un adjunto del cierre: lo justo para pintarlo o descargarlo a demanda.
+     */
+    TimelineAttachmentOut: {
+      /**
+       * Attachment Id
+       * Format: uuid
+       */
+      attachment_id: string;
+      /** Content Type */
+      content_type: string;
+      /** Size Bytes */
+      size_bytes: number;
+    };
     /** TimelineDeadlineOut */
     TimelineDeadlineOut: {
       /** Due At */
@@ -8796,6 +8811,8 @@ export interface components {
       photos: components['schemas']['FindingPhotoOut'][];
       /** Process */
       process: components['schemas']['ProcessVariableSummaryOut'][];
+      /** Attachments */
+      attachments: components['schemas']['TimelineAttachmentOut'][];
     };
     /** TimelineSummaryOut */
     TimelineSummaryOut: {

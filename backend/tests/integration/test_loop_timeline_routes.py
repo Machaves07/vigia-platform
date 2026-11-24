@@ -20,6 +20,10 @@ puertos reales de U-03 contados (``DetailPorts``) y la ficha de vida con ``Lecto
 - **Plazo de clasificación** (el caso del 22-11): la configuración creada **después** de la
   clasificación no cambia el plazo; ``met`` coincide con el numerador de la métrica de BR-LAZ-112
   sobre el mismo expediente.
+- **Adjuntos del cierre** (TASK-609): una evidencia con un JPG y un PDF y su cierre traen sus
+  referencias (``attachment_id``, tipo y tamaño) en orden, sin repetir y sin suma ni nombre de
+  archivo; por las rutas reales, el cierre cita los PNG verificados de la evidencia; con 50
+  adjuntos, una sola entrada de auditoría y ninguna ``closure_attachment_read_granted``.
 
 Solo datos generados. Las marcas salen del reloj simulado, que arranca en la hora de la base
 (retro 14); topes de las esperas de la base: 60 s (retro 15).
@@ -29,8 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -52,7 +57,7 @@ from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
 from vigia_platform.ledger.application import reader as reader_module
-from vigia_platform.ledger.application.audit_writer import ResourceRef
+from vigia_platform.ledger.application.audit_writer import AuditOperation, ResourceRef
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import EvidenceService as LedgerEvidence
 from vigia_platform.ledger.application.reader import (
@@ -437,23 +442,29 @@ def test_in_a_single_occupancy_zone_the_assignee_is_named_and_the_times_stay_agg
 # --- una sola auditoría por petición -------------------------------------------------------------
 
 
-def _evidence(stack: TimelineStack, subject: IngestedSubject, action_id: uuid.UUID) -> None:
+def _evidence(
+    stack: TimelineStack,
+    subject: IngestedSubject,
+    action_id: uuid.UUID,
+    attachments: Sequence[Mapping[str, Any]] = (),
+) -> uuid.UUID:
     """Una entrada ``action_evidence_added`` por el escritor real (la ruta limita a 20 por acción;
-    aquí se prueba la lectura con muchas)."""
+    aquí se prueba la lectura con muchas); su ``evidence_entry_id``."""
     world = stack.actions.world.stack
     stack.actions.tick()
+    entry_id = world.uuid7()
     # Una entrada de evidencia no mueve el estado (no se «aplica»): basta con que se escriba.
     receipt, _ = stack.actions.world.write(
         subject.organization,
         "action_evidence_added",
         {
-            "evidence_entry_id": str(world.uuid7()),
+            "evidence_entry_id": str(entry_id),
             "action_id": str(action_id),
             "subject_id": str(subject.subject_id),
             "description": "Resguardo fijo revisado y anclado en el acceso de la zona",
             "performed_at": format_timestamp(world.now() - timedelta(hours=1)),
             "performed_by_role": "Técnico de mantenimiento",
-            "attachments": [],
+            "attachments": [dict(attachment) for attachment in attachments],
             "added_by": {
                 "user_id": str(world.authz.operator_id),
                 "display_name": "Coordinación SST sintética",
@@ -463,6 +474,7 @@ def _evidence(stack: TimelineStack, subject: IngestedSubject, action_id: uuid.UU
         },
     )
     assert isinstance(receipt, Receipt), receipt
+    return entry_id
 
 
 def _one_entry(
@@ -1104,3 +1116,162 @@ def test_the_reader_never_brings_a_zone_record_as_plant_configuration(
     history = _history(stack, who, finding, preceding=("action_evidence_added",))
     assert history is not None and history.preceding_complete is True
     assert history.preceding == ()  # ni el de la zona hermana ni la configuración (otro tipo)
+
+
+# --- TASK-609: los adjuntos del cierre en la ficha -----------------------------------------------
+
+_REFERENCE_FIELDS: Final = frozenset({"attachment_id", "content_type", "size_bytes"})
+
+
+def _declared(stack: TimelineStack, content_type: str, note: str) -> dict[str, Any]:
+    """Un adjunto declarado en una evidencia del escritor real: la ficha no lee el almacén, así
+    que basta su referencia (los bytes son sintéticos y solo dan la suma)."""
+    data = f"adjunto sintético {note} {uuid.uuid4().hex}".encode()
+    return {
+        "attachment_id": str(stack.actions.world.stack.uuid7()),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "content_type": content_type,
+        "size_bytes": len(data),
+        "filename": f"evidencia-{note}.bin",
+        "no_identifiable_person_declared": True,
+    }
+
+
+def _reference(attachment: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: attachment[key] for key in _REFERENCE_FIELDS}
+
+
+def _write_closure_of(
+    stack: TimelineStack,
+    subject: IngestedSubject,
+    action_id: uuid.UUID,
+    entry_ids: Sequence[uuid.UUID],
+    digests: Sequence[str],
+) -> None:
+    """``closure`` firmado por el escritor real con las sumas que cita (como ``write_closure``)."""
+    world = stack.actions.world.stack
+    stack.actions.write_record(
+        subject,
+        "closure",
+        {
+            "closure_id": str(world.uuid7()),
+            "subject_kind": subject.subject_kind,
+            "subject_id": str(subject.subject_id),
+            "anchor_record_id": str(subject.record_id),
+            "action_id": str(action_id),
+            "action_type": "engineering",
+            "closure_description": "Resguardo instalado y verificado en el acceso de la zona",
+            "evidence_entry_ids": [str(entry) for entry in entry_ids],
+            "attachment_digests": list(digests),
+            "referenced_clip_ids": [],
+            "signer": {
+                "user_id": str(world.authz.operator_id),
+                "display_name": "Coordinación SST sintética",
+                "professional_license": "LIC-SST-0001",
+            },
+            "signed_at": format_timestamp(world.now()),
+        },
+    )
+
+
+def _by_id(reference: Mapping[str, Any]) -> str:
+    return str(reference["attachment_id"])
+
+
+def _read_grants(stack: TimelineStack, organization: LoopOrganization) -> list[dict[str, Any]]:
+    return [
+        entry
+        for entry in stack.audit_entries(organization)
+        if entry["operation"] == AuditOperation.CLOSURE_ATTACHMENT_READ_GRANTED.value
+    ]
+
+
+def test_an_evidence_with_a_jpg_and_a_pdf_and_its_closure_bring_their_references(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    actions = stack.actions
+    finding, action_id = actions.assigned(coordinator, actions.user(actions.world.a))
+    jpg = _declared(stack, "image/jpeg", "jpg")
+    pdf = _declared(stack, "application/pdf", "pdf")
+    entry = _evidence(stack, finding, action_id, [jpg, pdf])
+    # La misma suma dos veces: el cierre la nombra una sola vez.
+    _write_closure_of(
+        stack, finding, action_id, [entry], [pdf["sha256"], jpg["sha256"], pdf["sha256"]]
+    )
+    stack.occupancy(actions.finding_state_id(finding), False)
+    body = _one_entry(stack, coordinator, finding, 5)
+    by_kind = {m["kind"]: m for m in body["milestones"]}
+    assert by_kind["action_evidence_added"]["attachments"] == [_reference(jpg), _reference(pdf)]
+    # m_sin_adjuntos_del_cierre: el cierre trae los que cierra, en el orden de sus sumas.
+    assert by_kind["closure"]["attachments"] == [_reference(pdf), _reference(jpg)]
+    assert all(
+        m["attachments"] == []
+        for m in body["milestones"]
+        if m["kind"] not in ("action_evidence_added", "closure")
+    )
+    # Ni la suma ni el nombre del archivo en la respuesta; ninguna URL emitida.
+    for attachment in (jpg, pdf):
+        assert attachment["sha256"] not in set(_values(body))
+        assert attachment["filename"] not in set(_values(body))
+    assert _read_grants(stack, finding.organization) == []
+
+
+def test_the_closure_by_its_route_brings_the_verified_attachments_of_the_evidence(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    """Por las rutas reales: dos PNG verificados en la evidencia y el cierre que los cita."""
+    actions = stack.actions
+    finding, action_id = actions.assigned(coordinator, actions.user(actions.world.a))
+    claims = [actions.uploaded(finding), actions.uploaded(finding)]
+    added = actions.add_evidence(coordinator, action_id, actions.evidence_body(attachments=claims))
+    assert added.status_code == 201, added.text
+    closed = actions.close(coordinator, finding, actions.closure_body())
+    assert closed.status_code == 201, closed.text
+    body = _ok(stack.get(coordinator, actions.finding_state_id(finding)))
+    by_kind = {m["kind"]: m for m in body["milestones"]}
+    expected = [
+        {
+            "attachment_id": claim["attachment_id"],
+            "content_type": "image/png",
+            "size_bytes": claim["size_bytes"],
+        }
+        for claim in claims
+    ]
+    assert by_kind["action_evidence_added"]["attachments"] == expected
+    # El cierre cita las sumas en el orden que fija su servicio: los mismos, sin repetir.
+    closure = by_kind["closure"]["attachments"]
+    assert len(closure) == len(expected)
+    assert sorted(closure, key=_by_id) == sorted(expected, key=_by_id)
+    assert _read_grants(stack, finding.organization) == []
+
+
+def test_fifty_attachments_still_leave_one_audit_entry_and_no_url(
+    stack: TimelineStack, coordinator: Who
+) -> None:
+    """m_url_en_la_ficha: firmar las URL al componer la ficha dejaría una entrada por adjunto."""
+    actions = stack.actions
+    finding, action_id = actions.assigned(coordinator, actions.user(actions.world.a))
+    kinds = ("image/jpeg", "application/pdf", "image/png")
+    for index in range(10):
+        _evidence(
+            stack,
+            finding,
+            action_id,
+            [_declared(stack, kinds[(index + n) % 3], f"{index}-{n}") for n in range(5)],
+        )
+    body = _one_entry(stack, coordinator, finding, 13)
+    references = [r for m in body["milestones"] for r in m["attachments"]]
+    assert len(references) == len({r["attachment_id"] for r in references}) == 50
+    assert all(set(r) == _REFERENCE_FIELDS for r in references)
+    assert _read_grants(stack, finding.organization) == []
+
+
+def _values(value: Any) -> Iterator[Any]:
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _values(item)
+    else:
+        yield value

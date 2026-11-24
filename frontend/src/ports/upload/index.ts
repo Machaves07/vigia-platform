@@ -14,4 +14,9 @@ export {
   type UploadResult,
   type UploadTarget,
 } from './upload';
-export { readClosureAttachmentUrl, readEvidenceUrl, type ReadUrl } from './readUrls';
+export {
+  readClosureAttachmentObject,
+  readClosureAttachmentUrl,
+  readEvidenceUrl,
+  type ReadUrl,
+} from './readUrls';

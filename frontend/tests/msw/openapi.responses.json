@@ -17024,6 +17024,27 @@
         "display_name"
       ]
     },
+    "TimelineAttachmentOut": {
+      "properties": {
+        "attachment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "attachment_id",
+        "content_type",
+        "size_bytes"
+      ]
+    },
     "TimelineDeadlineOut": {
       "properties": {
         "due_at": {
@@ -17348,6 +17369,12 @@
             "$ref": "#/components/schemas/ProcessVariableSummaryOut"
           },
           "type": "array"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/components/schemas/TimelineAttachmentOut"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -17363,7 +17390,8 @@
         "details",
         "deadline",
         "photos",
-        "process"
+        "process",
+        "attachments"
       ]
     },
     "TimelineSummaryOut": {

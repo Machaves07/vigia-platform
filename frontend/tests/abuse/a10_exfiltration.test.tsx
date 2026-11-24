@@ -3,7 +3,8 @@ import { expect, it } from 'vitest';
 import spec from '../msw/openapi.responses.json';
 import { nodes, sources, styles } from './source';
 
-// Inventario positivo de salidas: transporte de API, sonda de salud, versión y PUT prefirmado.
+// Inventario positivo de salidas: transporte de API, sonda de salud, versión, PUT prefirmado y
+// GET de la foto adjunta desde su URL firmada, sin credenciales (TASK-609).
 // Se fija también la expresión (no solo el archivo) para no permitir otro destino en ese módulo.
 // `app/bootstrap.ts` solo delega en el `fetch` global para la sonda de salud (VIG-334, A-70): su
 // único destino es el `GET /health/live` de `state/connection/probe.ts`.
@@ -13,6 +14,7 @@ const NETWORK = [
   "ports/base/http.ts:fetchImpl(url, { method: operation.method.toUpperCase(), headers: headersFor(request, concession), credentials: 'same-origin', signal: controller.signal, ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }), })",
   "ports/scr01Admin.ts:globalThis.fetch(new URL('/version.json', globalThis.location.origin), { cache: 'no-store', credentials: 'same-origin', signal, })",
   'ports/upload/upload.ts:new XMLHttpRequest()',
+  "ports/upload/readUrls.ts:globalThis.fetch(url, { method: 'GET', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error', signal, })",
   "state/connection/probe.ts:options .fetch(new URL('/health/live', options.origin(dep)), { method: 'GET', signal: abort.signal, cache: 'no-store', credentials: 'omit', redirect: 'error', })",
 ];
 const compact = (value: string) => value.replace(/\s+/g, ' ').trim();

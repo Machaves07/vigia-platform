@@ -6,6 +6,7 @@
   "media.clip.loading": "Preparando el clip…",
   "media.clip.unavailable": "Evidencia no disponible ahora.",
   "media.clip.failed": "No se pudo preparar el clip.",
+  "media.clip.load_failed": "No se pudo cargar el clip",
   "media.clip.retry": "Reintentar",
   "media.episode_photo.label": "Foto del episodio",
   "media.episode_photo.commissioning_notice": "Material de puesta en marcha: no es un hallazgo ni se usa para gestión",
@@ -36,5 +37,8 @@
   "media.attachment.prepare": "Preparar el enlace del adjunto",
   "media.attachment.open": "Abrir el adjunto en una pestaña nueva",
   "media.attachment.unavailable": "Adjunto no disponible ahora.",
-  "media.attachment.failed": "No se pudo preparar el enlace del adjunto."
+  "media.attachment.failed": "No se pudo preparar el enlace del adjunto.",
+  "media.attachment.show_photo": "Ver foto",
+  "media.attachment.loading": "Cargando la foto…",
+  "media.attachment.request_again": "Volver a pedir la foto"
 }

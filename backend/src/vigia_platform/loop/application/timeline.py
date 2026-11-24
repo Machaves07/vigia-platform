@@ -45,6 +45,14 @@
   estado en el instante del hecho con su hora **presentada** (agregada en zona unipersonal). Sin
   la serie ni los cambios: están en el detalle.
 
+- **Adjuntos del cierre** (O-22, TASK-609): cada ``action_evidence_added`` lleva las
+  **referencias** de sus adjuntos (``attachment_id``, tipo y tamaño), en el orden del registro;
+  el ``closure``, las de los adjuntos que cierra: sus ``attachment_digests`` resueltas contra las
+  evidencias del sujeto en la ficha, sin repetir ninguno. Nunca la URL, la ``storage_key``, la
+  suma ni el ``filename`` (un campo de persona del lazo): la URL se pide al abrir el adjunto, a
+  la lectura auditada de siempre (``closure_attachment_read_granted``), y la ficha sigue con su
+  única entrada de auditoría.
+
 ``loop.finding_state.classified_within_deadline`` **no** se usa: ningún código la rellena (O-12,
 verificado en TASK-585); la ficha aplica la regla de la métrica sobre el historial.
 """
@@ -97,6 +105,7 @@ __all__ = [
     "FindingTimelineService",
     "Milestone",
     "MilestoneActor",
+    "MilestoneAttachment",
     "MilestoneDeadline",
     "MilestoneDetails",
     "MilestoneKind",
@@ -184,6 +193,16 @@ class MilestoneDetails:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class MilestoneAttachment:
+    """La referencia de un adjunto del cierre (TASK-609): sin URL, ``storage_key``, suma ni
+    ``filename``. La URL se pide al abrirlo, con su propia auditoría."""
+
+    attachment_id: uuid.UUID
+    content_type: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Milestone:
     kind: MilestoneKind
     record_type: str
@@ -200,6 +219,8 @@ class Milestone:
     """Las fotos del tramo en ``finding_received`` y ``late_segment_attached`` (A-128)."""
     process: tuple[ProcessVariableSummary, ...] = ()
     """El resumen de los valores de proceso en el hito de detección (A-129); vacío si no."""
+    attachments: tuple[MilestoneAttachment, ...] = ()
+    """Los adjuntos de una evidencia o los que cierra un cierre (TASK-609); vacío si no."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -310,6 +331,63 @@ def photo_documents(records: Sequence[TimelineSource]) -> tuple[Mapping[str, Any
 
 def _receptions(records: Sequence[TimelineSource]) -> dict[str, Mapping[str, Any]]:
     return {str(r.record_id): r.document for r in records if r.record_type == "finding_received"}
+
+
+EVIDENCE_TYPE: Final = "action_evidence_added"
+CLOSURE_TYPE: Final = "closure"
+
+
+def _declared_attachments(
+    document: Mapping[str, Any],
+) -> tuple[tuple[str, MilestoneAttachment], ...]:
+    """``(sha256, referencia)`` de cada adjunto de una evidencia, en el orden del registro. De
+    cada adjunto se eligen tres campos (BR-APP-40): ni el ``filename`` ni la suma salen de aquí."""
+    found = document.get("attachments")
+    if not isinstance(found, list | tuple):
+        return ()
+    return tuple(
+        (
+            str(item.get("sha256")),
+            MilestoneAttachment(
+                attachment_id=uuid.UUID(str(item["attachment_id"])),
+                content_type=str(item["content_type"]),
+                size_bytes=int(item["size_bytes"]),
+            ),
+        )
+        for item in found
+        if isinstance(item, Mapping)
+    )
+
+
+def _attachments_by_digest(
+    records: Sequence[TimelineSource],
+) -> dict[str, tuple[MilestoneAttachment, ...]]:
+    """Los adjuntos de las evidencias del sujeto en la ficha, por su suma y en orden de
+    expediente: con ellos se resuelven los ``attachment_digests`` de un cierre."""
+    index: dict[str, list[MilestoneAttachment]] = {}
+    for item in records:
+        if item.record_type == EVIDENCE_TYPE:
+            for digest, attachment in _declared_attachments(item.document):
+                index.setdefault(digest, []).append(attachment)
+    return {digest: tuple(found) for digest, found in index.items()}
+
+
+def _closure_attachments(
+    document: Mapping[str, Any], by_digest: Mapping[str, Sequence[MilestoneAttachment]]
+) -> tuple[MilestoneAttachment, ...]:
+    """Los adjuntos que cierra un cierre, en el orden de sus sumas y sin repetir ninguno. Una suma
+    que no está en la ficha (truncada) no se inventa."""
+    digests = document.get("attachment_digests")
+    if not isinstance(digests, list | tuple):
+        return ()
+    seen: set[uuid.UUID] = set()
+    closed: list[MilestoneAttachment] = []
+    for digest in digests:
+        for attachment in by_digest.get(str(digest), ()):
+            if attachment.attachment_id not in seen:
+                seen.add(attachment.attachment_id)
+                closed.append(attachment)
+    return tuple(closed)
 
 
 def timeline_source(record: LedgerRecordView) -> TimelineSource:
@@ -541,8 +619,16 @@ class _Walk:
     photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
     receptions: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     declarations: Mapping[uuid.UUID, DeclaredCatalogVersion | None] = field(default_factory=dict)
+    by_digest: Mapping[str, Sequence[MilestoneAttachment]] = field(default_factory=dict)
     milestones: list[Milestone] = field(default_factory=list)
     first_classification: Milestone | None = None
+
+    def attachments(self, item: TimelineSource) -> tuple[MilestoneAttachment, ...]:
+        if item.record_type == EVIDENCE_TYPE:
+            return tuple(attachment for _, attachment in _declared_attachments(item.document))
+        if item.record_type == CLOSURE_TYPE:
+            return _closure_attachments(item.document, self.by_digest)
+        return ()
 
     def segment_photos(self, item: TimelineSource) -> tuple[FindingPhotoView, ...]:
         if item.record_type not in _PHOTO_TYPES:
@@ -599,6 +685,7 @@ class _Walk:
             deadline=self.deadline(item),
             photos=self.segment_photos(item),
             process=self.process(item),
+            attachments=self.attachments(item),
         )
         if item.record_type == "classification" and self.first_classification is None:
             self.first_classification = milestone
@@ -643,6 +730,7 @@ def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
         photos=inputs.photos,
         receptions=_receptions(inputs.records),
         declarations=inputs.declarations,
+        by_digest=_attachments_by_digest(inputs.records),
     )
     for item in inputs.records:
         walk.add(item)
