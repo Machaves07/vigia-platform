@@ -13,6 +13,8 @@ renombra la señal:
 - **Ficha de vida**: el hito ``finding_received`` lleva el resumen por variable, sin la serie.
 - **Sin lectura ni auditoría nueva**: el detalle deja una ``ledger_detail_read`` por registro y la
   ficha una sola, como antes; las llamadas a U-03 del detalle siguen siendo las tres de siempre.
+- **Alcance**: el puerto de versiones del catálogo solo ve la zona pedida de la organización del
+  contexto; la de otra organización no devuelve nada (RLS y filtro explícito).
 - **Zona unipersonal**: ``at_event.read_at`` (y la hora del resumen) llegan agregadas y la hora
   exacta del instante del hecho no aparece en ninguna respuesta.
 
@@ -33,6 +35,8 @@ import pytest
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject, LoopOrganization
 from tests.loop_detail_support import DetailStack, Who, detail_stack
+from vigia_platform.fleet.application.record_declarations import RecordCatalogs
+from vigia_platform.fleet.domain.clock_tolerance import Window
 from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.loop.adapters.http.timeline_routes import TIMELINE_PATH
 from vigia_platform.loop.domain.time_aggregation import presented
@@ -305,3 +309,18 @@ def _values(document: Any) -> list[Any]:
     if isinstance(document, list):
         return [v for value in document for v in _values(value)]
     return [document]
+
+
+def test_the_catalog_port_only_sees_zones_of_the_context_organization(
+    stack: DetailStack, ingested: Ingested
+) -> None:
+    world = stack.world
+    catalogs = RecordCatalogs(database=stack.database)
+    window = Window(ingested.started - timedelta(days=3650), ingested.started + timedelta(days=1))
+    zone = ingested.organization.site.zone_id
+    own = stack.run(
+        catalogs.versions(world.context(ingested.organization), zone_id=zone, window=window)
+    )
+    assert [item.view.version for item in own] == [3, 2, 1]
+    other = stack.run(catalogs.versions(world.context(world.b), zone_id=zone, window=window))
+    assert other == ()

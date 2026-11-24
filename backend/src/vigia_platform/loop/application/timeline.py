@@ -726,8 +726,10 @@ class FindingTimelineService:
             raise ResourceNotFound()
         records = tuple(timeline_source(r) for r in history.records)
         photos = await self._subjects.record_photos(authorized, subject, photo_documents(records))
-        declarations = await self._subjects.record_declarations(
-            authorized, subject, process_records(records)
+        facts = process_records(records)
+        # Sin ningún hito con valores de proceso no hay nada que nombrar: ninguna consulta.
+        declarations = (
+            await self._subjects.record_declarations(authorized, subject, facts) if facts else {}
         )
         return finding_timeline(
             TimelineInputs(
