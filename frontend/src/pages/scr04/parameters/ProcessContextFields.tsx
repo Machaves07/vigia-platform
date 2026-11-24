@@ -231,7 +231,7 @@ export function ProcessContextFields({
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
   const issues = processIssues(draft, signals);
   const touch = (key: string) => {
-    if (!touched.has(key)) setTouched(new Set([...touched, key]));
+    setTouched((previous) => (previous.has(key) ? previous : new Set([...previous, key])));
   };
   const issueOf = (key: string) => (showAll || touched.has(key) ? issues.get(key) : undefined);
   const setVariable = (index: number, change: Partial<VariableDraft>) => {
