@@ -16,6 +16,14 @@ import {
 } from '@/ports/scr04Parameters';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
+import {
+  citedSignalMissing,
+  declaredSignals,
+  processBody,
+  processDraft,
+  processIssues,
+  ProcessContextFields,
+} from './ProcessContextFields';
 import { Failure } from './shared';
 import { SignalFields } from './SignalFields';
 import styles from './parameters.module.css';
@@ -26,6 +34,7 @@ const KINDS: readonly ParameterKind[] = [
   'signals',
   'thresholds',
   'windows',
+  'process_context',
 ];
 const emptyCamera = (): Camera => ({
   camera_id: '',
@@ -110,6 +119,9 @@ export function ParameterForm({
       : '';
   });
   const [signals, setSignals] = useState<Signal[]>(() => initialSignals(initial));
+  // El selector de la variable de estado solo ofrece las señales de la versión publicada.
+  const [declared] = useState(() => declaredSignals(initial));
+  const [process, setProcess] = useState(() => processDraft(initial));
   const [reason, setReason] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [issue, setIssue] = useState<string | null>(null);
@@ -143,6 +155,11 @@ export function ParameterForm({
           return parametersPort.windows.write({
             path,
             body: input.body as Parameters<typeof parametersPort.windows.write>[0]['body'],
+          });
+        case 'process_context':
+          return parametersPort.process_context.write({
+            path,
+            body: input.body as Parameters<typeof parametersPort.process_context.write>[0]['body'],
           });
       }
     },
@@ -185,6 +202,11 @@ export function ParameterForm({
         });
         break;
       case 'signals':
+        // Una variable de estado publicada no puede quedarse sin su señal (regla 7, A-129).
+        if (citedSignalMissing(initial, signals)) {
+          setIssue('scr04.parameters.signal_cited_by_process');
+          return;
+        }
         body.signals = signals;
         break;
       case 'thresholds':
@@ -203,6 +225,15 @@ export function ParameterForm({
           },
         });
         break;
+      case 'process_context': {
+        const problems = processIssues(process, declared);
+        if (problems.size > 0) {
+          setIssue('scr04.parameters.process_fix_fields');
+          return;
+        }
+        Object.assign(body, processBody(process));
+        break;
+      }
     }
     const issues = bodyIssues(PARAMETER_OPERATIONS[kind], body);
     if (issues.length > 0) {
@@ -275,6 +306,14 @@ export function ParameterForm({
           </>
         )}
         {kind === 'signals' && <SignalFields signals={signals} onChange={setSignals} />}
+        {kind === 'process_context' && (
+          <ProcessContextFields
+            draft={process}
+            signals={declared}
+            showAll={attempted}
+            onChange={setProcess}
+          />
+        )}
         {kind === 'cameras' && (
           <>
             <p>{text('scr04.parameters.stream_help')}</p>

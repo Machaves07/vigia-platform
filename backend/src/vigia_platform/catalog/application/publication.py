@@ -2,14 +2,15 @@
 
 ``publish_catalog_version(context, zone_id, change, reason_es)`` es el **único** camino por el que
 nace una versión del catálogo; lo usan todas las variantes (estándar nuevo, versión nueva de un
-estándar, retiro, cámaras, cobertura mínima, señales, umbrales, ventanas y marca unipersonal).
+estándar, retiro, cámaras, cobertura mínima, señales, umbrales, ventanas, marca unipersonal y
+variables de proceso).
 
 1. **Antes de la transacción**, sin escribir nada: zona dentro del alcance (``catalog.manage``;
    fuera de alcance o inexistente responden igual, ``ResourceNotFound``), y textos por la
    política base de U-02 más el validador mínimo de U-03 (``free_text_rejected``): ``reason_es``
-   de 10 a 500, ``title_es`` ≤ 120, ``declared_text`` ≤ 4 000, la descripción de cada señal y el
-   nombre visible de quien declara. Se guardan en NFC: así el escritor del expediente no cambia
-   ni una letra del sobre ya firmado.
+   de 10 a 500, ``title_es`` ≤ 120, ``declared_text`` ≤ 4 000, la descripción de cada señal y de
+   cada variable de proceso y el nombre visible de quien declara. Se guardan en NFC: así el
+   escritor del expediente no cambia ni una letra del sobre ya firmado.
 2. **En una sola transacción**, en este orden: exclusión de la zona (``pg_advisory_xact_lock``);
    candado de la regresión de la zona (``RegressionMarker.lock``, antes de escribir nada); versión
    vigente; familia admitida en la planta (``admission_for`` de LC-GOB-02, si no
@@ -74,6 +75,7 @@ from vigia_platform.catalog.domain.catalog_version import (
     NewStandard,
     NewStandardVersion,
     RetireStandard,
+    SetProcessContext,
     SetSignals,
     StandardDraft,
     ZoneCatalogVersion,
@@ -87,6 +89,7 @@ from vigia_platform.catalog.domain.standard import (
     DeclaredBy,
     DeclaredStandardVersion,
 )
+from vigia_platform.catalog.record_types import PROCESS_VARIABLE_FREE_TEXT_PATH
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
 from vigia_platform.identity.authz.context import with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -158,6 +161,9 @@ _DISPLAY_NAME: Final = FreeTextField(
 )
 _SIGNAL_DESCRIPTION: Final = FreeTextField(
     PUBLISHED_RECORD_TYPE, "/envelope/payload/signals[*]/description_es", 1, 120
+)
+_PROCESS_DESCRIPTION: Final = FreeTextField(
+    PUBLISHED_RECORD_TYPE, PROCESS_VARIABLE_FREE_TEXT_PATH, 1, 120
 )
 """Los campos de texto libre de ``catalog_version_published`` (límites de su esquema)."""
 
@@ -334,13 +340,19 @@ class CatalogPublicationService:
             raise CatalogRejected(CatalogDetailCode.FREE_TEXT_REJECTED) from None
 
     def _signals(self, signals: tuple[Mapping[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+        return self._described(signals, _SIGNAL_DESCRIPTION)
+
+    def _described(
+        self, items: tuple[Mapping[str, Any], ...], field: FreeTextField
+    ) -> tuple[dict[str, Any], ...]:
+        """Cada señal o variable con su ``description_es`` tras la política de texto libre."""
         normalized: list[dict[str, Any]] = []
-        for signal in signals:
-            if not isinstance(signal, Mapping):
+        for item in items:
+            if not isinstance(item, Mapping):
                 raise CatalogRequestInvalid
-            copy = dict(signal)
+            copy = dict(item)
             if "description_es" in copy:
-                copy["description_es"] = self._text(copy["description_es"], _SIGNAL_DESCRIPTION)
+                copy["description_es"] = self._text(copy["description_es"], field)
             normalized.append(copy)
         return tuple(normalized)
 
@@ -376,6 +388,10 @@ class CatalogPublicationService:
             )
         if isinstance(change, SetSignals):
             return dataclasses.replace(change, signals=self._signals(change.signals))
+        if isinstance(change, SetProcessContext):
+            return dataclasses.replace(
+                change, variables=self._described(change.variables, _PROCESS_DESCRIPTION)
+            )
         return change
 
     # --- Publicación -----------------------------------------------------------------------

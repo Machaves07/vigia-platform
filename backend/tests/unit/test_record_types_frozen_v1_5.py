@@ -10,8 +10,8 @@ Estas pruebas siembran ``InMemoryRecordTypeStore`` con la tabla que persistía `
 (``tests/fixtures/record_types/ledger_record_type_18981b6.json``) y comprueban, sin base de datos:
 
 - ``synchronize`` del registro de producción arranca, sella y solo sube los tres tipos cambiados
-  (``catalog_version_published`` a la 3; ``finding_received`` y ``detection_for_review_received`` a
-  la 2); el resto de filas no cambia;
+  (``catalog_version_published`` a la 4, con TASK-594; ``finding_received`` y
+  ``detection_for_review_received`` a la 2); el resto de filas no cambia;
 - cada versión que ``18981b6`` persistió sigue registrada con **su** esquema (congeladas en
   ``record_types_frozen_v1_5``) y la nueva solo la amplía;
 - un hallazgo con ``process_context`` o sin clips solo valida con la versión 2, y uno de v1.5.0 con
@@ -159,8 +159,8 @@ def test_registering_the_previous_versions_with_the_current_models_prevents_star
         definition = compiled.definition
         name = definition.record_type
         if name in V1_6_UPGRADED_TYPES:
-            if definition.schema_version == V1_6_UPGRADED_TYPES[name]:
-                continue
+            if definition.schema_version > ROWS[name].schema_version:
+                continue  # las posteriores (también la 4 del catálogo, TASK-594)
             if definition.schema_version == ROWS[name].schema_version:
                 latest = fresh.get(name).definition
                 definition = replace(

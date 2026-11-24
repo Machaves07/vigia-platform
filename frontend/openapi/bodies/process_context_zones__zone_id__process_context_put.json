@@ -1,0 +1,93 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "process_context_zones__zone_id__process_context_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/process-context",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ProcessContextBody",
+    "$defs": {
+      "Code": { "type": "string", "maxLength": 32, "minLength": 2, "pattern": "^[A-Z0-9-]{2,32}$" },
+      "ProcessContextBody": {
+        "properties": {
+          "before_ms": { "type": "integer", "maximum": 120000, "minimum": 0 },
+          "variables": {
+            "items": { "$ref": "#/$defs/ProcessVariableDeclaration" },
+            "type": "array",
+            "maxItems": 12
+          },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["before_ms", "variables", "reason_es"]
+      },
+      "ProcessScale": {
+        "properties": {
+          "at_4_ma": { "type": "number", "maximum": 1000000000000, "minimum": -1000000000000 },
+          "at_20_ma": { "type": "number", "maximum": 1000000000000, "minimum": -1000000000000 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["at_4_ma", "at_20_ma"]
+      },
+      "ProcessStatePair": {
+        "type": "string",
+        "enum": [
+          "closed_open",
+          "in_position_out",
+          "at_rest_moving",
+          "home_away",
+          "on_off",
+          "yes_no"
+        ]
+      },
+      "ProcessUnit": {
+        "type": "string",
+        "enum": ["m_per_min", "m", "percent", "rpm", "deg_c", "bar", "kg", "ampere", "count"]
+      },
+      "ProcessVariableDeclaration": {
+        "properties": {
+          "variable_id": { "$ref": "#/$defs/UUID" },
+          "code": { "$ref": "#/$defs/Code" },
+          "kind": { "$ref": "#/$defs/ProcessVariableKind" },
+          "description_es": { "type": "string", "maxLength": 120, "minLength": 1 },
+          "source": { "anyOf": [{ "$ref": "#/$defs/SignalSource" }, { "type": "null" }] },
+          "unit": { "anyOf": [{ "$ref": "#/$defs/ProcessUnit" }, { "type": "null" }] },
+          "scale": { "anyOf": [{ "$ref": "#/$defs/ProcessScale" }, { "type": "null" }] },
+          "decimals": {
+            "anyOf": [{ "type": "integer", "maximum": 3, "minimum": 0 }, { "type": "null" }]
+          },
+          "signal_id": { "anyOf": [{ "$ref": "#/$defs/UUID" }, { "type": "null" }] },
+          "states": { "anyOf": [{ "$ref": "#/$defs/ProcessStatePair" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["variable_id", "code", "kind", "description_es"]
+      },
+      "ProcessVariableKind": { "type": "string", "enum": ["analog", "binary"] },
+      "SignalSource": {
+        "properties": {
+          "reader": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]{0,31}$"
+          },
+          "channel": { "type": "integer", "maximum": 255, "minimum": 0 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["reader", "channel"]
+      },
+      "UUID": {
+        "type": "string",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      }
+    }
+  },
+  "query": null
+}

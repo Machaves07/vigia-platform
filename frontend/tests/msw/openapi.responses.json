@@ -1078,6 +1078,23 @@
       }
     },
     {
+      "operationId": "process_context_zones__zone_id__process_context_put",
+      "method": "put",
+      "path": "/zones/{zone_id}/process-context",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/CatalogVersionOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "regression_state_zones__zone_id__regression_get",
       "method": "get",
       "path": "/zones/{zone_id}/regression",
@@ -4613,7 +4630,8 @@
         "thresholds",
         "clip_window",
         "episode",
-        "single_occupancy"
+        "single_occupancy",
+        "process_context"
       ]
     },
     "CatalogHistoryOut": {
@@ -13668,6 +13686,32 @@
       "required": [
         "offset_ms",
         "value"
+      ]
+    },
+    "ProcessContextBody": {
+      "properties": {
+        "before_ms": {
+          "type": "integer",
+          "maximum": 120000,
+          "minimum": 0
+        },
+        "variables": {
+          "items": {
+            "$ref": "#/components/schemas/ProcessVariableDeclaration"
+          },
+          "type": "array",
+          "maxItems": 12
+        },
+        "reason_es": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "before_ms",
+        "variables",
+        "reason_es"
       ]
     },
     "ProcessContextDeclaration": {

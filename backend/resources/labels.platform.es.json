@@ -265,7 +265,8 @@
     "thresholds": "umbrales",
     "clip_window": "ventana de clip",
     "episode": "episodio",
-    "single_occupancy": "marca unipersonal"
+    "single_occupancy": "marca unipersonal",
+    "process_context": "valores de proceso"
   },
   "catalog_detail_code": {
     "catalog_admission_rejected": "Familia rechazada: no cumple el criterio de estándar, remedio o sujeto.",

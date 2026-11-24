@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 158 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 159 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -152,6 +152,10 @@ export const OPERATIONS = {
   signals_zones__zone_id__signals_put: { method: 'put', path: '/zones/{zone_id}/signals' },
   thresholds_zones__zone_id__thresholds_put: { method: 'put', path: '/zones/{zone_id}/thresholds' },
   windows_zones__zone_id__windows_put: { method: 'put', path: '/zones/{zone_id}/windows' },
+  process_context_zones__zone_id__process_context_put: {
+    method: 'put',
+    path: '/zones/{zone_id}/process-context',
+  },
   regression_state_zones__zone_id__regression_get: {
     method: 'get',
     path: '/zones/{zone_id}/regression',

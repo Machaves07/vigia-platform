@@ -2042,6 +2042,39 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/process-context":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Variables de proceso de la zona: versión nueva del catálogo sin regresión"
+      "operationId": "process_context_zones__zone_id__process_context_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ProcessContextBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/zones/{zone_id}/regression":
     "get":
       "tags":
@@ -7035,8 +7068,9 @@
         - "clip_window"
         - "episode"
         - "single_occupancy"
+        - "process_context"
       "title": "CatalogChangedField"
-      "description": "Qué cambió de una versión del catálogo a la siguiente."
+      "description": "Qué cambió de una versión del catálogo a la siguiente.\n\n``process_context`` desde la versión 4 de ``catalog_version_published`` (TASK-594, A-129): las\nvariables de proceso de la zona; nunca marca la regresión (BR-GOB-52, Q7)."
     "CatalogHistoryOut":
       "properties":
         "versions":
@@ -14360,6 +14394,29 @@
         - "offset_ms"
         - "value"
       "title": "ProcessChangeOut"
+    "ProcessContextBody":
+      "properties":
+        "before_ms":
+          "type": "integer"
+          "maximum": 120000.0
+          "minimum": 0.0
+          "title": "Before Ms"
+        "variables":
+          "items":
+            "$ref": "#/components/schemas/ProcessVariableDeclaration"
+          "type": "array"
+          "maxItems": 12
+          "title": "Variables"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "before_ms"
+        - "variables"
+        - "reason_es"
+      "title": "ProcessContextBody"
     "ProcessContextDeclaration":
       "properties":
         "before_ms":

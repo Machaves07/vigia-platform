@@ -814,6 +814,14 @@ _U02_U03_CASES: Final[dict[tuple[str, str], Case]] = {
             "PUT", f"/zones/{i.zone}/signals", json={"signals": [], "reason_es": REASON}
         ),
     ),
+    ("PUT", "/zones/{zone_id}/process-context"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/zones/{i.zone}/process-context",
+            json={"before_ms": 30_000, "variables": [], "reason_es": REASON},
+        ),
+    ),
     ("PUT", "/zones/{zone_id}/thresholds"): Case(
         Kind.RESOURCE,
         lambda i: Call(

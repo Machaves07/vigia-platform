@@ -202,8 +202,8 @@ describe('SCR-04 parámetros', { timeout: 60_000 }, () => {
       },
     ]);
   });
-  it('declara las once operaciones fixed y sin ocultar escrituras por reglas locales', () => {
-    expect(parametersPort.operations).toHaveLength(11);
+  it('declara las doce operaciones fixed y sin ocultar escrituras por reglas locales', () => {
+    expect(parametersPort.operations).toHaveLength(12);
     expect(
       parametersPort.operations.every(
         (operation) => operation.status === 'fixed' && operation.api_operation_id !== null,

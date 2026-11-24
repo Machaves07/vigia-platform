@@ -10,6 +10,8 @@
 - ``catalog``, ``standards`` y ``parameters``: catálogo versionado y firmado de la zona, sus
   estándares y sus cinco rutas de parámetros (``catalog.read`` y ``catalog.manage``; LC-GOB-01,
   VIG-148).
+- ``process_context``: variables de proceso de la zona, versión nueva sin regresión
+  (``catalog.manage``; A-129, TASK-594).
 - ``regression``: estado de la regresión del walk-test (``catalog.read``) y recaptura del encuadre
   (``commissioning.run``; LC-GOB-09, VIG-148).
 - ``agreements``: política de firmantes de la planta, acuerdo de uso, confirmación de cada
@@ -44,6 +46,7 @@ from vigia_platform.catalog.adapters.http.gates import gates_router
 from vigia_platform.catalog.adapters.http.occlusion import occlusion_router
 from vigia_platform.catalog.adapters.http.parameters import parameters_router
 from vigia_platform.catalog.adapters.http.plant_policy import plant_policy_router
+from vigia_platform.catalog.adapters.http.process_context import process_context_router
 from vigia_platform.catalog.adapters.http.regression import regression_router
 from vigia_platform.catalog.adapters.http.services import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.http.standards import standards_router
@@ -63,6 +66,7 @@ def catalog_routers() -> tuple[APIRouter, ...]:
         catalog_router(),
         standards_router(),
         parameters_router(),
+        process_context_router(),
         regression_router(),
         agreements_router(),
         transparency_router(),

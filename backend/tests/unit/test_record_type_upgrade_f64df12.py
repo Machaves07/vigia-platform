@@ -106,7 +106,7 @@ def test_only_the_changed_types_have_a_new_version_and_it_only_widens() -> None:
 
 def test_writers_write_the_last_version_with_the_current_models() -> None:
     registry = _registry()
-    assert registry.get("catalog_version_published").schema_version == 3
+    assert registry.get("catalog_version_published").schema_version == 4
     assert registry.get("catalog_version_published").definition.content_model is (
         CatalogVersionPublished
     )
