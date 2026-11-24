@@ -310,7 +310,11 @@ describe('armazón en tableta (768 px)', { timeout: 30_000 }, () => {
       ),
     );
     await screen.findByRole('heading', { name: 'Métricas sintéticas' }, WAIT);
-    expect(fixture.route()).toBe('/metrics');
+    // La ruta de los servicios la publica un efecto del enrutador, que puede llegar una tarea
+    // después del título: bajo carga, leerla sin esperar devolvía aún '/findings'.
+    await waitFor(() => {
+      expect(fixture.route()).toBe('/metrics');
+    }, WAIT);
     await waitFor(() => {
       expect(screen.queryByRole('navigation', { name: text('app_shell.nav.label') })).toBeNull();
     }, WAIT);

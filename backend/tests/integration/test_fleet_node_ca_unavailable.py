@@ -11,9 +11,17 @@ KMS que no responde) y el **plazo de producción** de la autoridad (``NODE_CA_DE
 - mientras el alta espera a KMS, la ruta de prueba interna de TASK-206 (petición de un nodo dado
   de alta) sigue respondiendo: ninguna otra ruta del contrato se ve afectada.
 
-Mide tiempo real a propósito (es el tope de producción lo que se prueba): el margen sobre el plazo
-de la autoridad es de 1 s, y la prueba de que la ruta de prueba responde no decide por tiempo
-(espera a que acabe, con el alta aún colgada).
+Los ≤ 5 s se prueban en dos partes, ninguna a merced de la carga de la máquina:
+
+- el **presupuesto**: el plazo de la autoridad deja al menos 1 s al resto de la petición
+  (``NODE_CA_DEADLINE_SECONDS + 1 <= 5``, sobre las constantes de producción);
+- el **corte**: la ruta responde por ese plazo y no por otra cosa: un único intento contra KMS,
+  respuesta no antes del plazo (cota inferior, que la carga no puede romper) y un techo de pared
+  holgado de 10 s que solo falla si la ruta añade una espera propia.
+
+Antes se medía ``elapsed <= 5 s`` en pared: en un runner cargado el resto de la petición
+(PostgreSQL, ASGI) pasó de 1 s y la prueba falló a 5,12 s sin defecto (CI de #337). La prueba de
+que la ruta de prueba responde no decide por tiempo (espera a que acabe, con el alta aún colgada).
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -43,12 +51,17 @@ from vigia_platform.shared.clock import SystemClock
 pytestmark = pytest.mark.integration
 
 WALL_CLOCK: Final = SystemClock()
-"""Tiempo real: lo que se mide es el tope de producción (no el reloj simulado de la prueba)."""
+"""Tiempo real: lo que se mide es el plazo de producción (no el reloj simulado de la prueba)."""
 LIMIT_SECONDS: Final = 5.0
 """El tope del criterio: alta y rotación responden en ≤ 5 s con KMS sin respuesta."""
+REST_OF_REQUEST_SECONDS: Final = 1.0
+"""Lo que el plazo de la autoridad deja al resto de la petición dentro de ``LIMIT_SECONDS``."""
+WALL_CEILING_SECONDS: Final = 10.0
+"""Techo de pared holgado (≥ 10 s, lecciones de la retro 15): falla si la ruta espera por su
+cuenta más allá del plazo, nunca porque la máquina vaya lenta."""
 GUARD_SECONDS: Final = 30.0
 """Corta la prueba si la ruta se queda colgada (sin el plazo de la autoridad, nunca responde):
-falla en lugar de esperar para siempre. No decide el criterio, que es ``LIMIT_SECONDS``."""
+falla en lugar de esperar para siempre."""
 
 
 @pytest.fixture(scope="module")
@@ -57,13 +70,13 @@ def world(postgres_endpoint: PostgresEndpoint) -> Iterator[EnrollmentWorld]:
         yield built
 
 
-def _hung_app(world: EnrollmentWorld) -> object:
-    """La aplicación con la autoridad colgada y el plazo de producción."""
+def _hung_app(world: EnrollmentWorld) -> tuple[object, MemoryKms]:
+    """La aplicación con la autoridad colgada y el plazo de producción, y su KMS colgado."""
     hung = MemoryKms(key=world.kms.key, hang=True)
     issuer = world.issuer(deadline=NODE_CA_DEADLINE_SECONDS, kms=hung)
     enrollment, rotation = world.services(issuer=issuer)
     _, app = world.app(enrollment, rotation)
-    return app
+    return app, hung
 
 
 def _client(app: object) -> httpx.AsyncClient:
@@ -74,12 +87,21 @@ def _client(app: object) -> httpx.AsyncClient:
     )
 
 
-def _unavailable(response: httpx.Response, elapsed: float) -> None:
+def _unavailable(response: httpx.Response, elapsed: float, hung: MemoryKms) -> None:
     rejection = parse_rejection_response(response.content)
     assert (response.status_code, rejection.code.value) == (503, "temporarily_unavailable")
     assert rejection.retryable is True and rejection.retry_after_seconds == 5
     assert response.headers["retry-after"] == "5"
-    assert elapsed <= LIMIT_SECONDS, elapsed
+    # Cortó el plazo de la autoridad: un solo intento, colgado en KMS, sin reintento ni firma...
+    assert (hung.public_reads, hung.signs) == (1, 0)
+    # ...y la respuesta no llegó antes del plazo (la carga solo puede alargarla) ni esperó por su
+    # cuenta después (techo holgado: el CI cargado de #337 tardó 5,12 s sin defecto).
+    assert NODE_CA_DEADLINE_SECONDS <= elapsed < WALL_CEILING_SECONDS, elapsed
+
+
+def test_the_authority_deadline_leaves_the_rest_of_the_request_a_second() -> None:
+    # El presupuesto de los ≤ 5 s, sobre las constantes de producción y no sobre la pared.
+    assert NODE_CA_DEADLINE_SECONDS + REST_OF_REQUEST_SECONDS <= LIMIT_SECONDS
 
 
 def test_enrollment_with_the_node_ca_down_is_transient_and_writes_nothing(
@@ -88,7 +110,7 @@ def test_enrollment_with_the_node_ca_down_is_transient_and_writes_nothing(
     setup = world.declared()
     code = world.code(setup)
     body = world.body(setup, code)
-    app = _hung_app(world)
+    app, hung = _hung_app(world)
 
     async def post() -> tuple[httpx.Response, float]:
         async with _client(app) as client, asyncio.timeout(GUARD_SECONDS):
@@ -100,7 +122,7 @@ def test_enrollment_with_the_node_ca_down_is_transient_and_writes_nothing(
 
     response, elapsed = world.run(post())
 
-    _unavailable(response, elapsed)
+    _unavailable(response, elapsed, hung)
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.credentials(setup.node_id) == []
     assert world.attempts(setup.node_id) == []
@@ -118,7 +140,7 @@ def test_rotation_with_the_node_ca_down_is_transient_and_writes_nothing(
     enrolled = world.enroll(setup)
     world.advance(1)
     body = world.rotation_body(setup.node_id)
-    app = _hung_app(world)
+    app, hung = _hung_app(world)
 
     async def post() -> tuple[httpx.Response, float]:
         async with _client(app) as client, asyncio.timeout(GUARD_SECONDS):
@@ -128,7 +150,7 @@ def test_rotation_with_the_node_ca_down_is_transient_and_writes_nothing(
 
     response, elapsed = world.run(post())
 
-    _unavailable(response, elapsed)
+    _unavailable(response, elapsed, hung)
     assert [row["status"] for row in world.credentials(setup.node_id)] == ["active"]
     assert world.fleet.records("node_credential_rotated", setup.organization_id) == []
     assert world.probe_get(enrolled.certificate, setup.zones[0]).status_code == 200
@@ -141,7 +163,7 @@ def test_other_contract_routes_keep_answering_while_the_enrollment_waits(
     other_enrolled = world.enroll(other)
     setup = world.declared()
     body = world.body(setup, world.code(setup))
-    app = _hung_app(world)
+    app, _ = _hung_app(world)
     probe_headers = {
         **alb_headers(other_enrolled.certificate),
         "X-Vigia-Contract-Version": VERSION,
