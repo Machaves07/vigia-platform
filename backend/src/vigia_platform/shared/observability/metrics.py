@@ -270,11 +270,12 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "route", "result", "rejection_code"),
     _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
           "NFR-GOB-54", "route"),
-    # Foto del episodio (TASK-572, A-112): por resultado, rejection_code y si trae imagen; nunca
-    # por nodo ni por zona (NFR-GOB-13), nunca con bytes ni base64.
+    # Foto del episodio (TASK-572, A-112): por resultado, rejection_code, si trae imagen y, en la
+    # del hallazgo, zone_mode = productive (TASK-603, A-128; la de la sombra, sin la etiqueta);
+    # nunca por nodo ni por zona (NFR-GOB-13), nunca con bytes ni base64.
     _spec(_N.EPISODE_PHOTO_RECEIVED_TOTAL, _C, "{record}",
-          "Fotos del episodio de la sombra por resultado y si traen imagen.", "A-112",
-          "result", "rejection_code", "image_presence"),
+          "Fotos del episodio por resultado, modo y si traen imagen.", "A-112",
+          "result", "rejection_code", "image_presence", "zone_mode"),
     # Purga de la foto del episodio (TASK-573, A-112): filas borradas por causa (vencida o zona en
     # productive) y por modo de la foto (TASK-588, A-128); nunca por nodo ni por zona.
     _spec(_N.EPISODE_PHOTOS_PURGED_TOTAL, _C, "{record}",

@@ -279,6 +279,24 @@ persistente ni parar contenedores ajenos. Resultado del ensayo: [Evidence](../ev
 | `temporarily_unavailable` en node-configuration set | A-88: `show` antes de repetir; la auditoría del intento no es el valor vigente. |
 | SCR-16 sin enlace o GET correcto sin vídeo | URL no anunciada/local no alcanzable, puerto 8443, confianza y token; el GET del humo no acredita una sesión de vista. |
 
+## Foto del hallazgo (`productive`, TASK-603, A-128)
+
+- **Orden de despliegue (QF9):** la plataforma con TASK-603 va **antes** que cualquier nodo con
+  `v1.6.0`; una plataforma anterior responde `schema_invalid` en `zone_mode` y la foto queda en la
+  cola del nodo.
+- **Vuelta atrás:** con fotos `productive` en `fleet.episode_photo`, nunca a una imagen anterior a
+  TASK-588: su purga por paso a `productive` las borraría. Además, desde TASK-593 la imagen
+  `v1.5.0` no arranca sobre la base migrada (registro de tipos en v2/v2/v3: `finding_received`,
+  `detection_for_review_received` y `catalog_version_published`): volver atrás exige restaurar la
+  copia de la base **además** de la imagen.
+- **Rechazos esperables:** `zone_gate_not_approved` si la compuerta **de uso** no estaba aprobada en
+  `node_time.started_at` (la de montaje no cuenta); `schema_invalid` en `photo_index` si el nodo
+  repite un índice del tramo con otro `photo_id` (error del nodo, permanente). Los dos dejan
+  `ingest_rejected` con `record_kind = episode_photo` en la auditoría; la foto de la sombra no.
+- Una foto que llega antes que su hallazgo es normal: el detalle la muestra cuando llega el
+  hallazgo. Una cuyo hallazgo no llega nunca no se ve y vence según
+  `VIGIA_FINDING_PHOTO_RETENTION_DAYS` (0 = sin vencimiento).
+
 ## Checklist para Evidence
 
 Marcar cada paso 1–13 con resultado real, destino, comando/pantalla y limitación. Separar

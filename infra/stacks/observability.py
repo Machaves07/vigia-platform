@@ -183,7 +183,10 @@ CERTIFICATE_NODE_ROUTES: Final = (
 el denominador de ``node-rate-limited-high``. La foto del episodio (A-112, TASK-572) no está:
 CloudWatch admite como mucho 10 métricas en una expresión de alarma y la expresión ya lleva 9
 rutas y el numerador. Sin ella el porcentaje sale algo mayor (el numerador sí cuenta sus
-``rate_limited``): la alarma es más sensible, nunca menos."""
+``rate_limited``): la alarma es más sensible, nunca menos. Revisado con la foto del hallazgo en
+``productive`` (TASK-603, A-128): con tres zonas en ráfaga son ~63 fotos por minuto y nodo, dentro
+de su cubo de 120; el sesgo sigue siendo hacia más sensible. La expresión se rehace antes de
+llevar la foto a ``pilot`` (A-112, «Precisiones del 13-11»)."""
 
 INGEST_ROUTES: Final = ("/api/nodes/findings", "/api/nodes/observability-events")
 """Ingesta de hallazgos y eventos: el denominador de ``node-permanent-reject-rate``."""

@@ -14,6 +14,9 @@
   memoria, un registro que rompe varias reglas de los pasos 4 a 8 responde siempre el código del
   paso de menor índice; con la misma foto ya aceptada, ``accepted_duplicate`` con el recibo
   original aunque después hayan cambiado el catálogo o la compuerta.
+- **Foto del hallazgo** (``productive``, TASK-603): el mismo orden con la compuerta **de uso** en
+  lugar de la de montaje y, tras ella, un índice por tramo (``schema_invalid`` en
+  ``photo_index``); otro ``photo_id`` en el índice ocupado nunca cambia la fila que ya estaba.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ from vigia_contracts.models import api
 from vigia_contracts.models.enumerations import RejectionCode
 
 from tests.episode_photo_support import JFIF16, JFXX, image, jpeg, submission
-from vigia_platform.fleet.adapters.postgres.episode_photo_store import StoredPhoto
+from vigia_platform.fleet.adapters.postgres.episode_photo_store import PhotoSlotTaken, StoredPhoto
 from vigia_platform.fleet.application.episode_photos import (
     EpisodePhotoDependencies,
     EpisodePhotoService,
@@ -384,12 +387,20 @@ class _Store:
     spans: list[GateSpan] = field(
         default_factory=lambda: [GateSpan(True, NOW - dt.timedelta(days=400), None)]
     )
+    usage: list[GateSpan] = field(
+        default_factory=lambda: [GateSpan(True, NOW - dt.timedelta(days=400), None)]
+    )
     retention: int | None = None
 
     async def claim(self, transaction: object, row: EpisodePhotoRow) -> bool:
         key = (row.organization_id, row.photo_id)
-        if key in self.rows or any((p.organization_id, p.photo_id) == key for p in self.pending):
+        every = [*self.rows.values(), *self.pending]
+        if any((p.organization_id, p.photo_id) == key for p in every):
             return False
+        if row.zone_mode is ZoneMode.PRODUCTIVE and any(
+            _slot(other) == _slot(row) for other in every if other.zone_mode is row.zone_mode
+        ):
+            raise PhotoSlotTaken()  # el índice único de gob_0045
         self.pending.append(row)
         return True
 
@@ -411,6 +422,15 @@ class _Store:
         self, transaction: object, zone_id: uuid.UUID, window: Window
     ) -> Sequence[GateSpan]:
         return self.spans
+
+    async def usage_spans(
+        self, transaction: object, zone_id: uuid.UUID, window: Window
+    ) -> Sequence[GateSpan]:
+        return self.usage
+
+
+def _slot(row: EpisodePhotoRow) -> tuple[Any, ...]:
+    return (row.organization_id, row.zone_id, row.episode_id, row.segment_index, row.photo_index)
 
 
 class _Database:
@@ -619,6 +639,81 @@ def test_a_photo_with_a_bad_image_writes_nothing() -> None:
     document = _document(photo=image(jpeg(marked=False)))
     assert _rejected(service, document) == ("clip_not_anonymized", "image.data_base64")
     assert store.rows == {} and store.pending == []
+
+
+# --- La foto del hallazgo (productive, TASK-603) ------------------------------------------------
+
+RECORD: Final = uuid.UUID("0190a8a0-0000-7000-8000-0000000000bb")
+
+
+def _productive(index: int = 0, **changes: Any) -> dict[str, Any]:
+    document = _document(**changes)
+    document |= {
+        "zone_mode": "productive",
+        "record_id": str(RECORD),
+        "photo_index": index,
+        "photo_role": "peak" if index == 0 else "burst",
+    }
+    return document
+
+
+def test_a_productive_photo_looks_at_the_usage_gate_not_the_mounting_one() -> None:
+    store = _Store(spans=[])  # sin montaje
+    service = _service(store)
+    assert not _accept(service, _productive()).duplicate
+    store.usage = [GateSpan(False, NOW - dt.timedelta(days=400), None)]
+    store.spans = [GateSpan(True, NOW - dt.timedelta(days=400), None)]
+    assert _rejected(service, _productive()) == ("zone_gate_not_approved", "zone_id")
+    assert len(store.rows) == 1
+
+
+PRODUCTIVE_STEPS: Final = (IMAGE, CATALOG, GATE, EpisodePhotoStep.WRITE)
+"""Los pasos que rompe la propiedad; ``WRITE`` es aquí el índice ya ocupado (tras la compuerta)."""
+
+
+@given(steps=st.sets(st.sampled_from(PRODUCTIVE_STEPS), min_size=1).map(frozenset))
+def test_a_productive_photo_answers_the_lowest_step_and_the_slot_after_the_gate(
+    steps: frozenset[EpisodePhotoStep],
+) -> None:
+    store = _Store()
+    service = _service(store)
+    first = _productive()
+    if EpisodePhotoStep.WRITE in steps:
+        assert _code(service, first) == "accepted"
+    photo = image(jpeg(marked=False)) if IMAGE in steps else None
+    rival = _productive(photo=photo)
+    rival["episode"] = dict(first["episode"])
+    if CATALOG in steps:
+        store.versions = [_view(cameras=frozenset())]
+    if GATE in steps:
+        store.usage = []
+    found = _code(service, rival)
+    expected = {
+        IMAGE: {"clip_not_anonymized"},
+        CATALOG: {"schema_invalid"},
+        GATE: {"zone_gate_not_approved"},
+        EpisodePhotoStep.WRITE: {"schema_invalid"},
+    }[min(steps)]
+    assert found in expected, (sorted(steps), found)
+    kept = [row.photo_id for row in store.rows.values()]
+    assert kept == ([uuid.UUID(first["photo_id"])] if EpisodePhotoStep.WRITE in steps else [])
+
+
+def test_the_slot_taken_is_schema_invalid_on_photo_index_and_the_first_row_stays() -> None:
+    store = _Store()
+    service = _service(store)
+    first = _productive()
+    assert not _accept(service, first).duplicate
+    before = dict(store.rows)
+    rival = _productive()
+    rival["episode"] = dict(first["episode"])
+    assert _rejected(service, rival) == ("schema_invalid", "photo_index")
+    assert store.rows == before and store.pending == []
+    # Otro índice del mismo tramo (la ráfaga) entra; el mismo photo_id es el duplicado.
+    burst = _productive(index=1)
+    burst["episode"] = dict(first["episode"])
+    assert not _accept(service, burst).duplicate
+    assert _accept(service, first).duplicate
 
 
 # --- Alcance antes que el esquema (before_schema) -------------------------------------------------

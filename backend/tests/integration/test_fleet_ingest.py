@@ -403,6 +403,50 @@ def test_a_missing_clip_is_clip_missing_nothing_written_and_the_grant_stays_issu
     assert entry["filters"] == {"code": "clip_missing", "record_kind": "finding"}
 
 
+def _without_clips(stack: IngestStack, site: IngestSite, kind: IngestKind) -> dict[str, Any]:
+    """Un hallazgo o una detección de la fase 1 de A-128: la cámara originadora con ``clips: []``,
+    sin objeto en el almacén ni concesión (v1.6.0)."""
+    if kind is FINDING:
+        document = stack.finding(site, store=False, grant=False)
+        document["cameras"][0]["clips"] = []
+        api.parse_finding_submission(json.dumps(document).encode())
+    else:
+        document = stack.detection(site, store=False, grant=False)
+        document["cameras"][0]["clips"] = []
+        api.parse_detection_for_review_submission(json.dumps(document).encode())
+    return document
+
+
+def test_a_finding_and_a_detection_without_clips_are_accepted_without_asking_the_store(
+    stack: IngestStack,
+) -> None:
+    # m_sin_clip_pide_almacen: ninguna petición al almacén (el doble cuenta cada head_object).
+    site = stack.site()
+    for kind, record_type in (
+        (FINDING, "finding_received"),
+        (DETECTION, "detection_for_review_received"),
+    ):
+        document = _without_clips(stack, site, kind)
+        calls = stack.storage.calls
+        stack.tick()
+        response = stack.post(site, kind, document)
+        assert response.status_code == 200, response.text
+        assert stack.storage.calls == calls
+        receipt = api.parse_receipt(response.content)
+        (record,) = stack.records(record_type, site.organization_id)
+        assert str(record["record_id"]) == receipt.platform_record_id
+        assert record["content"]["cameras"][0]["clips"] == []
+        assert stack.evidence(record["record_id"]) == []
+        # Repetido: el mismo recibo, tampoco con petición al almacén.
+        again = stack.post(site, kind, document)
+        assert api.parse_receipt(again.content).status.value == "accepted_duplicate"
+        assert stack.storage.calls == calls
+    assert stack.audit(site.organization_id) == []
+    # Un clip citado que no está en el almacén sigue rechazándose como hasta ahora.
+    missing = stack.finding(site, store=False)
+    assert _rejection(stack.post(site, FINDING, missing)).code.value == "clip_missing"
+
+
 def test_every_permanent_rejection_is_audited_and_the_chain_stays_whole(
     stack: IngestStack,
 ) -> None:

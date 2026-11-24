@@ -8,16 +8,19 @@ Todas las sentencias van en la transacción de la presentación, con el ``ScopeC
   modo, el ``record_id``, el índice y el papel de la foto (``gob_0045``, TASK-588) y los valores de
   proceso como ``jsonb`` (``gob_0046``, TASK-593; nulos sin bloque). Un segundo
   ``photo_id`` con el mismo ``(zona, episodio, tramo, índice)`` de ``productive`` choca con el
-  índice único ``episode_photo_productive_slot`` y lanza ``IntegrityError`` (su traducción a
-  ``schema_invalid`` en ``photo_index`` es de la ingesta, TASK-603). Es la
-  idempotencia **atómica** del paso 5: una segunda presentación simultánea del mismo ``photo_id``
-  espera en la clave única a que la primera confirme o se revierta y, si confirmó, no inserta;
+  índice único ``episode_photo_productive_slot``: el ``INSERT`` de ``productive`` va en un
+  ``SAVEPOINT`` y ese choque, y solo ese (por el nombre exacto de la restricción), sale como
+  ``PhotoSlotTaken`` con la transacción aún usable (la ingesta lo responde ``schema_invalid`` en
+  ``photo_index`` tras la compuerta, TASK-603). Es la idempotencia **atómica** del paso 5: una
+  segunda presentación simultánea del mismo ``photo_id`` espera en la clave única a que la primera
+  confirme o se revierta y, si confirmó, no inserta;
 - ``stored``: la fila ya aceptada con ese ``photo_id`` (su ``canonical_sha256`` y su recibo),
   para resolver el duplicado o el conflicto en la misma transacción;
 - ``retention_days`` y ``catalog_versions``: las del paso 7 de la ingesta
   (``PostgresIngestStore``);
-- ``mounting_spans``: los intervalos de la compuerta de **montaje** que se cruzan con la ventana
-  (paso 8, A-112).
+- ``mounting_spans`` y ``usage_spans``: los intervalos de la compuerta de **montaje** (paso 8 de
+  ``commissioning``, A-112) o **de uso** (paso 8 de ``productive``, la consulta de los hallazgos,
+  BR-GOB-92) que se cruzan con la ventana.
 
 SQL sin valores en trazas ni registros (NFR-GOB-57); los bytes de la imagen solo viajan como
 parámetro del ``INSERT``.
@@ -30,17 +33,29 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import text
 
 from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
 from vigia_platform.fleet.domain.clock_tolerance import Window
-from vigia_platform.fleet.domain.episode_photo import EpisodePhotoRow
+from vigia_platform.fleet.domain.episode_photo import EpisodePhotoRow, ZoneMode
 from vigia_platform.fleet.domain.ingest_order import CatalogVersionView, GateSpan
-from vigia_platform.ledger.application.writer import LedgerDatabase
+from vigia_platform.ledger.application.writer import LedgerDatabase, violated_constraint
 from vigia_platform.shared.context import repository
 from vigia_platform.shared.db import Transaction
 
-__all__ = ["COLUMNS", "PostgresEpisodePhotoStore", "StoredPhoto"]
+__all__ = [
+    "COLUMNS",
+    "SLOT_CONSTRAINT",
+    "PhotoSlotTaken",
+    "PostgresEpisodePhotoStore",
+    "StoredPhoto",
+]
+
+SLOT_CONSTRAINT: Final = "episode_photo_productive_slot"
+"""El índice único de ``productive`` por ``(organización, zona, episodio, tramo, índice)``
+(``gob_0045``)."""
+_UNIQUE_VIOLATION: Final = "23505"
 
 COLUMNS: Final = (
     "organization_id",
@@ -107,6 +122,11 @@ _MOUNTING_SPANS: Final = text(
 )
 
 
+class PhotoSlotTaken(Exception):
+    """Otro ``photo_id`` ya ocupa el ``(zona, episodio, tramo, índice)`` de esta foto
+    ``productive``; el ``INSERT`` se deshizo hasta su ``SAVEPOINT`` y la transacción sigue."""
+
+
 @dataclass(frozen=True, slots=True)
 class StoredPhoto:
     """La foto ya aceptada: su hash canónico y lo que forma su recibo."""
@@ -129,14 +149,24 @@ class PostgresEpisodePhotoStore:
         self._ingest = PostgresIngestStore(database)
 
     async def claim(self, transaction: Transaction, row: EpisodePhotoRow) -> bool:
-        """``True`` si la fila entró; ``False`` si ya había una con ese ``photo_id``."""
+        """``True`` si la fila entró; ``False`` si ya había una con ese ``photo_id``;
+        ``PhotoSlotTaken`` si es ``productive`` y otro ``photo_id`` ocupa su índice del tramo."""
         if row.organization_id != transaction.context.organization_id:
             raise ValueError("la foto es de otra organización que la transacción")
         values = {column: getattr(row, column) for column in COLUMNS}
         # Los enumerados del dominio van como su texto (la base los comprueba con sus CHECK).
         values["zone_mode"] = row.zone_mode.value
         values["photo_role"] = row.photo_role.value
-        inserted = (await transaction.execute(_CLAIM, values)).first()
+        if row.zone_mode is not ZoneMode.PRODUCTIVE:
+            # ``commissioning`` no tiene índice único por tramo: sin SAVEPOINT, como TASK-572.
+            return (await transaction.execute(_CLAIM, values)).first() is not None
+        try:
+            async with transaction.savepoint():
+                inserted = (await transaction.execute(_CLAIM, values)).first()
+        except sa_exc.IntegrityError as error:
+            if violated_constraint(error, _UNIQUE_VIOLATION) != SLOT_CONSTRAINT:
+                raise
+            raise PhotoSlotTaken() from None
         return inserted is not None
 
     async def stored(self, transaction: Transaction, photo_id: uuid.UUID) -> StoredPhoto | None:
@@ -159,6 +189,11 @@ class PostgresEpisodePhotoStore:
         self, transaction: Transaction, zone_id: uuid.UUID, window: Window
     ) -> tuple[CatalogVersionView, ...]:
         return await self._ingest.catalog_versions(transaction, zone_id, window)
+
+    async def usage_spans(
+        self, transaction: Transaction, zone_id: uuid.UUID, window: Window
+    ) -> tuple[GateSpan, ...]:
+        return await self._ingest.usage_spans(transaction, zone_id, window)
 
     async def mounting_spans(
         self, transaction: Transaction, zone_id: uuid.UUID, window: Window

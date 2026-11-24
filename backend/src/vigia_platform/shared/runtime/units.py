@@ -1071,7 +1071,7 @@ def _node_operations(
                 database=services.database, writer=services.writer, clock=services.clock
             )
         ),
-        NodeRoute.EPISODE_PHOTO: episode_photo_route(services),  # TASK-572 (A-112).
+        NodeRoute.EPISODE_PHOTO: episode_photo_route(services, rejections=ingest),  # TASK-572, 603.
     }
 
 

@@ -1,4 +1,4 @@
-"""``fleet.episode_photos``: ingesta de la foto del episodio de la sombra (TASK-572; A-112).
+"""``fleet.episode_photos``: ingesta de la foto del episodio (TASK-572, A-112; TASK-603, A-128).
 
 ``POST /api/nodes/episode-photos`` (``node_api.routes.episode_photos``) llega aquí con la
 verificación previa común de ``node_api`` hecha: (1) versión, (2) certificado y zona del nodo
@@ -7,10 +7,9 @@ estricto ``EpisodePhotoSubmission`` del contrato vigente (v1.6.0). Este servicio
 orden de BR-GOB-84 (el primer fallo decide el código):
 
 - **paso 4, lo que el esquema no expresa**: ``contract_version`` del cuerpo igual a la cabecera,
-  ``Idempotency-Key`` igual a ``photo_id`` (BR-CTR-26), ``data_base64`` que se decodifica y
-  ``zone_mode`` de ``commissioning`` → ``schema_invalid``. La foto del hallazgo (``productive``,
-  A-128), que el lector estricto de v1.6.0 ya admite, se rechaza con ``field = zone_mode`` hasta
-  TASK-603: nunca se guarda como foto de puesta en marcha;
+  ``Idempotency-Key`` igual a ``photo_id`` (BR-CTR-26) y ``data_base64`` que se decodifica →
+  ``schema_invalid``. El lector estricto de v1.6.0 ya exige ``record_id``, ``photo_index`` y
+  ``photo_role`` coherentes con ``zone_mode`` (r1 y r2 de TASK-600);
 - **paso 5, idempotencia atómica** (BR-GOB-89): en **una** transacción, ``INSERT … ON CONFLICT DO
   NOTHING`` de la fila y, si ya había una con ese ``photo_id`` en la organización, la comparación
   de su ``canonical_sha256`` con el de la presentación: igual → ``accepted_duplicate`` con el
@@ -23,14 +22,27 @@ orden de BR-GOB-84 (el primer fallo decide el código):
   nodo, como los demás registros fechados), el estándar vigente y la cámara del catálogo de la
   zona y sus valores de proceso, si los trae (``schema_invalid`` en ``standard``, ``camera_id`` o
   ``process_context.variables…``, A-129);
-- **paso 8**: la compuerta de **montaje** aprobada en la ventana del hecho
-  (``zone_gate_not_approved``; A-112 la usa aquí para el montaje);
+- **paso 8**: la compuerta aprobada en la ventana del hecho (``node_time.started_at`` con la
+  tolerancia; ``zone_gate_not_approved``): la de **montaje** en ``commissioning`` (A-112) y la **de
+  uso** en ``productive``, la misma consulta que los hallazgos (BR-GOB-92, A-128 §5);
+- **un índice por tramo** (``productive``, tras la compuerta, como la plataforma simulada de
+  v1.6.0): si otro ``photo_id`` ya ocupa su ``(zona, episodio, tramo, photo_index)``
+  (``PhotoSlotTaken`` del almacén), ``schema_invalid`` en ``photo_index``, permanente, y la fila
+  que ya estaba no cambia. Si la que lo ocupa resulta ser **la misma** ``photo_id`` (dos envíos
+  simultáneos), se resuelve como el paso 5;
 - **paso 9**: la transacción confirma. Si cualquier paso falla, se revierte y no queda nada.
 
-La foto **no** entra en el expediente ni en la cadena (QF10): ni registro, ni evento, ni rastro
-``ingest_rejected``. Vence a los ``retention_days`` (``VIGIA_EPISODE_PHOTO_RETENTION_DAYS``, 30 por
-defecto, de 1 a 90) de su recepción. Ningún paso lee la hora del sistema: ``received_at`` llega de
-la verificación previa y el identificador del recibo, del mismo ``Clock`` inyectado.
+La foto del hallazgo **no** exige que su registro haya llegado antes (A-128 §5): la lectura
+(TASK-589) las une por ``record_id``, zona, episodio y tramo cuando están los dos; una foto cuyo
+registro no llega nunca no se ve y vence según su modo.
+
+La foto **no** entra en el expediente ni en la cadena (QF10). Vence según su modo
+(``fleet.domain.episode_photo.photo_row``): ``VIGIA_EPISODE_PHOTO_RETENTION_DAYS`` en
+``commissioning`` y ``VIGIA_FINDING_PHOTO_RETENTION_DAYS`` en ``productive``. Los rechazos de
+``productive`` dejan su rastro ``ingest_rejected`` como los hallazgos (BR-GOB-96; lo pide la ruta);
+los de ``commissioning``, solo métrica y registro (A-112). Ningún paso lee la hora del sistema:
+``received_at`` llega de la verificación previa y el identificador del recibo, del mismo ``Clock``
+inyectado.
 """
 
 from __future__ import annotations
@@ -48,7 +60,7 @@ from vigia_contracts.models._base import ContractModel
 from vigia_contracts.models.enumerations import AcceptanceStatus, RejectionCode
 from vigia_contracts.models.receipt import Receipt as ContractReceipt
 
-from vigia_platform.fleet.adapters.postgres.episode_photo_store import StoredPhoto
+from vigia_platform.fleet.adapters.postgres.episode_photo_store import PhotoSlotTaken, StoredPhoto
 from vigia_platform.fleet.application.ingest import IngestRejected, IngestReply
 from vigia_platform.fleet.domain.clock_tolerance import FactTime, Window
 from vigia_platform.fleet.domain.episode_photo import (
@@ -101,6 +113,10 @@ class EpisodePhotoStore(Protocol):
     ) -> Sequence[CatalogVersionView]: ...
 
     async def mounting_spans(
+        self, transaction: Transaction, zone_id: uuid.UUID, window: Window
+    ) -> Sequence[GateSpan]: ...
+
+    async def usage_spans(
         self, transaction: Transaction, zone_id: uuid.UUID, window: Window
     ) -> Sequence[GateSpan]: ...
 
@@ -183,10 +199,6 @@ class EpisodePhotoService:
                 body_level=True,
                 zone_id=zone_id,
             )
-        if submission.get("zone_mode") != ZoneMode.COMMISSIONING.value:
-            # La foto del hallazgo (A-128) aún no se admite: la ingesta de ``productive`` es de
-            # TASK-603. Sin ``zone_mode`` el lector estricto ya rechazó en el paso 4.
-            raise IngestRejected(RejectionCode.SCHEMA_INVALID, field="zone_mode", zone_id=zone_id)
         image = submission.get("image")
         try:
             data = None if image is None else decode_image(image)
@@ -210,12 +222,19 @@ class EpisodePhotoService:
         # recibe el nodo sigue siendo el de BR-GOB-84: la idempotencia (5) antes que la imagen (6).
         violation = None if image is None or data is None else image_violation(image, data)
         attributes = {"node_id": str(node.node_id), "zone_id": str(zone_id)}
+        slot_taken = False
         async with deps.database.transaction(node.context) as transaction:
             # (5) idempotencia: la fila entra, o la que ya estaba decide. Con la imagen rechazada
             # solo se consulta la que ya estaba, sin INSERT.
             with deps.tracer.start_as_current_span(CLAIM_SPAN, attributes=attributes):
                 if violation is None:
-                    previous = await self._claim(transaction, row)
+                    try:
+                        previous = await self._claim(transaction, row)
+                    except PhotoSlotTaken:
+                        # Otro photo_id en su índice del tramo (o el mismo, si dos envíos
+                        # simultáneos chocaron en el índice): se decide tras la compuerta.
+                        slot_taken = True
+                        previous = await self._existing(transaction, row)
                 else:
                     previous = await self._existing(transaction, row)
             if previous is not None:
@@ -226,12 +245,20 @@ class EpisodePhotoService:
             # (7) antigüedad, catálogo y cámara.
             with deps.tracer.start_as_current_span(CATALOG_SPAN, attributes=attributes):
                 await self._check_catalog(transaction, node, zone_id, submission, fact)
-            # (8) compuerta de montaje.
+            # (8) compuerta: la de montaje en commissioning y la de uso en productive.
             with deps.tracer.start_as_current_span(GATE_SPAN, attributes=attributes):
-                spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)
+                if row.zone_mode is ZoneMode.PRODUCTIVE:
+                    spans = await deps.store.usage_spans(transaction, zone_id, fact.gate_window)
+                else:
+                    spans = await deps.store.mounting_spans(transaction, zone_id, fact.gate_window)
             if not usage_approved_during(spans, fact.gate_window):
                 raise IngestRejected(
                     RejectionCode.ZONE_GATE_NOT_APPROVED, field="zone_id", zone_id=zone_id
+                )
+            # Un índice por tramo (productive): el INSERT ya se deshizo hasta su SAVEPOINT.
+            if slot_taken:
+                raise IngestRejected(
+                    RejectionCode.SCHEMA_INVALID, field="photo_index", zone_id=zone_id
                 )
         # (9) la transacción confirmó.
         return IngestReply(
