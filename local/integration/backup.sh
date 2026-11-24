@@ -9,6 +9,10 @@
 # `pg_restore --file=/dev/null` (`--list` no detecta una copia truncada por el final) y borra las de
 # más de VIGIA_BACKUP_KEEP_DAYS días (14). Una copia que falla a medias no deja un archivo que
 # parezca bueno. No incluye la clave de la autoridad de nodos ni los secretos: ver el README.
+#
+# Junto a cada copia de la base deja el espejo de vigia-evidence (volumen `almacen`, TASK-608):
+# `vigia-<fecha UTC>-<pid>.almacen.tar` (0600, leído entero con `tar -tf`), con la misma retención.
+# Se publica antes que la base: una copia `.dump` publicada siempre tiene su `.almacen.tar`.
 set -euo pipefail
 # shellcheck source=local/integration/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -20,9 +24,13 @@ umask 077
 # Dos copias a la vez (el `cron` y una a mano) no se pisan: cada una escribe su propio temporal y
 # su propio nombre (la fecha y el pid) y solo lo publica, con `mv`, cuando ya la comprobó.
 temporary="$(mktemp "$destination/.vigia-XXXXXX")"
-trap 'rm -f "$temporary"' EXIT
+almacen_temporary="$(mktemp "$destination/.almacen-XXXXXX")"
+trap 'rm -f "$temporary" "$almacen_temporary"' EXIT
 file="$destination/vigia-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
 dump_live_database "$temporary"
+dump_live_almacen "$almacen_temporary"
+mv "$almacen_temporary" "${file%.dump}.almacen.tar"
 mv "$temporary" "$file"
-find "$destination" -maxdepth 1 -name 'vigia-*.dump' -mtime +"$keep_days" -delete
+find "$destination" -maxdepth 1 \( -name 'vigia-*.dump' -o -name 'vigia-*.almacen.tar' \) \
+    -mtime +"$keep_days" -delete
 echo "$file"
