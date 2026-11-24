@@ -84,6 +84,7 @@ function milestone(
     details: { ...NO_DETAILS, ...details },
     deadline: null,
     photos: [],
+    process: [],
     ...changes,
   };
 }

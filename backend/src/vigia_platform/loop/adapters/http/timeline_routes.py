@@ -5,7 +5,8 @@ sin parámetros de consulta): la línea de tiempo completa del sujeto en **una**
 del expediente (``ledger_detail_read``, BR-LAZ-09), con un hito por registro en orden de
 expediente, la hora presentada (agregada en zona unipersonal, BR-LAZ-06), el tiempo desde el hito
 anterior, quién (rol y nombre del usuario de la plataforma, solo si el registro lo trae), los
-campos elegidos de cada registro y el plazo que aplica con si se cumplió; arriba, el resumen.
+campos elegidos de cada registro y el plazo que aplica con si se cumplió; arriba, el resumen. El
+hito de detección lleva el resumen de sus valores de proceso (``process``, A-129, TASK-595).
 
 Inexistente, de otra organización, fuera del alcance o en una zona sin compuerta de uso aprobada
 en el instante del hecho: ``not_found``. Sin compuerta legible, **503 ``temporarily_unavailable``
@@ -22,6 +23,10 @@ from typing import Annotated, Final
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict
 
+from vigia_platform.fleet.adapters.http.process_context import (
+    ProcessVariableSummaryOut,
+    process_summary_out,
+)
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import exact_query, no_store
 from vigia_platform.loop.adapters.http.findings_routes import FindingPhotoOut, finding_photo_out
@@ -109,6 +114,10 @@ class TimelineMilestoneOut(_Strict):
     photos: tuple[FindingPhotoOut, ...]
     """Las fotos del tramo en ``finding_received`` y ``late_segment_attached`` (A-128), con la
     forma del detalle; vacía en los demás hitos."""
+    process: tuple[ProcessVariableSummaryOut, ...]
+    """En el hito de detección, una entrada por variable de proceso del registro (A-129): nombre,
+    unidad, decimales, par de estados y el valor o estado en el instante del hecho con su hora
+    (agregada en zona unipersonal); sin la serie. Vacía en los demás hitos."""
 
 
 class TimelineSummaryOut(_Strict):
@@ -190,6 +199,7 @@ def _milestone(milestone: Milestone) -> TimelineMilestoneOut:
             else TimelineDeadlineOut(due_at=_stamp(deadline.due_at), met=deadline.met)
         ),
         photos=tuple(finding_photo_out(photo) for photo in milestone.photos),
+        process=process_summary_out(milestone.process),
     )
 
 

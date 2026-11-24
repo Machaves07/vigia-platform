@@ -94,9 +94,26 @@ LISTED_KEYS: Final = frozenset(
         "frame_at",
         "image",
         "image_absent_reason",
+        "process_context",
     }
 )
 """Las claves de cada foto del listado: ni ``data``, ni ``sha256``, ni ``url``."""
+PROCESS_BLOCK: Final = {
+    "from_offset_ms": -30_000,
+    "to_offset_ms": 4_000,
+    "variables": [
+        {
+            "variable_id": str(uuid.UUID(int=7)),
+            "kind": "analog",
+            "at_event": {"value": 1397.5, "valid": True, "offset_ms": 0},
+            "min": 1390.25,
+            "max": 1400.0,
+            "last": 1397.5,
+            "samples": [{"offset_ms": -10_000, "value": 1390.25}],
+        }
+    ],
+}
+"""Un bloque sintético de valores de proceso (TASK-595), sin versión del catálogo que lo declare."""
 CLIENT_ROLES: Final = (
     Role.COORDINATOR_SST,
     Role.PLANT_MANAGER,
@@ -217,6 +234,46 @@ def test_a_record_without_image_is_listed_with_its_reason_and_its_image_is_not_f
     assert _comparable(response) == _comparable(missing)
     assert _code(response) == "not_found"
     assert [e["outcome"] for e in image_audit(stack, photo.photo_id)] == ["denied"]
+
+
+def test_the_listing_returns_the_stored_process_values_and_null_without_them(
+    stack: FleetStack,
+) -> None:
+    """TASK-595 (A-129, Q6): la foto con bloque lo devuelve tal como se guardó (sin versión del
+    catálogo que lo declare, los nombres en ``null``); sin bloque, ``null``. La lectura deja las
+    mismas entradas de auditoría que antes: una ``fleet_read`` por petición bajo concesión."""
+    site = stack.site()
+    with_block = _photo(stack, site)
+    without = _photo(stack, site, started_at=with_block.started_at - HOUR)
+    stack.execute(
+        "UPDATE fleet.episode_photo SET process_context = $2::jsonb WHERE photo_id = $1",
+        with_block.photo_id,
+        json.dumps(PROCESS_BLOCK),
+    )
+    installer = stack.installer(site)
+    before = len(entries(stack, "fleet_read"))
+    listed = _list(stack, installer, with_block.zone_id)
+    assert listed.status_code == 200, listed.text
+    first, second = listed.json()["photos"]
+    assert (first["photo_id"], second["photo_id"]) == (
+        str(with_block.photo_id),
+        str(without.photo_id),
+    )
+    assert second["process_context"] is None
+    block = first["process_context"]
+    assert (block["from_offset_ms"], block["to_offset_ms"]) == (-30_000, 4_000)
+    (variable,) = block["variables"]
+    assert (variable["variable_id"], variable["kind"]) == (str(uuid.UUID(int=7)), "analog")
+    assert (variable["code"], variable["description_es"], variable["unit"]) == (None, None, None)
+    assert variable["at_event"] == {
+        "value": 1397.5,
+        "valid": True,
+        "offset_ms": 0,
+        "read_at": format_timestamp(with_block.started_at),
+    }
+    assert (variable["min"], variable["max"], variable["last"]) == (1390.25, 1400.0, 1397.5)
+    assert variable["samples"] == [{"offset_ms": -10_000, "value": 1390.25}]
+    assert len(entries(stack, "fleet_read")) == before + 1
 
 
 # --- Listado ------------------------------------------------------------------------------------

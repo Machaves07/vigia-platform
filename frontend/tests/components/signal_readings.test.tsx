@@ -21,6 +21,8 @@ const SIGNALS: SignalReading[] = [
     value: 'asserted',
     valid: true,
     read_at: '2026-01-01T12:00:07.000Z',
+    code: null,
+    description_es: null,
   },
   {
     signal_id: null,
@@ -28,8 +30,18 @@ const SIGNALS: SignalReading[] = [
     value: 'deasserted',
     valid: false,
     read_at: '2026-01-01T12:00:09.250Z',
+    code: null,
+    description_es: null,
   },
-  { signal_id: null, role: 'start_command', value: 'asserted', valid: true, read_at: null },
+  {
+    signal_id: null,
+    role: 'start_command',
+    value: 'asserted',
+    valid: true,
+    read_at: null,
+    code: null,
+    description_es: null,
+  },
 ];
 
 function part(root: Element, name: string): Element | null {

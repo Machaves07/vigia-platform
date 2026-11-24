@@ -21,7 +21,11 @@ SCR-06, ni aunque la zona vuelva a ``commissioning`` por una regresión; su imag
    por ``(started_at, photo_id)``, con ``from``/``to`` sobre ``started_at``; páginas de 50 por
    defecto y 200 como mucho; ``after`` es el ``photo_id`` del último de la página anterior, y un
    cursor que no es una foto viva de la zona es ``invalid_request``;
-4. solo metadatos y ``image_absent_reason``: nunca bytes, suma ni URL. **Sin auditoría propia**
+4. solo metadatos, ``image_absent_reason`` y los valores de proceso (``process_context``, A-129,
+   Q6), con el nombre de cada variable de la versión del catálogo con la que se aceptó la foto
+   (``fleet.domain.record_declarations.photo_version``; una consulta más en la misma transacción,
+   solo si alguna foto de la página trae el bloque): nunca bytes, suma ni URL. **Sin auditoría
+   propia**
    (identificadores y enumeraciones); bajo concesión, la lectura del proveedor se audita como las
    demás lecturas de la flota (``fleet_read`` con el número de fotos, BR-NUC-38), en la misma
    transacción.
@@ -51,6 +55,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Final, Protocol
@@ -61,6 +66,9 @@ from vigia_platform.fleet.adapters.postgres.episode_photo_queries import (
     PostgresEpisodePhotoQueries,
     StoredImage,
 )
+from vigia_platform.fleet.application.record_declarations import RecordCatalogs
+from vigia_platform.fleet.domain.clock_tolerance import MAX_CLOCK_TOLERANCE, Window
+from vigia_platform.fleet.domain.record_declarations import DeclaredCatalogVersion, photo_version
 from vigia_platform.identity.authz.authorize import Resource, ResourceNotFound
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.audit_writer import (
@@ -154,6 +162,25 @@ class EpisodePhotoPage:
 
     photos: tuple[EpisodePhotoSummary, ...]
     next_after: uuid.UUID | None
+    declarations: Mapping[uuid.UUID, DeclaredCatalogVersion | None] = field(default_factory=dict)
+    """La versión del catálogo de cada foto con valores de proceso, por ``photo_id``."""
+
+
+def _photo_document(photo: EpisodePhotoSummary) -> dict[str, object]:
+    """Lo que la búsqueda del paso 7 mira de la foto: estándar, cámara y valores de proceso."""
+    return {
+        "standard": {"standard_id": str(photo.standard_id), "version": photo.standard_version},
+        "camera_id": None if photo.camera_id is None else str(photo.camera_id),
+        "process_context": photo.process_context,
+    }
+
+
+def _span(photos: tuple[EpisodePhotoSummary, ...]) -> Window:
+    """La ventana que cubre la del tramo (con la tolerancia máxima) y la recepción de cada foto."""
+    return Window(
+        min(min(p.started_at - MAX_CLOCK_TOLERANCE, p.received_at) for p in photos),
+        max(max(p.ended_at + MAX_CLOCK_TOLERANCE, p.received_at) for p in photos),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,12 +234,14 @@ class EpisodePhotoReader:
         audit: AuditWriter,
         clock: Clock,
         queries: EpisodePhotoReads | None = None,
+        catalogs: RecordCatalogs | None = None,
     ) -> None:
         self._database = database
         self._authorizer = authorizer
         self._audit = audit
         self._clock = clock
         self._queries = queries if queries is not None else PostgresEpisodePhotoQueries(database)
+        self._catalogs = catalogs if catalogs is not None else RecordCatalogs(database=database)
 
     def __repr__(self) -> str:
         return "EpisodePhotoReader()"
@@ -260,6 +289,22 @@ class EpisodePhotoReader:
             if found is None:
                 raise EpisodePhotosRequestInvalid("el cursor no es una foto viva de la zona")
             items = found[:limit]
+            declarations: dict[uuid.UUID, DeclaredCatalogVersion | None] = {}
+            with_block = tuple(p for p in items if p.process_context is not None)
+            if with_block:
+                versions = await self._catalogs.versions_in(
+                    transaction, zone_id=zone.zone_id, window=_span(with_block)
+                )
+                declarations = {
+                    p.photo_id: photo_version(
+                        versions,
+                        _photo_document(p),
+                        started_at=p.started_at,
+                        ended_at=p.ended_at,
+                        received_at=p.received_at,
+                    )
+                    for p in with_block
+                }
             if authorized.concession_id is not None:
                 # BR-NUC-38: la lectura del proveedor bajo concesión, en la misma transacción.
                 await self._audit.append(
@@ -271,7 +316,7 @@ class EpisodePhotoReader:
                     transaction=transaction,
                 )
         following = items[-1].photo_id if len(found) > limit else None
-        return EpisodePhotoPage(photos=items, next_after=following)
+        return EpisodePhotoPage(photos=items, next_after=following, declarations=declarations)
 
     async def image(self, context: ScopeContext, photo_id: uuid.UUID) -> ServedImage:
         """Los bytes de la foto, con su entrada ``episode_photo_read`` ya confirmada."""

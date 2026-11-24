@@ -617,6 +617,7 @@ def episode_photos_section() -> dict[str, Any]:
                     blur_params_version="blur-v1",
                 ),
                 image_absent_reason=None,
+                process_context=None,
                 **common,
             ),
             EpisodePhotoOut(
@@ -630,6 +631,7 @@ def episode_photos_section() -> dict[str, Any]:
                 frame_at=None,
                 image=None,
                 image_absent_reason=ImageAbsentReason.PENDING_CAP.value,
+                process_context=None,
                 **common,
             ),
         ),

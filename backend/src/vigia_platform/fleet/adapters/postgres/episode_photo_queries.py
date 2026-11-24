@@ -30,7 +30,8 @@ lectura de la foto del hallazgo (TASK-589) es aparte: filas ``productive`` por `
   ``not_found`` entero);
 - ``page`` y ``cursor``: el listado por clave, el más reciente primero por ``(started_at,
   photo_id)``, con ``from``/``to`` sobre ``started_at`` (el inicio del tramo: cuándo hubo el
-  episodio). **Nunca** selecciona la columna ``image``;
+  episodio). **Nunca** selecciona la columna ``image``; sí ``process_context`` (``gob_0046``,
+  TASK-595), que se devuelve tal como se guardó;
 - ``location`` y ``image``: la foto de la petición de imagen; ``image`` es la única sentencia que
   lee los bytes, y solo de una foto viva;
 - ``purge_retired`` y ``purge_expired``: ``DELETE`` de a lo sumo ``limit`` filas, que devuelve solo
@@ -48,7 +49,9 @@ SQL sin valores en trazas ni registros (NFR-GOB-57); ``StoredImage`` no muestra 
 
 from __future__ import annotations
 
+import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
@@ -97,7 +100,8 @@ _PAGE: Final = text(
     "SELECT p.photo_id, p.organization_id, p.plant_id, p.zone_id, p.node_id, p.episode_id,"
     " p.segment_index, p.classified_as, p.family, p.standard_id, p.standard_version,"
     " p.max_confidence, p.started_at, p.ended_at, p.received_at, p.expires_at, p.camera_id,"
-    " p.frame_at, p.width, p.height, p.size_bytes, p.blur_params_version, p.image_absent_reason"
+    " p.frame_at, p.width, p.height, p.size_bytes, p.blur_params_version, p.image_absent_reason,"
+    " p.process_context"
     " FROM fleet.episode_photo AS p"
     " WHERE p.organization_id = :organization_id AND p.zone_id = :zone_id"
     " AND p.zone_mode = 'commissioning' AND p.expires_at > CAST(:now AS timestamptz)"
@@ -225,6 +229,8 @@ class EpisodePhotoSummary:
     size_bytes: int | None
     blur_params_version: str | None
     image_absent_reason: str | None
+    process_context: Mapping[str, Any] | None = None
+    """El bloque ``process_context`` guardado (``gob_0046``; A-129, Q6), o ``None`` sin bloque."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +309,12 @@ def _finding_photo(values: Any) -> FindingPhoto:
     )
 
 
+def _block(value: Any) -> Mapping[str, Any] | None:
+    """La columna ``jsonb`` (asyncpg la entrega como texto) como objeto, o ``None``."""
+    block = json.loads(value) if isinstance(value, str | bytes) else value
+    return block if isinstance(block, Mapping) else None
+
+
 def _summary(row: Any) -> EpisodePhotoSummary:
     values = row._mapping
     return EpisodePhotoSummary(
@@ -329,6 +341,7 @@ def _summary(row: Any) -> EpisodePhotoSummary:
         size_bytes=values["size_bytes"],
         blur_params_version=values["blur_params_version"],
         image_absent_reason=values["image_absent_reason"],
+        process_context=_block(values["process_context"]),
     )
 
 
