@@ -209,7 +209,8 @@ def test_a_zone_without_catalog_is_named(routes: CatalogRoutes) -> None:
 
     response = _put(routes, zone, admin, {**POPE, "reason_es": REASON})
 
-    assert _code(response) == (400, "invalid_request", "catalog_zone_without_cameras")
+    # Como las demás rutas de parámetros: choca con el estado de la zona (CATALOG_API_ERROR_CODES).
+    assert _code(response) == (409, "conflict", "catalog_zone_without_cameras")
     assert routes.versions(zone) == []
 
 
