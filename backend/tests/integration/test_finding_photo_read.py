@@ -20,6 +20,9 @@ ingresados por la ruta del nodo y las filas de ``fleet.episode_photo`` sembradas
   (``m_sin_integridad``).
 - **Concurrencia**: lecturas lanzadas a la vez que la purga que borra la fila devuelven los bytes
   completos con ``success`` o ``not_found`` con ``denied``, nunca una respuesta parcial.
+- **Por la ruta del nodo** (TASK-603): una foto ``productive`` enviada por ``POST episode-photos``
+  **antes** que su hallazgo sale en el detalle cuando el hallazgo llega; un hallazgo y una
+  detección sin clip (``clips: []``, fase 1 de A-128) se muestran con ``clips: []``.
 
 Solo datos generados.
 """
@@ -40,6 +43,7 @@ import pytest
 from tests.episode_photo_read_support import photo_bytes
 from tests.episode_photo_support import BLUR_VERSION
 from tests.fleet_alarm_support import system
+from tests.fleet_episode_photo_support import PhotoStack
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject, LoopOrganization
 from tests.loop_classification_support import SAME_ORIGIN, Who
@@ -348,6 +352,60 @@ def test_the_timeline_carries_the_photos_of_the_reception_of_each_segment(
         str(second.record_id): [str(late.photo_id)],
     }
     assert all(m["photos"] == [] for m in body["milestones"] if m["kind"] != "finding_received")
+
+
+# --- por la ruta del nodo (TASK-603) ------------------------------------------------------------
+
+
+def test_a_photo_sent_before_its_finding_shows_in_the_detail_when_the_finding_arrives(
+    stack: DetailStack, coordinator: Who
+) -> None:
+    world = stack.world
+    organization = world.a
+    site = organization.site
+    photos = PhotoStack(world.stack)
+    try:
+        finding = world.stack.finding(site)
+        started = dt.datetime.fromisoformat(str(finding["node_time"]["started_at"]))
+        photo = photos.photo(site, started=started, validate=False)
+        photo |= {
+            "zone_mode": "productive",
+            "record_id": finding["finding_id"],
+            "photo_index": 0,
+            "photo_role": "peak",
+            "episode": dict(finding["episode"]),
+        }
+        sent = photos.post(site, photo)
+        assert sent.status_code == 200, sent.text
+        received = world.stack.records("finding_received", organization.organization_id)
+        assert finding["finding_id"] not in {row["content"]["finding_id"] for row in received}
+        subject = world._ingest(organization, IngestKind.FINDING, finding)
+        assert world.project(subject).transition_id == "T01"
+        body = _ok(stack.detail(coordinator, stack.finding_state_id(subject)))
+        (record,) = body["records"]
+        assert [p["photo_id"] for p in record["photos"]] == [photo["photo_id"]]
+    finally:
+        photos.run(photos.release())
+
+
+def test_a_finding_and_a_detection_without_clips_show_with_no_clips(
+    stack: DetailStack, coordinator: Who
+) -> None:
+    world = stack.world
+    organization = world.a
+    site = organization.site
+    finding = world.stack.finding(site, store=False, grant=False)
+    detection = world.stack.detection(site, store=False, grant=False)
+    for kind, document, transition in (
+        (IngestKind.FINDING, finding, "T01"),
+        (IngestKind.DETECTION_FOR_REVIEW, detection, "T02"),
+    ):
+        document["cameras"][0]["clips"] = []
+        subject = world._ingest(organization, kind, document)
+        assert world.project(subject).transition_id == transition
+        body = _ok(stack.detail(coordinator, stack.finding_state_id(subject)))
+        (record,) = body["records"]
+        assert record["clips"] == []
 
 
 # --- hora agregada -------------------------------------------------------------------------------

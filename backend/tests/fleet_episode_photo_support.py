@@ -6,8 +6,9 @@ alta, su certificado, su catálogo y su compuerta de uso) y añade:
 
 - ``PhotoInstance``: una instancia de ``vigia-api`` con la ``NodeApiGate`` real, solo la ruta
   ``POST /api/nodes/episode-photos`` y la operación que compone la raíz
-  (``episode_photo_operation`` sobre ``EpisodePhotoService`` y ``PostgresEpisodePhotoStore``), con
-  métricas en memoria para leerlas;
+  (``episode_photo_operation`` sobre ``EpisodePhotoService`` y ``PostgresEpisodePhotoStore``, con
+  el ``IngestService`` de la pila para el rastro de los rechazos de ``productive``), con métricas
+  en memoria para leerlas;
 - ``mounting``: la compuerta de **montaje** de la zona aprobada o revocada desde un instante;
 - ``photo`` y ``rows``: una presentación válida de la zona y lo que quedó en
   ``fleet.episode_photo``.
@@ -92,7 +93,11 @@ class PhotoStack:
 
     # --- Instancias ----------------------------------------------------------------------------
 
-    def instance(self, database: Database | None = None) -> PhotoInstance:
+    def instance(
+        self, database: Database | None = None, *, finding_retention_days: int = 0
+    ) -> PhotoInstance:
+        """Una instancia; ``finding_retention_days`` es ``VIGIA_FINDING_PHOTO_RETENTION_DAYS``
+        (0 = la foto del hallazgo sin vencimiento, el valor por defecto de la raíz)."""
         ingest = self.ingest
         database = database if database is not None else ingest.database()
         clock = ingest.authz.sessions.clock
@@ -104,6 +109,7 @@ class PhotoStack:
                 clock=clock,
                 store=PostgresEpisodePhotoStore(database),
                 retention_days=self.retention_days,
+                finding_retention_days=finding_retention_days,
             )
         )
         gate = NodeApiGate(
@@ -113,7 +119,11 @@ class PhotoStack:
             limits=NodeRateLimits(UnlimitedLimiter(clock)),
             clock=clock,
             responses=NodeResponses(clock),
-            operations={NodeRoute.EPISODE_PHOTO: episode_photo_operation(service, metrics=metrics)},
+            operations={
+                NodeRoute.EPISODE_PHOTO: episode_photo_operation(
+                    service, metrics=metrics, rejections=ingest.primary.service
+                )
+            },
         )
         app = World(clock=clock).app(
             units=(node_unit(ROUTES),), runtime={"state": {NODE_GATE_STATE_KEY: gate}}

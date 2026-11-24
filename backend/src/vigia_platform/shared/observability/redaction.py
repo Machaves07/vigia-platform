@@ -239,7 +239,8 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "image_presence": ("present", "absent"),
     # Su purga (TASK-573): la causa del borrado, vencida o zona en productive.
     "cause": ("expired", "productive"),
-    # Y el modo de la foto borrada (TASK-588, A-128): de puesta en marcha o del hallazgo.
+    # Y el modo de la foto borrada (TASK-588) o recibida (TASK-603, A-128): de puesta en marcha o
+    # del hallazgo.
     "zone_mode": ("commissioning", "productive"),
     # Relevo firmado del almacén (TASK-607, A-130): el resultado de una petición
     # (``shared.storage_relay.RelayOutcome``); el 413 lo emite la cadena antes de la ruta.

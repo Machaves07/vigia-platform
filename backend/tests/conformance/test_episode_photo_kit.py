@@ -17,6 +17,13 @@ sin nada tras ``EOI``):
 - sin marca, con ``APP1`` (EXIF), con un ``APP0`` ``JFXX`` o con bytes tras ``EOI``:
   ``clip_not_anonymized`` en ``image.data_base64``; nada queda guardado.
 
+**Foto del hallazgo** (v1.6.0, TASK-603, A-128) con el nodo simulado del kit
+(``record_with_photos`` con ``clips=False``: un hallazgo o una detección sin clip y sus fotos
+``productive`` con imagen, la ``0``/``peak`` y la ráfaga): las fotos se envían **antes** que su
+registro y se aceptan; el registro sin clip se acepta después; cada foto queda con su
+``record_id`` e índice; el reenvío es ``accepted_duplicate`` con el mismo ``Receipt`` y otro
+``photo_id`` en el índice 0 del tramo, ``schema_invalid`` en ``photo_index``.
+
 Cada rechazo es un ``RejectionResponse`` del contrato (lo lee el lector tolerante de la sesión).
 Solo datos sintéticos (NFR-CTR-43).
 """
@@ -33,7 +40,7 @@ from vigia_contracts.conformance.checks import PlatformUrl
 from vigia_contracts.conformance.checks._core import derive_seed, draw_seeded
 from vigia_contracts.conformance.checks._platform import PlatformSession, Reply
 from vigia_contracts.conformance.cli import load_provision
-from vigia_contracts.conformance.generators import episode_photo
+from vigia_contracts.conformance.generators import episode_photo, record_with_photos
 from vigia_contracts.conformance.generators._primitives import format_ms, parse_ms
 from vigia_contracts.models import api
 
@@ -181,3 +188,73 @@ def test_any_seed_of_the_generator_is_accepted(
         if reply.receipt is None:
             refused.append((index, reply.outcome_es()))
     assert refused == [], refused
+
+
+# --- Foto del hallazgo (v1.6.0, TASK-603) ------------------------------------------------------
+
+
+def _record_with_photos(session: PlatformSession) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Un registro sin clip del kit y sus fotos ``productive`` para la zona aprobada, trasladados
+    juntos a ahora (el mismo instante final), con identificadores nuevos: las fotos citan el
+    nuevo identificador del registro."""
+    zone = session.primary.approved_zone
+    assert zone is not None
+    record, photos = draw_seeded(
+        record_with_photos(
+            dict(zone.catalog),
+            node_id=session.primary.node_id,
+            clips=False,
+            with_image=True,
+            burst=True,
+        ),
+        derive_seed(session.seed, "foto-del-hallazgo"),
+    )
+    end = session.now()
+    prepared = session.prepare(record, end=end)
+    field = "finding_id" if "finding_id" in prepared else "detection_id"
+    moved = []
+    for photo in photos:
+        document = session.rebased(photo, end=end)
+        document["photo_id"] = session.fresh_uuid7()
+        document["record_id"] = prepared[field]
+        api.parse_episode_photo_submission(json.dumps(document).encode())
+        moved.append(document)
+    return prepared, moved
+
+
+def _productive_rows(platform_target: PlatformTarget, record_id: str) -> list[Any]:
+    rows: list[Any] = platform_target.stack.fetch(
+        "SELECT photo_id, photo_index, photo_role, sha256 FROM fleet.episode_photo"
+        " WHERE zone_mode = 'productive' AND record_id = $1 ORDER BY photo_index",
+        uuid.UUID(record_id),
+    )
+    return rows
+
+
+def test_kit_photos_before_their_record_without_clips_are_accepted(
+    session: PlatformSession, platform_target: PlatformTarget
+) -> None:
+    record, photos = _record_with_photos(session)
+    assert all(camera["clips"] == [] for camera in record["cameras"])
+    replies = [_submit(session, photo) for photo in photos]
+    assert [reply.receipt is not None for reply in replies] == [True] * len(photos), [
+        reply.outcome_es() for reply in replies
+    ]
+    submitted = session.submit(record)
+    assert submitted.receipt is not None, submitted.outcome_es()
+    record_id = str(photos[0]["record_id"])
+    assert [
+        (str(row["photo_id"]), row["photo_index"], row["photo_role"], row["sha256"])
+        for row in _productive_rows(platform_target, record_id)
+    ] == [
+        (photo["photo_id"], photo["photo_index"], photo["photo_role"], photo["image"]["sha256"])
+        for photo in photos
+    ]
+    first = replies[0].receipt
+    assert first is not None
+    again = _submit(session, photos[0])
+    assert again.receipt == {**first, "status": "accepted_duplicate"}, again.outcome_es()
+    rival = {**photos[0], "photo_id": session.fresh_uuid7()}
+    reply = _submit(session, rival)
+    assert (reply.status, reply.code, reply.field) == (422, "schema_invalid", "photo_index")
+    assert len(_productive_rows(platform_target, record_id)) == len(photos)

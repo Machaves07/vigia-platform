@@ -14,8 +14,8 @@ posición, de estado sobre la señal declarada):
   dejan un registro y un ``accepted_duplicate`` con el mismo ``Receipt``.
 - **Foto del episodio**: con bloque guarda la columna ``process_context`` (``gob_0046``); sin
   bloque, ``NULL``; con un bloque que no concuerda, ``schema_invalid`` y ninguna fila; la purga
-  por vencimiento borra la fila entera. La foto ``productive`` sigue rechazada hasta TASK-603
-  (``schema_invalid`` en ``zone_mode``, ninguna fila).
+  por vencimiento borra la fila entera. La foto ``productive`` (TASK-603) guarda su bloque igual
+  y uno que no concuerda la rechaza en el mismo paso 7.
 - **Migración** ``gob_0046`` sobre una base en ``gob_0045`` con fotos: cada fila queda con
   ``process_context`` nulo y ningún otro valor cambia; el ``INSERT`` de la imagen anterior (sin la
   columna) sigue funcionando. Solo hacia adelante (NFR-NUC-14, ``MIG001``): sin ``downgrade``.
@@ -327,15 +327,25 @@ def test_a_photo_whose_block_does_not_match_leaves_no_row(stack: PhotoStack) -> 
     assert _column(stack, document["photo_id"]) == []
 
 
-def test_a_productive_photo_is_still_rejected_until_task_603(stack: PhotoStack) -> None:
+def test_a_productive_photo_stores_its_block_and_a_mismatch_leaves_no_row(
+    stack: PhotoStack,
+) -> None:
     site = _site(stack)
     document = _photo(stack, site, block=True)
     document["zone_mode"] = "productive"
     document["record_id"] = str(uuid7(stack.ingest.authz.sessions.clock))
     api.parse_episode_photo_submission(json.dumps(document).encode())
     response = stack.post(site, document)
-    assert _rejection(response) == ("schema_invalid", "zone_mode"), response.text
-    assert _column(stack, document["photo_id"]) == []
+    assert response.status_code == 200, response.text
+    (stored,) = _column(stack, document["photo_id"])
+    assert json.loads(stored) == document["process_context"]
+    mismatch = _photo(stack, site, block=True)
+    mismatch["zone_mode"] = "productive"
+    mismatch["record_id"] = str(uuid7(stack.ingest.authz.sessions.clock))
+    del mismatch["process_context"]["variables"][0]
+    response = stack.post(site, mismatch)
+    assert _rejection(response) == ("schema_invalid", "process_context.variables"), response.text
+    assert _column(stack, mismatch["photo_id"]) == []
 
 
 def test_the_purge_removes_the_whole_row_with_its_block(stack: PhotoStack) -> None:
