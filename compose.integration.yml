@@ -158,7 +158,10 @@ services:
   localstack:
     # La 4.14.0 comunitaria (Apache-2.0) y su digest, los de `docker-compose.yml`. Ningún puerto.
     # No persiste nada por sí sola: `localstack/state.py` recrea la clave KMS (mismo id y material),
-    # los depósitos, los secretos y `ca/root.pem` desde `estado` en cada arranque.
+    # los depósitos, los secretos y `ca/root.pem` desde `estado` en cada arranque, y los objetos de
+    # `vigia-evidence` desde su espejo en `almacen` (TASK-608; solo este servicio lo monta). Con el
+    # tope lleno (2 GiB) la restauración tarda unos 25 s (256 MiB en 2,8 s, medido): cabe en la
+    # ventana del healthcheck (10 s + 40 × 3 s).
     image: localstack/localstack:4.14.0@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a
     restart: unless-stopped
     networks: [interna]
@@ -177,8 +180,12 @@ services:
       VIGIA_ENROLLMENT_SECRET_NAME: vigia/integration/enrollment/source-key
       VIGIA_STORE_RELAY_SECRET_NAME: vigia/integration/store-relay/key
       VIGIA_SAVE_SECONDS: "10"
+      # Espejo de vigia-evidence en el volumen `almacen` (TASK-608): tope de 2 GiB; al llegar no copia
+      # nada nuevo ni borra nada guardado (`almacen_lleno` en el registro).
+      VIGIA_ALMACEN_MAX_BYTES: "2147483648"
     volumes:
       - estado:/state
+      - almacen:/almacen
       - ./local/integration/localstack/state.py:/opt/vigia/state.py:ro
       - ./local/integration/localstack/boot.d:/etc/localstack/init/boot.d:ro
       - ./local/integration/localstack/ready.d:/etc/localstack/init/ready.d:ro
@@ -347,6 +354,7 @@ networks:
 volumes:
   datos: # PostgreSQL
   estado: # secretos generados, copia de LocalStack (0600)
+  almacen: # espejo de vigia-evidence (clips y adjuntos; TASK-608), se vacía sin tocar `estado`
   autoridad: # clave de vigia-node-ca por archivo (VIG-382)
   proveedora: # identificador de la organización proveedora (no es secreto)
   borde: # certificado de servidor de vigia-mtls-edge

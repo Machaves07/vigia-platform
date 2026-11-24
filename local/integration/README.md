@@ -97,12 +97,13 @@ Se resuelve sin pago y sin AWS real, dentro de LocalStack (`local/integration/lo
 | Secretos (base, clave del hash de origen, claves de firma, invitación) | copia `estado/localstack-snapshot.json` (`0600`) cada 10 s | se recrean con **el mismo ARN y la misma versión** (la base guarda el ARN de cada clave de firma) |
 | `ca/root.pem` | la misma copia | se vuelve a escribir |
 | Depósitos y centinela de salud | se recrean | — |
+| Objetos de `vigia-evidence` (clips y adjuntos del cierre) | espejo en el volumen `almacen` (TASK-608, abajo) | se vuelven a subir con los mismos bytes, suma, tipo y metadatos antes de dar sano |
 
 Si falta `kms-secrets.material` y el volumen `estado` ya tiene otros archivos, `init` se detiene con `kms_material_missing` y no crea otro material (la clave volvería con el mismo identificador y otro material, y el segundo factor de las personas quedaría ilegible sin ningún error de arranque): restaura el volumen, o vacía `estado` entero si es una primera instalación deliberada.
 
 El contenedor no queda sano hasta terminar `restore`, y no guarda nada hasta entonces (un arranque que falló no sustituye una copia buena por otra vacía).
 
-**Qué se pierde:** los objetos de los depósitos que no son `vigia-edge` (clips de integración y evidencias: aceptado), las versiones anteriores de un secreto, y lo escrito en los 10 s anteriores a una caída o un reinicio (`bootstrap.sh` y `admin.sh` fuerzan una copia al terminar, y los secretos solo cambian con esas órdenes). No hay gancho de parada: LocalStack ya no atiende la API cuando lo ejecuta (probado, 503). La copia no sustituye al respaldo de los volúmenes:
+**Qué se pierde:** los objetos de `vigia-archive` (los paquetes exportados se regeneran), las versiones anteriores de un objeto o de un secreto, y lo escrito en los 10 s anteriores a una caída o un reinicio (`bootstrap.sh` y `admin.sh` fuerzan una copia al terminar, y los secretos solo cambian con esas órdenes). No hay gancho de parada: LocalStack ya no atiende la API cuando lo ejecuta (probado, 503). La copia no sustituye al respaldo de los volúmenes:
 
 ```bash
 # Respalda la clave de la autoridad de nodos y los secretos (no van en pg_dump). Guárdalo fuera del servidor.
@@ -110,12 +111,31 @@ docker run --rm --user 0 --entrypoint sh -v vigia-integration_autoridad:/ca:ro -
   -c 'umask 077 && tar czf /out/vigia-integracion-secretos.tgz /ca /state'   # en tu HOME, fuera del repositorio; usa la imagen local, sin descargar nada
 ```
 
+### Espejo de `vigia-evidence` en el volumen `almacen` (TASK-608, A-130)
+
+Solo lo monta `localstack` (`/almacen`); va aparte de `estado` para poder vaciarlo sin tocar los secretos ni la autoridad.
+
+- **Qué guarda:** la versión vigente de cada objeto de `vigia-evidence` (clips de los hallazgos y adjuntos del cierre), nunca `vigia-edge`, `vigia-archive` ni el centinela de salud. Cada blob es `objetos/<sha256>` (`0600`), escrito solo tras comprobar que su SHA-256 es la que declara el almacén; `indice.json` (`0600`, atómico) dice por clave la suma, el tamaño, el tipo, los metadatos de usuario y el `ETag`. Un objeto sin suma SHA-256 de objeto entero no se copia (la plataforma tampoco lo leería).
+- **Cuándo:** el mismo bucle de 10 s, y solo lo nuevo o cambiado (por `ETag` y tamaño). Una clave que la plataforma borró sale del índice, y su blob si nadie más lo usa, pero solo cuando la restauración de este arranque ya terminó: el espejo no resucita lo purgado y tampoco toma por borrado lo que aún no se restauró.
+- **Al arrancar:** `state.py restore` sube cada clave del índice que falte, con `ChecksumSHA256`, el tipo y los metadatos, **antes** de dar sano. Un blob cuya suma no es la del índice no se sube y deja `objeto_corrupto: objetos=<n>` en el registro; la plataforma lo verá como evidencia ilegible. Con el tope lleno la restauración tarda unos 25 s (256 MiB en 2,8 s, medido): cabe en la ventana del healthcheck.
+- **Tope:** `VIGIA_ALMACEN_MAX_BYTES` (2 GiB). Al llegar no copia nada nuevo, no borra nada guardado y deja una vez `almacen_lleno: omitidos=… guardados=… bytes=… tope=…` en el registro del contenedor (`docker compose … logs localstack`). Las líneas del espejo solo llevan recuentos: nunca una clave, un nombre de archivo ni un contenido.
+- **Privacidad:** guarda lo mismo que el almacén (clips difuminados por construcción y adjuntos declarados sin personas identificables), y las bajas de la plataforma se reflejan.
+- **Vaciarlo a propósito** (las evidencias desaparecen también de LocalStack, que no guarda nada en disco):
+
+  ```bash
+  docker compose -f compose.integration.yml --env-file local/integration/.env rm --stop --force localstack
+  docker volume rm vigia-integration_almacen
+  docker compose -f compose.integration.yml --env-file local/integration/.env --profile app up -d --wait
+  ```
+
 ## Copia y restauración de la base
 
 ```bash
 local/integration/backup.sh                       # escribe ~/vigia-integration-backups/vigia-<fecha UTC>-<pid>.dump (0600)
 local/integration/restore.sh --yes <copia.dump>   # SUSTITUYE la base; para y vuelve a levantar el perfil app
 ```
+
+Cada copia lleva al lado el espejo de `vigia-evidence`: `vigia-<fecha UTC>-<pid>.almacen.tar` (`0600`, tomado con el cerrojo de `state.py` y leído entero con `tar -tf`), con la misma retención. `restore.sh` lo comprueba antes de tocar nada, guarda el vivo en `previa-<fecha>-<pid>.almacen.tar` y, tras la base, sustituye el volumen con `localstack` parado; al levantarlo, `state.py restore` sube los objetos. Una copia sin `.almacen.tar` (anterior a TASK-608) restaura solo la base.
 
 Copia diaria por `cron` en el host (retiene 14 días; `VIGIA_BACKUP_DIR` y `VIGIA_BACKUP_KEEP_DAYS` lo cambian):
 
@@ -142,7 +162,7 @@ El navegador no alcanza `http://localstack:4566`, y LocalStack **no se publica**
 - **Nunca** sirve `vigia-edge`, `vigia-archive` ni una clave `ca/`, aunque el token sea auténtico. Un token alterado, vencido, de otro método o de otro depósito da 403 sin decir por qué; la causa va a la métrica `store_relay_requests_total{method, outcome}`.
 - Ni el balanceador ni la API registran la consulta: el token y la clave del objeto no aparecen en ninguna línea. La política de contenido no cambia (`'self'` en `media-src` y `connect-src`; `VIGIA_CSP_STORE_ORIGINS` sigue vacío).
 
-Comprobación tras desplegar: abre en SCR-08 el hallazgo de prueba (el clip se reproduce y se puede buscar) y sube un adjunto en el cierre (sale sin «El almacén no recibió el archivo»). En el registro del balanceador, las líneas del relevo dicen `"path": "/store-relay/object"` sin consulta. Los objetos de `vigia-evidence` aún no sobreviven a un reinicio de LocalStack (TASK-608).
+Comprobación tras desplegar: abre en SCR-08 el hallazgo de prueba (el clip se reproduce y se puede buscar) y sube un adjunto en el cierre (sale sin «El almacén no recibió el archivo»). En el registro del balanceador, las líneas del relevo dicen `"path": "/store-relay/object"` sin consulta. Desde TASK-608, los objetos de `vigia-evidence` sobreviven a un reinicio de LocalStack (espejo en `almacen`, arriba).
 
 ## Confiar en la raíz del balanceador desde un navegador de planta
 

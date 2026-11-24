@@ -72,3 +72,27 @@ dump_live_database() {
     [ -s "$target" ] || fail dump_empty "la copia salió vacía"
     validate_dump "$target" || fail dump_unreadable "pg_restore no lee la copia entera"
 }
+
+# El espejo de vigia-evidence (volumen `almacen`, solo lo monta `localstack`; TASK-608) en el
+# archivo dado (0600). Con el cerrojo de `state.py`: ningún `save` a medias dentro. Se lee entero
+# (`tar -tf`) antes de darlo por bueno.
+validate_almacen() {
+    [ -s "$1" ] && tar -tf "$1" >/dev/null 2>&1
+}
+
+dump_live_almacen() {
+    local target="$1"
+    "${COMPOSE[@]}" exec -T localstack flock /almacen/.cerrojo \
+        tar -C /almacen --exclude=./.cerrojo --exclude="./objetos/.*" -cf - . >"$target" ||
+        fail almacen_dump_failed "no se pudo copiar el volumen almacen; no se escribió ninguna copia"
+    validate_almacen "$target" || fail almacen_unreadable "tar no lee entera la copia del almacén"
+}
+
+# Sustituye el contenido del volumen `almacen` por el de una copia, con `localstack` parado (si no,
+# su `save` tomaría por bajas las claves aún sin restaurar). Al arrancar, `state.py restore` sube
+# lo que falte antes de dar el contenedor por sano.
+replace_almacen() {
+    "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint sh localstack \
+        -c "find /almacen -mindepth 1 -delete && tar -C /almacen -xf - && chmod 700 /almacen/objetos" \
+        <"$1" >/dev/null
+}
