@@ -53,7 +53,12 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
 - ``VIGIA_NODE_CA_BACKEND`` (``kms`` por defecto, o ``file``) y ``VIGIA_NODE_CA_KEY_FILE``: firmante
   de ``vigia-node-ca`` (TASK-543). ``file`` **solo** en ``local`` e ``integration``; en cualquier
   otro entorno el arranque termina con ``node_ca_backend_forbidden`` (fallo cerrado; U-02 §7.1 sigue
-  valiendo en producción: la clave privada nunca existe fuera de KMS).
+  valiendo en producción: la clave privada nunca existe fuera de KMS);
+- ``VIGIA_STORE_RELAY`` (``0`` por omisión, o ``1``) y ``VIGIA_STORE_RELAY_SECRET`` (el nombre del
+  secreto con la clave HMAC del relevo, nunca su valor): el relevo firmado del mismo origen del
+  depósito de evidencias (TASK-607, A-130). ``1`` **solo** en ``local`` e ``integration``; en
+  cualquier otro entorno el arranque termina con ``store_relay_forbidden``; sin el secreto, tampoco
+  arranca.
 
 Un valor ausente o no válido produce ``RuntimeConfigInvalid``: el mensaje, en español, nombra la
 variable y **nunca** su valor (ERR-019). Por eso cada variable se valida aquí antes de llegar a
@@ -87,11 +92,13 @@ __all__ = [
     "NODE_CA_BACKEND_FILE",
     "NODE_CA_BACKEND_KMS",
     "NODE_CA_FILE_ENVIRONMENTS",
+    "STORE_RELAY_ENVIRONMENTS",
     "VARIABLES",
     "NodeCaBackendForbidden",
     "RegistrationIncomplete",
     "RuntimeConfig",
     "RuntimeConfigInvalid",
+    "StoreRelayForbidden",
     "report_invalid",
 ]
 
@@ -101,6 +108,8 @@ NODE_CA_BACKEND_KMS: Final = "kms"
 NODE_CA_BACKEND_FILE: Final = "file"
 NODE_CA_FILE_ENVIRONMENTS: Final = frozenset({"local", "integration"})
 """Entornos que admiten ``VIGIA_NODE_CA_BACKEND=file`` (TASK-543, Q6)."""
+STORE_RELAY_ENVIRONMENTS: Final = frozenset({"local", "integration"})
+"""Entornos que admiten ``VIGIA_STORE_RELAY=1`` (TASK-607, A-130); en AWS sirve S3."""
 
 _ENVIRONMENT: Final = re.compile(r"(local|test|integration|pilot|staging-[1-9][0-9]{0,2})")
 _NODE_CA_BACKEND: Final = re.compile(rf"{NODE_CA_BACKEND_KMS}|{NODE_CA_BACKEND_FILE}")
@@ -116,6 +125,7 @@ _PATH: Final = re.compile(r"/[A-Za-z0-9/_.-]{1,1023}")
 _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _DIGITS: Final = re.compile(r"[0-9]{1,9}")
 _DOCUMENTS_PREFIX: Final = re.compile(r"documents/")
+_FLAG: Final = re.compile(r"[01]")
 _NODES_BASE_URL: Final = re.compile(
     r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+){0,16}/?"
 )
@@ -153,6 +163,15 @@ class NodeCaBackendForbidden(RuntimeConfigInvalid):
 
     def __init__(self) -> None:
         super().__init__("VIGIA_NODE_CA_BACKEND", "file solo se admite en local e integration")
+
+
+class StoreRelayForbidden(RuntimeConfigInvalid):
+    """``VIGIA_STORE_RELAY=1`` fuera de ``local`` e ``integration``: no arranca (A-130)."""
+
+    code: ClassVar[str] = "store_relay_forbidden"
+
+    def __init__(self) -> None:
+        super().__init__("VIGIA_STORE_RELAY", "1 solo se admite en local e integration")
 
 
 class RegistrationIncomplete(Exception):
@@ -222,6 +241,13 @@ def _integer(minimum: int, maximum: int) -> Callable[[str], object]:
         return number
 
     return parse
+
+
+def _flag(value: str) -> object:
+    """``0`` o ``1``; cualquier otro texto no vale (ni ``true`` ni ``yes``)."""
+    if _FLAG.fullmatch(value) is None:
+        raise ValueError
+    return value == "1"
 
 
 def _organization(value: str) -> object:
@@ -306,6 +332,8 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable(
         "finding_photo_retention_days", "VIGIA_FINDING_PHOTO_RETENTION_DAYS", _integer(0, 1825)
     ),
+    _Variable("store_relay", "VIGIA_STORE_RELAY", _flag),
+    _Variable("store_relay_secret", "VIGIA_STORE_RELAY_SECRET", _text(_SECRET_ID)),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -385,6 +413,11 @@ class RuntimeConfig(BaseModel):
     """Días que vive la foto del hallazgo (``productive``; TASK-588, A-128, Q2 de M11): 0 = sin
     vencimiento automático (``expires_at`` nulo, el régimen del clip, BR-NUC-65); de 0 a 1 825;
     fuera de ese rango el proceso no arranca."""
+    store_relay: bool = False
+    """El relevo firmado del mismo origen de ``vigia-evidence`` (TASK-607, A-130): solo en
+    ``local`` e ``integration``; ``from_environ`` lo impide en cualquier otro entorno."""
+    store_relay_secret: str | None = None
+    """Nombre o ARN del secreto con la clave HMAC del relevo (≥ 32 bytes); nunca su valor."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:
@@ -439,6 +472,13 @@ class RuntimeConfig(BaseModel):
             if "node_ca_key_file" not in values:
                 raise RuntimeConfigInvalid(
                     "VIGIA_NODE_CA_KEY_FILE", "ausente: el backend file la exige"
+                )
+        if values.get("store_relay") is True:
+            if environment not in STORE_RELAY_ENVIRONMENTS:
+                raise StoreRelayForbidden()
+            if "store_relay_secret" not in values:
+                raise RuntimeConfigInvalid(
+                    "VIGIA_STORE_RELAY_SECRET", "ausente: el relevo la exige"
                 )
         fields = cls.model_fields
         node = values.get("bulkhead_node", fields["bulkhead_node"].default)

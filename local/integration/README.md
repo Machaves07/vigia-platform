@@ -133,6 +133,17 @@ Copia diaria por `cron` en el host (retiene 14 días; `VIGIA_BACKUP_DIR` y `VIGI
 - **`commissioning`** (la sombra, SCR-06): sin cambios respecto de A-112. Vencen a los `VIGIA_EPISODE_PHOTO_RETENTION_DAYS` (30) y la purga diaria (`purge_episode_photos`, 04:00 UTC) borra **todas** las de una zona al aprobarse su compuerta de uso. Para que no queden en disco tras ese paso a `productive` sigue valiendo la receta de A-112 («Precisiones del 13-11»): la purga, `VACUUM` de `fleet.episode_photo` y `CHECKPOINT`; las copias anteriores las conservan hasta su propia retención.
 - **`productive`** (la foto del hallazgo, TASK-588): **no** se purgan al aprobar la compuerta de uso ni al volver a aprobarla. Vencen según `VIGIA_FINDING_PHOTO_RETENTION_DAYS` (0 por defecto = nunca, como el clip del hallazgo; de 0 a 1 825). Las copias diarias las incluyen; la retención de las copias solo borra copias viejas, no estas fotos de la base.
 
+## Evidencias y adjuntos del cierre por el relevo firmado (TASK-607, A-130)
+
+El navegador no alcanza `http://localstack:4566`, y LocalStack **no se publica** (A-108: el mismo servicio sirve `ca/root.pem` de `vigia-edge` sin autenticar y LocalStack no protege nada con credenciales). Por eso, **solo aquí** (`VIGIA_STORE_RELAY=1`, que fuera de `local` e `integration` impide arrancar), las URL firmadas del depósito `vigia-evidence` apuntan al **mismo origen** de la aplicación: `https://app.<zona>:8443/store-relay/object?token=…`. La API comprueba el token y habla con LocalStack por la red `interna`.
+
+- **El token** es la capacidad, como una URL de S3: depósito, clave, versión, método, vencimiento (≤ 5 min la lectura de evidencias, ≤ 15 min la de adjuntos y la subida), tipo, suma y disposición, firmados con HMAC-SHA256. La clave son 32 bytes que `init` genera en `estado/store-relay.key` (`0600`) y `localstack/state.py` publica como el secreto `vigia/integration/store-relay/key` (`VIGIA_STORE_RELAY_SECRET`); las dos réplicas de la API leen la misma.
+- **Lectura** (`GET`/`HEAD`, con un rango `bytes=a-b`): la versión fijada al conceder la lectura, nunca otra. **Subida** (`PUT`): **solo** adjuntos de cierre, con el tipo, la suma y los metadatos firmados. Los clips del nodo siguen sin subida (`storage_unavailable`, A-108).
+- **Nunca** sirve `vigia-edge`, `vigia-archive` ni una clave `ca/`, aunque el token sea auténtico. Un token alterado, vencido, de otro método o de otro depósito da 403 sin decir por qué; la causa va a la métrica `store_relay_requests_total{method, outcome}`.
+- Ni el balanceador ni la API registran la consulta: el token y la clave del objeto no aparecen en ninguna línea. La política de contenido no cambia (`'self'` en `media-src` y `connect-src`; `VIGIA_CSP_STORE_ORIGINS` sigue vacío).
+
+Comprobación tras desplegar: abre en SCR-08 el hallazgo de prueba (el clip se reproduce y se puede buscar) y sube un adjunto en el cierre (sale sin «El almacén no recibió el archivo»). En el registro del balanceador, las líneas del relevo dicen `"path": "/store-relay/object"` sin consulta. Los objetos de `vigia-evidence` aún no sobreviven a un reinicio de LocalStack (TASK-608).
+
 ## Confiar en la raíz del balanceador desde un navegador de planta
 
 El certificado de servidor de `app.` y `nodes.` lo crea una vez `vigia-mtls-edge` (`init-cert`, con los nombres de `VIGIA_DOMAIN` y la IP de `VIGIA_EDGE_BIND`) y persiste en el volumen `borde`. La raíz que firma ese certificado no es la de los nodos: es `edge-ca.pem`, y hay que repartirla a los navegadores y a los nodos:

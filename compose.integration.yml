@@ -69,6 +69,14 @@ x-runtime: &runtime-environment
   VIGIA_EVIDENCE_BUCKET: vigia-evidence
   VIGIA_ARCHIVE_BUCKET: vigia-archive
   VIGIA_EDGE_BUCKET: vigia-edge
+  # Relevo firmado del almacén (TASK-607, A-130): las URL de `vigia-evidence` apuntan a
+  # `VIGIA_PUBLIC_ORIGIN/store-relay/object?token=…` y la API habla con LocalStack por la red
+  # interna. LocalStack sigue sin publicarse (`ca/root.pem`, A-108). La clave HMAC la genera `init`
+  # (`store-relay.key`) y `localstack/state.py` la publica como este secreto. Solo `local` e
+  # `integration`: en cualquier otro entorno el proceso no arranca. `VIGIA_CSP_STORE_ORIGINS` sigue
+  # vacío: el relevo es `'self'` en `media-src` y `connect-src`.
+  VIGIA_STORE_RELAY: "1"
+  VIGIA_STORE_RELAY_SECRET: vigia/integration/store-relay/key
   # Con el puerto de publicación: el origen de las personas se compara exacto (CSRF) y la alta
   # entrega esta URL al nodo, que late en ella. `app.` y `nodes.` comparten IP y no pueden
   # compartir el 443.
@@ -167,6 +175,7 @@ services:
       VIGIA_KMS_KEY_ALIAS: alias/vigia-secrets
       VIGIA_DB_SECRET_NAME: vigia/integration/database/app
       VIGIA_ENROLLMENT_SECRET_NAME: vigia/integration/enrollment/source-key
+      VIGIA_STORE_RELAY_SECRET_NAME: vigia/integration/store-relay/key
       VIGIA_SAVE_SECONDS: "10"
     volumes:
       - estado:/state

@@ -241,6 +241,9 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "cause": ("expired", "productive"),
     # Y el modo de la foto borrada (TASK-588, A-128): de puesta en marcha o del hallazgo.
     "zone_mode": ("commissioning", "productive"),
+    # Relevo firmado del almacén (TASK-607, A-130): el resultado de una petición
+    # (``shared.storage_relay.RelayOutcome``); el 413 lo emite la cadena antes de la ruta.
+    "outcome": ("served", "partial", "denied", "expired", "bad_digest", "unavailable"),
     # U-04 (TASK-349, LC-LAZ-38 a 40): fijas aquí porque varias (``rejected_blocked_vocabulary``,
     # ``email_delivery_events``…) tienen forma de token y ``register`` las rechazaría. Son las
     # dimensiones de ``loop.observability.metrics`` y los atributos del trabajo largo

@@ -112,6 +112,8 @@ class MetricName(enum.StrEnum):
     # Foto del episodio de la sombra (U-03, TASK-572, A-112)
     EPISODE_PHOTO_RECEIVED_TOTAL = "episode_photo_received_total"
     EPISODE_PHOTOS_PURGED_TOTAL = "episode_photos_purged_total"
+    # Relevo firmado del almacén en integración (TASK-607, A-130)
+    STORE_RELAY_REQUESTS_TOTAL = "store_relay_requests_total"
     # Concesiones de clip por nodo (U-03, NFR-GOB-55)
     CLIP_GRANTS_ISSUED_TOTAL = "clip_grants_issued_total"
     CLIP_GRANTS_USED_TOTAL = "clip_grants_used_total"
@@ -278,6 +280,11 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.EPISODE_PHOTOS_PURGED_TOTAL, _C, "{record}",
           "Fotos del episodio borradas por la purga, por causa y modo.", "A-112",
           "cause", "zone_mode"),
+    # Relevo firmado del almacén (TASK-607, A-130; solo local e integration): por método y resultado
+    # de una lista cerrada; nunca el token, la clave del objeto ni el depósito.
+    _spec(_N.STORE_RELAY_REQUESTS_TOTAL, _C, "{request}",
+          "Peticiones al relevo firmado del almacén por método y resultado.", "A-130",
+          "method", "outcome"),
     # Concesiones de clip (NFR-GOB-55, LC-GOB-13): emitidas, usadas y huérfanas por nodo. Solo
     # contadores y solo node_id (NFR-GOB-13: sin histogramas por nodo ni etiqueta de zona).
     _spec(_N.CLIP_GRANTS_ISSUED_TOTAL, _C, "{grant}", "Concesiones de clip emitidas por nodo.",
@@ -533,6 +540,7 @@ class PlatformMetrics:
         self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
         self.episode_photo_received_total = counter(_N.EPISODE_PHOTO_RECEIVED_TOTAL)
         self.episode_photos_purged_total = counter(_N.EPISODE_PHOTOS_PURGED_TOTAL)
+        self.store_relay_requests_total = counter(_N.STORE_RELAY_REQUESTS_TOTAL)
         self.clip_grants_issued_total = counter(_N.CLIP_GRANTS_ISSUED_TOTAL)
         self.clip_grants_used_total = counter(_N.CLIP_GRANTS_USED_TOTAL)
         self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)

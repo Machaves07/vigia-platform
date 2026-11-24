@@ -45,6 +45,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
         ("kms-secrets.id", str(uuid.UUID(int=4))),
         ("app.pw", "clave-de-la-app"),
         ("enrollment-source.key", base64.b64encode(b"k" * 32).decode()),
+        ("store-relay.key", base64.b64encode(b"r" * 32).decode()),
     ):
         (tmp_path / "state" / name).write_text(content + chr(10))
     monkeypatch.setattr(module, "STATE", tmp_path / "state")
@@ -57,6 +58,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
         "VIGIA_KMS_KEY_ALIAS": "alias/vigia-secrets",
         "VIGIA_DB_SECRET_NAME": "vigia/integration/database/app",
         "VIGIA_ENROLLMENT_SECRET_NAME": "vigia/integration/enrollment/source-key",
+        "VIGIA_STORE_RELAY_SECRET_NAME": "vigia/integration/store-relay/key",
     }.items():
         monkeypatch.setenv(name, value)
     return module
@@ -163,6 +165,8 @@ def test_restore_on_an_empty_cloud_builds_everything_and_marks_itself_done(
     assert (database["host"], database["username"]) == ("postgres", "vigia_app")
     source = cloud.secrets["vigia/integration/enrollment/source-key"]
     assert source["SecretBinary"] == b"k" * 32
+    relay = cloud.secrets["vigia/integration/store-relay/key"]
+    assert relay["SecretBinary"] == b"r" * 32
     assert state.MARKER.exists()
 
 
@@ -185,6 +189,7 @@ def test_a_secret_from_the_snapshot_wins_over_the_derived_one(
     assert cloud.secrets["vigia/integration/signing/catalog-1"]["SecretString"] == "firma"
     assert cloud.buckets["vigia-edge"]["ca/root.pem"] == b"PEM"
     assert "vigia/integration/enrollment/source-key" in cloud.secrets
+    assert "vigia/integration/store-relay/key" in cloud.secrets
 
 
 def test_save_after_restore_round_trips_through_a_second_restore(
@@ -201,6 +206,7 @@ def test_save_after_restore_round_trips_through_a_second_restore(
         "vigia/integration/database/app",
         "vigia/integration/enrollment/source-key",
         "vigia/integration/signing/gate-1",
+        "vigia/integration/store-relay/key",
     ]
     assert state.SNAPSHOT.stat().st_mode & 0o777 == 0o600
     again = Cloud()

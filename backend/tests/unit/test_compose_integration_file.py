@@ -33,7 +33,11 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 from tests.integration.conftest import LOCALSTACK_IMAGE, POSTGRES_IMAGE
-from vigia_platform.shared.runtime.config import NODE_CA_FILE_ENVIRONMENTS, RuntimeConfig
+from vigia_platform.shared.runtime.config import (
+    NODE_CA_FILE_ENVIRONMENTS,
+    STORE_RELAY_ENVIRONMENTS,
+    RuntimeConfig,
+)
 
 REPOSITORY: Final = Path(__file__).resolve().parents[3]
 INTEGRATION: Final = REPOSITORY / "local" / "integration"
@@ -210,6 +214,26 @@ def test_the_forwarded_addresses_are_the_internal_subnet() -> None:
     assert environment["VIGIA_FORWARDED_ALLOW_IPS"] == subnet
 
 
+def test_the_store_relay_is_on_with_its_secret_and_no_store_origin_in_the_policy() -> None:
+    """TASK-607 (A-130): el relevo firmado sirve vigia-evidence por el mismo origen."""
+    config = RuntimeConfig.from_environ(runtime_environment())
+    assert config.store_relay is True
+    assert environment_of("vigia-api-1")["VIGIA_STORE_RELAY"] == "1"
+    assert (
+        config.store_relay_secret
+        == SERVICES["localstack"]["environment"]["VIGIA_STORE_RELAY_SECRET_NAME"]
+        == "vigia/integration/store-relay/key"  # noqa: S105 - nombre del secreto
+    )
+    assert config.environment in STORE_RELAY_ENVIRONMENTS
+    for name in ("vigia-api-1", "vigia-api-2", EDGE, "localstack"):
+        assert "VIGIA_CSP_STORE_ORIGINS" not in SERVICES[name].get("environment", {}), name
+    assert not any("4566" in str(port) for port in SERVICES["localstack"].get("ports", []))
+
+
+def environment_of(service: str) -> dict[str, str]:
+    return {key: str(value) for key, value in SERVICES[service]["environment"].items()}
+
+
 def test_the_secrets_key_is_the_same_in_localstack_and_the_runtime() -> None:
     assert (
         SERVICES["localstack"]["environment"]["VIGIA_KMS_KEY_ALIAS"]
@@ -298,6 +322,7 @@ def test_init_creates_private_secrets_once_and_never_replaces_them(
         "kms-secrets.material",
         "kms-secrets.id",
         "enrollment-source.key",
+        "store-relay.key",
     }
     before = {path.name: path.read_bytes() for path in state.iterdir()}
     second = init_state.ensure_state(state, owner=None)
@@ -326,8 +351,10 @@ def test_init_secrets_are_distinct_and_the_key_material_is_32_bytes(
     init_state.ensure_state(state, owner=None)
     passwords = {(state / n).read_text() for n in ("postgres.pw", "app.pw", "migrate.pw")}
     assert len(passwords) == 3
-    for name in ("kms-secrets.material", "enrollment-source.key"):
+    keys = ("kms-secrets.material", "enrollment-source.key", "store-relay.key")
+    for name in keys:
         assert len(base64.b64decode((state / name).read_text().strip(), validate=True)) == 32
+    assert len({(state / name).read_text() for name in keys}) == 3
 
 
 def test_init_pgpass_follows_the_postgres_password(
@@ -532,6 +559,7 @@ def test_concurrent_inits_create_each_secret_once_and_never_expose_a_partial_fil
             "kms-secrets.material",
             "kms-secrets.id",
             "enrollment-source.key",
+            "store-relay.key",
         ]
     ), "cada secreto lo crea un único init"
     assert sorted(path.name for path in state.iterdir()) == sorted(
@@ -542,6 +570,7 @@ def test_concurrent_inits_create_each_secret_once_and_never_expose_a_partial_fil
             "kms-secrets.material",
             "kms-secrets.id",
             "enrollment-source.key",
+            "store-relay.key",
             "pgpass",
         ]
     ), "no quedan temporales"

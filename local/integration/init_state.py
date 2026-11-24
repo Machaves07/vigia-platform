@@ -13,7 +13,9 @@ En ``/state`` (volumen ``estado``, ``0700``, del usuario 10001) deja, cada archi
 - ``kms-secrets.material`` y ``kms-secrets.id``: 32 bytes en base64 y un UUID, el material y el
   identificador de la clave KMS ``vigia-secrets`` (``localstack/state.py`` la recrea con los mismos
   tras cada reinicio; el resto de la plataforma la nombra por su alias, ``alias/vigia-secrets``);
-- ``enrollment-source.key``: 32 bytes en base64, la clave estable del hash de origen del alta.
+- ``enrollment-source.key``: 32 bytes en base64, la clave estable del hash de origen del alta;
+- ``store-relay.key``: 32 bytes en base64, la clave HMAC del relevo firmado del almacén (TASK-607,
+  A-130); ``localstack/state.py`` la publica como el secreto ``VIGIA_STORE_RELAY_SECRET``.
 
 Y prepara ``/ca`` (clave de la autoridad de nodos), ``/edge`` (certificado de servidor del
 balanceador) y ``/shared`` (identificador de la organización proveedora, que no es secreto) con
@@ -47,6 +49,7 @@ OWNER: Final = 10001
 _SECRET_FILES: Final = ("postgres.pw", "app.pw", "migrate.pw")
 MATERIAL_FILE: Final = "kms-secrets.material"
 ENROLLMENT_KEY_FILE: Final = "enrollment-source.key"
+STORE_RELAY_KEY_FILE: Final = "store-relay.key"
 SNAPSHOT_FILE: Final = "localstack-snapshot.json"
 _ID_FILE: Final = "kms-secrets.id"
 _SHA1_LINE: Final = re.compile(r"[0-9A-F]{40}")
@@ -133,6 +136,8 @@ def ensure_state(state: Path, *, owner: int | None = OWNER) -> list[str]:
             created.append(name)
     if _create_private(state / ENROLLMENT_KEY_FILE, _random_key(), owner):
         created.append(ENROLLMENT_KEY_FILE)
+    if _create_private(state / STORE_RELAY_KEY_FILE, _random_key(), owner):
+        created.append(STORE_RELAY_KEY_FILE)
     # El archivo de libpq se rehace siempre a partir de postgres.pw: es derivado, no un original.
     password = (state / "postgres.pw").read_text(encoding="ascii").strip()
     _replace_private(state / "pgpass", f"postgres:5432:vigia:vigia:{password}", owner)
