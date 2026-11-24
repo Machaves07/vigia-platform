@@ -949,6 +949,10 @@ RUNTIME_VARIABLES_OUTSIDE_TASKS = {
     "episodio es de la sombra, que corre en la plataforma de integracion, no en pilot",
     "VIGIA_FINDING_PHOTO_RETENTION_DAYS": "por defecto 0, sin vencimiento automatico como el clip "
     "(A-128, TASK-588); la retencion definitiva se fija con R5 antes del piloto",
+    "VIGIA_STORE_RELAY": "solo local e integration (TASK-607, A-130): en pilot el arranque "
+    "aborta; en AWS las URL las firma S3",
+    "VIGIA_STORE_RELAY_SECRET": "solo con VIGIA_STORE_RELAY=1 (TASK-607): el secreto existe en "
+    "la plataforma de integracion, nunca en pilot",
 }
 """Variables de ``RuntimeConfig`` que ninguna definición de tarea de ``pilot`` lleva, con el
 motivo. Cualquier otra que la raíz lea tiene que estar en una de las dos."""

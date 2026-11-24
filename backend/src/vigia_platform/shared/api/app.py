@@ -40,7 +40,9 @@ FastAPI, es la del contrato (``node_api.observability.NodeResponses``, TASK-206)
 ``ApiError``. La sesión, la auditoría de ``csrf_rejected``, la versión vigente del aviso de
 tratamiento y el autorizador por ruta llegan en ``AppRuntime``; el origen de la aplicación
 (``VIGIA_PUBLIC_ORIGIN``) y los del almacén para la política de contenido
-(``VIGIA_CSP_STORE_ORIGINS``) en ``AppConfig``.
+(``VIGIA_CSP_STORE_ORIGINS``) en ``AppConfig``. Con ``AppRuntime.store_relay`` (solo ``local`` e
+``integration``, ``VIGIA_STORE_RELAY=1``; TASK-607) la fábrica incluye además la ruta del relevo
+firmado del almacén (``shared.api.store_relay``); sin él, esa ruta no existe.
 
 La versión vigente del aviso es, por defecto, la del código (``identity.domain.privacy_notice``):
 la misma que acepta ``POST /privacy-notice/accept``. Solo ``None`` explícito la deja sin fijar, y
@@ -128,6 +130,7 @@ from vigia_platform.shared.api.static import (
     StaticSiteInvalid,
     static_routers,
 )
+from vigia_platform.shared.api.store_relay import STORE_RELAY_STATE_KEY, store_relay_router
 from vigia_platform.shared.bulkheads import Bulkheads
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.observability.logging import get_logger
@@ -143,6 +146,7 @@ from vigia_platform.shared.runtime.units import label_bindings, registered_units
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import SigningPurpose
+from vigia_platform.shared.storage_relay import StoreRelayStorage
 
 __all__ = [
     "API_TITLE",
@@ -345,6 +349,9 @@ class AppRuntime:
     state: Mapping[str, object] = field(default_factory=dict)
     """Servicios que cada unidad deja en ``app.state`` para sus rutas (``units.api_state``); una
     clave que ya fijó la fábrica no se puede pisar."""
+    store_relay: StoreRelayStorage | None = None
+    """El relevo firmado del almacén (TASK-607, A-130): solo con ``VIGIA_STORE_RELAY=1`` en
+    ``local`` e ``integration``. Con él existe ``/store-relay/object``; sin él, no."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -630,6 +637,7 @@ def _assemble(
     lifespan: Callable[[FastAPI], contextlib.AbstractAsyncContextManager[None]] | None,
     site: StaticSite,
     runtime: AppRuntime | None = None,
+    extra_routers: tuple[APIRouter, ...] = (),
 ) -> FastAPI:
     labels = _labels(config, units)
     detail_codes = _detail_codes(units)
@@ -650,6 +658,8 @@ def _assemble(
     for unit in units:
         for router in unit.routers:
             app.include_router(router)
+    for router in extra_routers:
+        app.include_router(router)
     app.include_router(files)
     problems = check_routes(app.routes, permissions, detail_codes, docs_enabled=docs)
     if problems:
@@ -767,6 +777,7 @@ def create_app(
             await supervisor.stop()
 
     site = _static_site(config)
+    relay = runtime.store_relay
     app = _assemble(
         config,
         clock=runtime.clock,
@@ -775,6 +786,8 @@ def create_app(
         lifespan=lifespan,
         site=site,
         runtime=runtime,
+        # TASK-607: la ruta del relevo solo existe con el relevo (sin él, ruta desconocida).
+        extra_routers=(store_relay_router(),) if relay is not None else (),
     )
     _register_observability(app, runtime.attribute_policy)
     recorder = _health_recorder(site, runtime.attribute_policy, runtime.metrics)
@@ -786,6 +799,7 @@ def create_app(
     setattr(app.state, API_VERSION_STATE_KEY, site.app_version)
     setattr(app.state, READINESS_STATE_KEY, supervisor)
     setattr(app.state, HEALTH_RECORDER_STATE_KEY, recorder)
+    setattr(app.state, STORE_RELAY_STATE_KEY, relay)
     for key, value in runtime.state.items():
         if getattr(app.state, key, None) is not None:
             raise ApiStartupError([f"la clave de app.state «{key}» ya está en uso"])

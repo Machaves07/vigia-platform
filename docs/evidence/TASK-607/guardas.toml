@@ -1,0 +1,185 @@
+# Mutaciones con nombre de TASK-607 (relevo firmado del almacén; A-130) y una por guarda nueva de
+# seguridad. Formato de tabla_guardas.py (skill vigia-calidad-antes-del-pr). Rutas desde la raíz.
+# Todas caen con una prueba unitaria aislada (S3 en memoria, sin Docker); el recorrido contra
+# LocalStack es backend/tests/integration/test_store_relay_routes.py.
+base = "origin/main"
+comando = "uv run --frozen --project backend pytest -q -p no:cacheprovider -x -W ignore::hypothesis.errors.HypothesisWarning"
+
+# --- Mutaciones con nombre de la tarea ----------------------------------------------------------
+
+[[guarda]]
+nombre = "m_sin_rango: se ignora Range"
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+buscar = "        span = byte_range(_single(request.headers.getlist(\"range\")), size)\n"
+reemplazar = "        span = None\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_a_range_serves_exactly_those_bytes_with_206"
+
+[[guarda]]
+nombre = "m_ultima_version: no se pasa la VersionId del token"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "            params[\"VersionId\"] = grant.version_id\n"
+reemplazar = "            pass\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_a_read_serves_the_version_of_the_token_not_the_latest"
+
+[[guarda]]
+nombre = "m_sin_cabeceras_firmadas: el PUT no compara las cabeceras firmadas"
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+buscar = "        if request.headers.getlist(name) != [expected]:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_an_upload_without_the_signed_headers_is_403_and_stores_nothing"
+
+[[guarda]]
+nombre = "m_comparacion_no_constante: == sobre la firma"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if not compare_digest(self._mac(body), signature):\n"
+reemplazar = "        if self._mac(body) != signature:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_signature_is_compared_with_compare_digest"
+
+[[guarda]]
+nombre = "m_reloj_del_sistema: el vencimiento con la hora del sistema"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if _epoch_ms(self._clock.now()) >= grant.expires_at_ms:\n"
+reemplazar = "        if _epoch_ms(datetime.now(UTC)) >= grant.expires_at_ms:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_token_expires_at_its_millisecond_by_the_injected_clock"
+
+[[guarda]]
+nombre = "m_sin_vencimiento: el token no vence"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if _epoch_ms(self._clock.now()) >= grant.expires_at_ms:\n            raise RelayTokenRejected(RelayOutcome.EXPIRED)\n"
+reemplazar = "        if False:\n            raise RelayTokenRejected(RelayOutcome.EXPIRED)\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_token_expires_at_its_millisecond_by_the_injected_clock"
+
+[[guarda]]
+nombre = "m_deposito_libre: se acepta el depósito del token"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if grant.bucket != self._bucket:\n            raise denied\n"
+reemplazar = "        if False:\n            raise denied\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_an_authentic_token_outside_the_relay_is_403_and_never_reaches_the_store"
+
+[[guarda]]
+nombre = "m_put_de_clip: el relevo firma la subida de un clip del nodo"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if CLOSURE_KEY_PATTERN.fullmatch(key) is None:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_node_clip_is_never_signed_for_upload_and_the_grant_stays_unavailable"
+
+[[guarda]]
+nombre = "m_relevo_en_produccion: VIGIA_STORE_RELAY=1 arranca fuera de local e integration"
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+buscar = "            if environment not in STORE_RELAY_ENVIRONMENTS:\n                raise StoreRelayForbidden()\n"
+reemplazar = "            if False:\n                raise StoreRelayForbidden()\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_relay_outside_local_and_integration_does_not_start"
+
+[[guarda]]
+nombre = "m_token_en_ruta: el token va en la ruta y no en la consulta"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        return f\"{self._origin}{RELAY_PATH}?{query}\"\n"
+reemplazar = "        return f\"{self._origin}{RELAY_PATH}/{self.tokens.issue(grant)}\"\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_read_urls_are_same_origin_with_the_token_in_the_query"
+
+# --- Una por guarda nueva de seguridad ------------------------------------------------------------
+
+[[guarda]]
+nombre = "nunca ca/: una clave de la raíz de nodos con token auténtico"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if grant.key.startswith(REFUSED_KEY_PREFIXES):\n            raise denied\n"
+reemplazar = "        if False:\n            raise denied\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_an_authentic_token_for_a_ca_key_is_refused"
+
+[[guarda]]
+nombre = "el token de un método no sirve para otro"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if grant.method is not method:\n            raise denied\n"
+reemplazar = "        if False:\n            raise denied\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_token_for_one_method_does_not_serve_the_other"
+
+[[guarda]]
+nombre = "firma en base64url canónica (bits sobrantes del último carácter)"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "    return data if _b64e(data) == text else None\n"
+reemplazar = "    return data\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_signature_with_other_trailing_bits_is_not_canonical_and_is_refused"
+
+[[guarda]]
+nombre = "la firma tiene 32 bytes"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if signature is None or len(signature) != _SIGNATURE_BYTES:\n            raise denied\n"
+reemplazar = "        if signature is None:\n            raise denied\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_token_without_the_shape_is_refused"
+
+[[guarda]]
+nombre = "clave HMAC de al menos 32 bytes"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if not isinstance(key, bytes) or len(key) < MIN_KEY_BYTES:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_short_key_is_refused_and_the_key_never_shows"
+
+[[guarda]]
+nombre = "el relevo no se construye para vigia-edge ni vigia-archive"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        if settings.bucket in refused_buckets:\n"
+reemplazar = "        if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_relay_is_never_built_for_the_edge_or_the_archive"
+
+[[guarda]]
+nombre = "s3_storage solo releva el depósito de evidencias"
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+buscar = "    if relay is not None and config.store_relay and bucket == config.evidence_bucket:\n"
+reemplazar = "    if relay is not None and config.store_relay:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_with_the_relay_only_the_evidence_bucket_is_relayed"
+
+[[guarda]]
+nombre = "sin subida por partes por el relevo"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        raise StorageUnavailable(\"presign_part\")\n"
+reemplazar = "        return await super().presign_part(key, upload_id, part_number, checksum_sha256, ttl)\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_multipart_uploads_are_never_signed"
+
+[[guarda]]
+nombre = "el relevo sin su secreto no arranca"
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+buscar = "            if \"store_relay_secret\" not in values:\n"
+reemplazar = "            if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_relay_without_its_secret_does_not_start"
+
+[[guarda]]
+nombre = "VIGIA_STORE_RELAY solo admite 0 o 1"
+archivo = "backend/src/vigia_platform/shared/runtime/config.py"
+buscar = "    if _FLAG.fullmatch(value) is None:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_the_relay_flag_is_only_zero_or_one"
+
+[[guarda]]
+nombre = "una clave del relevo de menos de 32 bytes no arranca"
+archivo = "backend/src/vigia_platform/shared/runtime/core.py"
+buscar = "    if len(key) < MIN_KEY_BYTES:\n"
+reemplazar = "    if False:\n"
+prueba = "backend/tests/unit/test_storage_relay_token.py::test_a_bad_relay_secret_stops_the_start_and_names_only_the_variable"
+
+[[guarda]]
+nombre = "la ruta del relevo solo existe con el relevo"
+archivo = "backend/src/vigia_platform/shared/api/app.py"
+buscar = "        extra_routers=(store_relay_router(),) if relay is not None else (),\n"
+reemplazar = "        extra_routers=(store_relay_router(),),\n"
+prueba = "backend/tests/isolation/test_store_relay_isolation.py::test_without_the_relay_the_route_answers_like_an_unknown_one"
+
+[[guarda]]
+nombre = "BadDigest del almacén: 400 y nada guardado"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "                if _http_status(error) == 400 and code in _BAD_DIGEST_CODES:\n                    raise RelayBadDigest from None\n"
+reemplazar = "                if False:\n                    raise RelayBadDigest from None\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_bytes_that_do_not_match_the_signed_sum_are_400_and_store_nothing"
+
+[[guarda]]
+nombre = "una versión que no existe es 403 (como S3), no 500"
+archivo = "backend/src/vigia_platform/shared/storage_relay.py"
+buscar = "        def head() -> RelayObject:\n            try:\n                response = self._client.head_object(**params)\n            except botocore_exceptions.ClientError as error:\n                if _http_status(error) in _MISSING_HTTP_STATUS:\n                    raise RelayObjectMissing from None\n"
+reemplazar = "        def head() -> RelayObject:\n            try:\n                response = self._client.head_object(**params)\n            except botocore_exceptions.ClientError as error:\n                if False:\n                    raise RelayObjectMissing from None\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_a_missing_version_is_403_like_s3"
+
+[[guarda]]
+nombre = "un rango fuera del objeto es 416"
+archivo = "backend/src/vigia_platform/shared/api/store_relay.py"
+buscar = "    if first >= size:\n        raise RangeNotSatisfiable\n"
+reemplazar = "    if False:\n        raise RangeNotSatisfiable\n"
+prueba = "backend/tests/unit/test_store_relay_route.py::test_a_range_outside_the_object_is_416"

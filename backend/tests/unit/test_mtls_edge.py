@@ -423,6 +423,27 @@ def test_the_502_line_carries_no_query(directory: Path, capsys: pytest.CaptureFi
     assert SECRET_MARKER not in capsys.readouterr().err
 
 
+def test_the_store_relay_line_has_the_path_without_the_token(
+    directory: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TASK-607: el token del relevo va en la consulta; el balanceador registra la ruta sin ella."""
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    with (
+        echo_backend() as backend,
+        running(_config(directory, (backend,))) as edge,
+        _client(directory) as client,
+    ):
+        capsys.readouterr()
+        response = client.get(edge.app.url + "/store-relay/object?token=" + SECRET_MARKER)
+    assert response.status_code == 200
+    err = capsys.readouterr().err
+    lines = [json.loads(line) for line in err.splitlines() if line.startswith("{")]
+    assert [line["path"] for line in lines if line.get("listener") == "app"] == [
+        "/store-relay/object"
+    ]
+    assert SECRET_MARKER not in err
+
+
 def test_the_forwarding_ignores_a_proxy_of_the_environment(
     directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
