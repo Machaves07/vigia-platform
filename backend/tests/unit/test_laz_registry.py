@@ -66,6 +66,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.finding_photo_routes import finding_photo_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.history_routes import closed_findings_router
 from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
@@ -222,6 +223,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/findings/{finding_state_id}/timeline"),
                 # TASK-586: el histórico de lo cerrado (otra lectura de SUP-U05-01).
                 ("GET", "/loop/closed-findings"),
+                # TASK-589: la imagen de la foto del hallazgo (otra lectura de SUP-U05-02).
+                ("GET", "/loop/findings/{finding_state_id}/photos/{photo_id}/image"),
             ]
             assert state[LOOP_STATE_KEY].assignees is not None
             assert state[LOOP_STATE_KEY].overdue is not None
@@ -238,6 +241,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].review_queue is not None
             assert state[LOOP_STATE_KEY].unclosable is not None
             assert state[LOOP_STATE_KEY].timeline is not None
+            assert state[LOOP_STATE_KEY].finding_photos is not None
             assert state[LOOP_STATE_KEY].history is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
@@ -358,6 +362,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         assignees_router,  # TASK-583
         timeline_router,  # TASK-585
         closed_findings_router,  # TASK-586
+        finding_photo_router,  # TASK-589
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).

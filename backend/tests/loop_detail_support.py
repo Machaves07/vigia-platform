@@ -60,6 +60,7 @@ from tests.loop_classification_support import (
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
+from vigia_platform.fleet.application.finding_photos import FindingPhotos
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
@@ -73,6 +74,9 @@ from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.detail import FindingDetailService
+from vigia_platform.loop.application.finding_photo import FindingPhotoReader
+from vigia_platform.loop.application.timeline import FindingTimelineService
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
@@ -200,6 +204,8 @@ class DetailStack(ClassificationStack):
     detail_service: FindingDetailService = field(kw_only=True)
     ports: DetailPorts = field(kw_only=True)
     evidence_store: DetailEvidenceStore = field(kw_only=True)
+    photo_reader: FindingPhotoReader | None = field(default=None, kw_only=True)
+    """La imagen de la foto del hallazgo (TASK-589) sobre el mismo detalle."""
 
     # --- siembra ------------------------------------------------------------------------------
 
@@ -375,6 +381,7 @@ def detail_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[DetailStac
             )
         )
         evidence_store = DetailEvidenceStore(stack.storage, clock)
+        photos = FindingPhotos(database=database, clock=clock)
         detail = FindingDetailService(
             database=database,
             authorizer=authz.authorizer,
@@ -384,6 +391,20 @@ def detail_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[DetailStac
             gates=ports,
             fleet=ports,
             coverage=ports,
+            photos=photos,
+        )
+        # TASK-589: la ficha de vida y la imagen de la foto del hallazgo sobre el mismo detalle.
+        timeline = FindingTimelineService(
+            subjects=detail,
+            reader=LectorExpediente(database=database, audit=audit, clock=clock),
+            timezones=PostgresLoopConfigurationRepository(database),
+        )
+        photo_reader = FindingPhotoReader(
+            database=database,
+            subjects=detail,
+            authorizer=authz.authorizer,
+            audit=audit,
+            photos=photos,
         )
         app = World(clock=clock).app(
             runtime={
@@ -394,7 +415,14 @@ def detail_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[DetailStac
                     provider_queries=LedgerProviderQueryLedger(writer),
                     clock=clock,
                 ),
-                "state": {LOOP_STATE_KEY: LoopHttp(classification=classification, detail=detail)},
+                "state": {
+                    LOOP_STATE_KEY: LoopHttp(
+                        classification=classification,
+                        detail=detail,
+                        timeline=timeline,
+                        finding_photos=photo_reader,
+                    )
+                },
             },
         )
         client = httpx.AsyncClient(
@@ -409,6 +437,7 @@ def detail_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[DetailStac
             detail_service=detail,
             ports=ports,
             evidence_store=evidence_store,
+            photo_reader=photo_reader,
         )
         try:
             yield built

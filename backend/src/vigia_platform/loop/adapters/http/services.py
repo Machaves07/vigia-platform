@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import Request
 
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.finding_photos import FindingPhotos
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import (
@@ -31,6 +32,7 @@ from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.finding_photo import FindingPhotoReader
 from vigia_platform.loop.application.history import ClosedFindingsService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -59,6 +61,7 @@ __all__ = [
     "LOOP_STATE_KEY",
     "LoopHttp",
     "build_detail",
+    "build_finding_photos",
     "build_loop_http",
     "build_timeline",
     "installed",
@@ -112,6 +115,8 @@ class LoopHttp:
     """``GET /loop/findings/{finding_state_id}/timeline``: la ficha de vida (TASK-585)."""
     history: ClosedFindingsService | None = None
     """``GET /loop/closed-findings``: el histórico de lo cerrado (TASK-586)."""
+    finding_photos: FindingPhotoReader | None = None
+    """``GET /loop/findings/{finding_state_id}/photos/{photo_id}/image`` (A-128, TASK-589)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -177,6 +182,21 @@ def build_detail(services: UnitServices) -> FindingDetailService:
             clock=services.clock,
             metrics=services.metrics,
         ),
+        photos=FindingPhotos(database=services.database, clock=services.clock),
+    )
+
+
+def build_finding_photos(
+    services: UnitServices, detail: FindingDetailService
+) -> FindingPhotoReader:
+    """La imagen de la foto del hallazgo: los pasos de alcance del detalle, ``evidence.read`` y
+    ``FindingPhotoPort`` de ``fleet`` con el reloj de la raíz (TASK-589)."""
+    return FindingPhotoReader(
+        database=services.database,
+        subjects=detail,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        photos=FindingPhotos(database=services.database, clock=services.clock),
     )
 
 
@@ -299,6 +319,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
         ),
         timeline=build_timeline(services, detail),
         history=ClosedFindingsService(database=services.database, authorizer=services.authorizer),
+        finding_photos=build_finding_photos(services, detail),
     )
 
 

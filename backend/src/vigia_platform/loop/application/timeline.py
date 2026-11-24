@@ -32,6 +32,12 @@
   no cumplida si se declaró vencida antes del cierre (BR-LAZ-46) o se cerró tarde, y ``met =
   null`` mientras siga abierta sin vencimiento declarado. La ficha no lee ningún reloj.
 
+- **Fotos del hallazgo** (A-128, TASK-589): los hitos ``finding_received`` y
+  ``late_segment_attached`` llevan las fotos de su tramo, con la forma y las marcas presentadas del
+  detalle (``FindingDetailService.record_photos``: una consulta a ``fleet``, sin auditoría propia;
+  la ficha sigue con su única entrada). El tramo tardío toma el ``record_id`` del nodo de la
+  recepción que cita (``segment_record_id``) si está en la ficha; si no, va sin fotos.
+
 ``loop.finding_state.classified_within_deadline`` **no** se usa: ningún código la rellena (O-12,
 verificado en TASK-585); la ficha aplica la regla de la métrica sobre el historial.
 """
@@ -44,6 +50,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
 
+from vigia_platform.fleet.application.finding_photos import FindingPhoto, FindingPhotoKey
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.ledger.application.audit_writer import ResourceRef
 from vigia_platform.ledger.application.reader import (
@@ -52,7 +59,12 @@ from vigia_platform.ledger.application.reader import (
     SubjectRef,
 )
 from vigia_platform.loop.application.classification import SUBJECT_RESOURCE_KIND
-from vigia_platform.loop.application.detail import FindingDetailService
+from vigia_platform.loop.application.detail import (
+    FindingDetailService,
+    FindingPhotoView,
+    finding_photo_view,
+    photo_key,
+)
 from vigia_platform.loop.calendar import is_business_day, local_date
 from vigia_platform.loop.config.classification_deadline import (
     ClassificationDeadlineRule,
@@ -76,6 +88,7 @@ __all__ = [
     "TimelineSource",
     "TimelineSummary",
     "finding_timeline",
+    "photo_documents",
     "timeline_source",
 ]
 
@@ -166,6 +179,8 @@ class Milestone:
     actor: MilestoneActor | None
     details: MilestoneDetails
     deadline: MilestoneDeadline | None
+    photos: tuple[FindingPhotoView, ...] = ()
+    """Las fotos del tramo en ``finding_received`` y ``late_segment_attached`` (A-128)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -223,6 +238,39 @@ class TimelineInputs:
     clasificación no se sabe)."""
     timezone: str | None
     """La zona horaria de la planta; ``None`` si no se sabe (tampoco el plazo de clasificación)."""
+    photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
+    """Las fotos del hallazgo por tramo (``detail.photo_key``), con las marcas exactas."""
+
+
+_PHOTO_TYPES: Final = frozenset({"finding_received", "late_segment_attached"})
+"""Los hitos que llevan las fotos de su tramo (TASK-589)."""
+
+
+def _segment_document(
+    item: TimelineSource, receptions: Mapping[str, Mapping[str, Any]]
+) -> Mapping[str, Any] | None:
+    """El documento de la recepción del tramo del hito: el propio en ``finding_received`` y el
+    de la recepción citada (``segment_record_id``) en ``late_segment_attached``."""
+    if item.record_type == "finding_received":
+        return item.document
+    if item.record_type == "late_segment_attached":
+        try:
+            cited = uuid.UUID(str(item.document.get("segment_record_id")))
+        except ValueError:
+            return None
+        return receptions.get(str(cited))
+    return None
+
+
+def photo_documents(records: Sequence[TimelineSource]) -> tuple[Mapping[str, Any], ...]:
+    """Los documentos de recepción cuyas fotos lleva la ficha."""
+    receptions = _receptions(records)
+    found = (_segment_document(r, receptions) for r in records if r.record_type in _PHOTO_TYPES)
+    return tuple(document for document in found if document is not None)
+
+
+def _receptions(records: Sequence[TimelineSource]) -> dict[str, Mapping[str, Any]]:
+    return {str(r.record_id): r.document for r in records if r.record_type == "finding_received"}
 
 
 def timeline_source(record: LedgerRecordView) -> TimelineSource:
@@ -451,8 +499,20 @@ class _Walk:
     shown: _Shown
     fates: Mapping[str, _ActionFate]
     classification_deadline: datetime | None
+    photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
+    receptions: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     milestones: list[Milestone] = field(default_factory=list)
     first_classification: Milestone | None = None
+
+    def segment_photos(self, item: TimelineSource) -> tuple[FindingPhotoView, ...]:
+        if item.record_type not in _PHOTO_TYPES:
+            return ()
+        key = photo_key(_segment_document(item, self.receptions))
+        found = () if key is None else self.photos.get(key, ())
+        return tuple(
+            finding_photo_view(photo, self.shown)
+            for photo in sorted(found, key=lambda p: (p.photo_index, str(p.photo_id)))
+        )
 
     def deadline(self, item: TimelineSource) -> MilestoneDeadline | None:
         doc = item.document
@@ -486,6 +546,7 @@ class _Walk:
             actor=_actor(item),
             details=_details(item, self.shown),
             deadline=self.deadline(item),
+            photos=self.segment_photos(item),
         )
         if item.record_type == "classification" and self.first_classification is None:
             self.first_classification = milestone
@@ -527,6 +588,8 @@ def finding_timeline(inputs: TimelineInputs) -> FindingTimeline:
         shown=shown,
         fates=_action_fates(inputs.records),
         classification_deadline=rule.deadline() if finding else None,
+        photos=inputs.photos,
+        receptions=_receptions(inputs.records),
     )
     for item in inputs.records:
         walk.add(item)
@@ -608,10 +671,13 @@ class FindingTimelineService:
         if history is None:
             # El expediente manda: un anclaje que el alcance no ve no se inventa.
             raise ResourceNotFound()
+        records = tuple(timeline_source(r) for r in history.records)
+        photos = await self._subjects.record_photos(authorized, subject, photo_documents(records))
         return finding_timeline(
             TimelineInputs(
                 subject=subject,
-                records=tuple(timeline_source(r) for r in history.records),
+                records=records,
+                photos=photos,
                 truncated=history.truncated,
                 configuration=(
                     tuple(timeline_source(r) for r in history.preceding)

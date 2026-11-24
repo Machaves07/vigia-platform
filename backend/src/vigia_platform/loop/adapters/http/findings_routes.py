@@ -68,6 +68,7 @@ from vigia_platform.loop.application.detail import (
     ClassificationView,
     FindingDetail,
     FindingGateUnavailable,
+    FindingPhotoView,
     RecordView,
 )
 from vigia_platform.loop.application.inbox import (
@@ -97,11 +98,13 @@ __all__ = [
     "PATH",
     "ClassificationHistoryOut",
     "FindingDetailOut",
+    "FindingPhotoOut",
     "InboxOrder",
     "InboxPageOut",
     "decode_inbox_cursor",
     "detail_view",
     "encode_inbox_cursor",
+    "finding_photo_out",
     "findings_router",
     "history_view",
 ]
@@ -341,6 +344,38 @@ class ClipOut(_Strict):
     """De solo lectura, vigente a lo sumo 5 minutos; ``null`` si el almacén no la concedió."""
 
 
+class FindingPhotoStandardOut(_Strict):
+    standard_id: uuid.UUID
+    version: int
+
+
+class FindingPhotoOut(_Strict):
+    """Una foto del hallazgo (A-128): solo metadatos. **Sin** bytes, suma, tamaño ni URL: la
+    imagen se pide por ``GET …/photos/{photo_id}/image`` (``evidence.read``, auditada)."""
+
+    photo_id: uuid.UUID
+    photo_index: int
+    """0 es el cuadro de mayor confianza del tramo (``peak``); 1 a 20, la ráfaga (``burst``)."""
+    photo_role: str
+    classified_as: str
+    camera_id: uuid.UUID | None
+    frame_at: str | None
+    family: str
+    standard: FindingPhotoStandardOut
+    max_confidence: float
+    started_at: str
+    ended_at: str
+    episode_duration_ms: int
+    received_at: str
+    expires_at: str | None
+    """``null``: sin vencimiento automático (la retención del hallazgo)."""
+    has_image: bool
+    image_absent_reason: str | None
+    """El motivo cerrado si la foto llegó sin imagen; ``null`` si la hay."""
+    width: int | None
+    height: int | None
+
+
 class RecordOut(_Strict):
     record_id: uuid.UUID
     record_type: str
@@ -351,6 +386,9 @@ class RecordOut(_Strict):
     occurred_at: str | None
     signals: tuple[SignalOut, ...]
     clips: tuple[ClipOut, ...]
+    photos: tuple[FindingPhotoOut, ...]
+    """Las fotos de este registro y su tramo, por ``photo_index`` (A-128); en zona unipersonal,
+    sus marcas agregadas como las del detalle."""
 
 
 class EpisodeOut(_Strict):
@@ -492,6 +530,31 @@ def _classification_view(item: ClassificationView) -> ClassificationItemOut:
     )
 
 
+def finding_photo_out(photo: FindingPhotoView) -> FindingPhotoOut:
+    return FindingPhotoOut(
+        photo_id=photo.photo_id,
+        photo_index=photo.photo_index,
+        photo_role=photo.photo_role,
+        classified_as=photo.classified_as,
+        camera_id=photo.camera_id,
+        frame_at=_stamp(photo.frame_at),
+        family=photo.family,
+        standard=FindingPhotoStandardOut(
+            standard_id=photo.standard_id, version=photo.standard_version
+        ),
+        max_confidence=photo.max_confidence,
+        started_at=format_timestamp(photo.started_at),
+        ended_at=format_timestamp(photo.ended_at),
+        episode_duration_ms=photo.episode_duration_ms,
+        received_at=format_timestamp(photo.received_at),
+        expires_at=_stamp(photo.expires_at),
+        has_image=photo.has_image,
+        image_absent_reason=photo.image_absent_reason,
+        width=photo.width,
+        height=photo.height,
+    )
+
+
 def _record_view(record: RecordView) -> RecordOut:
     return RecordOut(
         record_id=record.record_id,
@@ -528,6 +591,7 @@ def _record_view(record: RecordView) -> RecordOut:
             )
             for clip in record.clips
         ),
+        photos=tuple(finding_photo_out(photo) for photo in record.photos),
     )
 
 

@@ -29,6 +29,13 @@
    ``EvidencePort.url_lectura`` da la URL de cada clip (≤ 5 min, auditada, BR-LAZ-08); un clip
    ilegible o sin almacén deja su referencia y ``evidence_url_unavailable``, y los demás clips se
    siguen pidiendo (solo un almacén caído corta el resto).
+6. **Fotos del hallazgo** (A-128, TASK-589) por ``FindingPhotoPort.record_photos`` (``fleet``, sin
+   SQL de ``fleet`` aquí), en **una** consulta para todos los registros leídos: por cada registro,
+   las fotos ``productive`` vivas con su ``record_id`` del nodo (``finding_id`` o
+   ``detection_id`` del documento; el ``record_id`` del expediente es el ``platform_record_id`` y
+   no sirve) **y** la misma zona, episodio y tramo, por ``photo_index``. Solo metadatos (sin
+   bytes, suma, tamaño ni URL) y **sin** entrada de auditoría propia: el detalle sigue dejando las
+   suyas y nada más. La imagen se pide aparte (``loop.application.finding_photo``).
 
 **A lo sumo tres llamadas a U-03** por detalle (NFR-LAZ-03): ``state_at``, ``standard_version``
 y ``nodes_by_zone``, una vez cada una y nunca dentro de un bucle. La ocupación unipersonal, el
@@ -60,9 +67,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any, Final, Protocol
 
 from sqlalchemy import text
@@ -72,6 +79,11 @@ from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
 from vigia_platform.catalog.domain.ports import CatalogQueryPort, GateQueryPort
 from vigia_platform.catalog.domain.standard import DeclaredStandardVersion
+from vigia_platform.fleet.application.finding_photos import (
+    FindingPhoto,
+    FindingPhotoKey,
+    FindingPhotoPort,
+)
 from vigia_platform.fleet.ports import FleetQueryPort, ZoneNode
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -90,6 +102,7 @@ from vigia_platform.loop.domain.enums import FindingDetailNotice, FindingLifecyc
 from vigia_platform.loop.domain.time_aggregation import presented
 from vigia_platform.shared.api.errors import ExternalDependencyDown
 from vigia_platform.shared.context import ScopeContext, repository
+from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
@@ -106,6 +119,7 @@ __all__ = [
     "FindingDetail",
     "FindingDetailService",
     "FindingGateUnavailable",
+    "FindingPhotoView",
     "GateAtEvent",
     "NodeView",
     "RecordReader",
@@ -113,8 +127,11 @@ __all__ = [
     "ReviewResolutionView",
     "SignalView",
     "StandardCitation",
+    "TimePresenter",
     "classification_history",
     "finding_detail",
+    "finding_photo_view",
+    "photo_key",
     "standard_text_sha256",
 ]
 
@@ -124,6 +141,7 @@ más lo **declara** (``segment_records_limited``) en vez de alargar la lectura s
 oculta los demás: sus identificadores siguen en ``episode.segment_record_ids``."""
 
 _READ: Final = PermissionKey.FINDINGS_READ
+_MILLISECOND: Final = timedelta(milliseconds=1)
 _log = get_logger("loop.detail")
 
 _SUBJECT: Final = text(
@@ -301,6 +319,32 @@ class ClipView:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class FindingPhotoView:
+    """Una foto del hallazgo (A-128): metadatos con sus marcas presentadas; nunca los bytes, su
+    suma, su tamaño ni una URL (la imagen se pide por su ruta, auditada)."""
+
+    photo_id: uuid.UUID
+    photo_index: int
+    photo_role: str
+    classified_as: str
+    camera_id: uuid.UUID | None
+    frame_at: datetime | None
+    family: str
+    standard_id: uuid.UUID
+    standard_version: int
+    max_confidence: float
+    started_at: datetime
+    ended_at: datetime
+    episode_duration_ms: int
+    received_at: datetime
+    expires_at: datetime | None
+    has_image: bool
+    image_absent_reason: str | None
+    width: int | None
+    height: int | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RecordView:
     """Un registro del expediente leído por ``LectorExpediente`` (auditado)."""
 
@@ -313,6 +357,8 @@ class RecordView:
     occurred_at: datetime | None
     signals: tuple[SignalView, ...]
     clips: tuple[ClipView, ...]
+    photos: tuple[FindingPhotoView, ...] = ()
+    """Las fotos ``productive`` de este registro y su tramo, por ``photo_index`` (A-128)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -462,6 +508,8 @@ class DetailInputs:
     classifications: Sequence[Mapping[str, Any]]
     actions: Sequence[Mapping[str, Any]]
     analyses: Sequence[Mapping[str, Any]]
+    photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]] = field(default_factory=dict)
+    """Las fotos del hallazgo por tramo de registro (``photo_key``), con las marcas exactas."""
 
 
 # --- composición pura ------------------------------------------------------------------------
@@ -641,8 +689,81 @@ def _segment_index(document: Mapping[str, Any]) -> int | None:
     return None
 
 
+def photo_key(document: object) -> FindingPhotoKey | None:
+    """El tramo de un registro del hallazgo en ``fleet.episode_photo``: el ``finding_id`` o el
+    ``detection_id`` del documento (el ``record_id`` del nodo), su episodio y su tramo; ``None``
+    si el documento no los trae (un registro que no es de un tramo)."""
+    if not isinstance(document, Mapping):
+        return None
+    node_record = document.get("finding_id", document.get("detection_id"))
+    episode = document.get("episode")
+    if node_record is None or not isinstance(episode, Mapping):
+        return None
+    index = episode.get("segment_index")
+    if type(index) is not int:
+        return None
+    try:
+        return FindingPhotoKey(
+            uuid.UUID(str(node_record)), uuid.UUID(str(episode.get("episode_id"))), index
+        )
+    except ValueError:
+        return None
+
+
+class TimePresenter(Protocol):
+    """La marca que se devuelve (``_Presenter`` aquí, ``_Shown`` en la ficha de vida)."""
+
+    def __call__(self, moment: Any) -> datetime: ...
+
+    def optional(self, moment: Any) -> datetime | None: ...
+
+
+def finding_photo_view(photo: FindingPhoto, shown: TimePresenter) -> FindingPhotoView:
+    """La foto con sus marcas presentadas por ``shown`` (agregadas en zona unipersonal; también
+    ``expires_at``, que con la retención configurada delataría ``received_at``). La duración del
+    tramo, como ``total_episode_duration_ms`` del episodio, va exacta."""
+    duration = (photo.ended_at - photo.started_at) // _MILLISECOND
+    return FindingPhotoView(
+        photo_id=photo.photo_id,
+        photo_index=photo.photo_index,
+        photo_role=photo.photo_role,
+        classified_as=photo.classified_as,
+        camera_id=photo.camera_id,
+        frame_at=shown.optional(photo.frame_at),
+        family=photo.family,
+        standard_id=photo.standard_id,
+        standard_version=photo.standard_version,
+        max_confidence=photo.max_confidence,
+        started_at=shown(photo.started_at),
+        ended_at=shown(photo.ended_at),
+        episode_duration_ms=max(int(duration), 0),
+        received_at=shown(photo.received_at),
+        expires_at=shown.optional(photo.expires_at),
+        has_image=photo.has_image,
+        image_absent_reason=photo.image_absent_reason,
+        width=photo.width,
+        height=photo.height,
+    )
+
+
+def _photos(
+    document: object,
+    photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]],
+    shown: TimePresenter,
+) -> tuple[FindingPhotoView, ...]:
+    key = photo_key(document)
+    found = () if key is None else photos.get(key, ())
+    return tuple(
+        finding_photo_view(photo, shown)
+        for photo in sorted(found, key=lambda p: (p.photo_index, str(p.photo_id)))
+    )
+
+
 def _record(
-    record: LedgerRecordView, read_urls: Mapping[uuid.UUID, str], shown: _Presenter
+    record: LedgerRecordView,
+    read_urls: Mapping[uuid.UUID, str],
+    shown: _Presenter,
+    photos: Mapping[FindingPhotoKey, Sequence[FindingPhoto]],
 ) -> RecordView:
     document = record.document()
     document = document if isinstance(document, Mapping) else {}
@@ -672,6 +793,7 @@ def _record(
             )
             for evidence in record.evidences
         ),
+        photos=_photos(document, photos, shown),
     )
 
 
@@ -802,7 +924,7 @@ def finding_detail(inputs: DetailInputs) -> FindingDetail:
         ),
         nodes=None if inputs.nodes is None else tuple(_node(n, shown) for n in inputs.nodes),
         episode=None if inputs.episode is None else _episode(inputs.episode, shown),
-        records=tuple(_record(r, inputs.read_urls, shown) for r in inputs.records),
+        records=tuple(_record(r, inputs.read_urls, shown, inputs.photos) for r in inputs.records),
         classifications=tuple(_classification(r, shown) for r in inputs.classifications),
         actions=tuple(_action(r, shown) for r in inputs.actions),
         analyses=tuple(_analysis(r, shown) for r in inputs.analyses),
@@ -832,6 +954,7 @@ class FindingDetailService:
         gates: GateQueryPort,
         fleet: FleetQueryPort,
         coverage: CoveragePort,
+        photos: FindingPhotoPort,
     ) -> None:
         self._database = database
         self._authorizer = authorizer
@@ -841,6 +964,7 @@ class FindingDetailService:
         self._gates = gates
         self._fleet = fleet
         self._coverage = coverage
+        self._photos = photos
 
     def __repr__(self) -> str:
         return "FindingDetailService()"
@@ -854,6 +978,7 @@ class FindingDetailService:
         episode, classifications, actions, analyses = await self._projection(authorized, subject)
         records, limited = await self._records(authorized, subject, episode)
         read_urls, urls_unavailable = await self._read_urls(authorized, records)
+        photos = await self.record_photos(authorized, subject, (r.document() for r in records))
         return finding_detail(
             DetailInputs(
                 subject=subject,
@@ -869,8 +994,39 @@ class FindingDetailService:
                 classifications=classifications,
                 actions=actions,
                 analyses=analyses,
+                photos=photos,
             )
         )
+
+    async def record_photos(
+        self,
+        context: ScopeContext,
+        subject: Mapping[str, Any],
+        documents: Iterable[object],
+    ) -> Mapping[FindingPhotoKey, tuple[FindingPhoto, ...]]:
+        """Las fotos de los tramos de ``documents`` (documentos de registros del sujeto ya leídos
+        y auditados) en la planta y la zona del sujeto, en una consulta y sin auditoría propia.
+        También para la ficha de vida (TASK-589)."""
+        keys = tuple(dict.fromkeys(k for k in map(photo_key, documents) if k is not None))
+        if not keys:
+            return {}
+        return await self._photos.record_photos(
+            context,
+            plant_id=_uuid(subject["plant_id"]),
+            zone_id=_uuid(subject["zone_id"]),
+            keys=keys,
+        )
+
+    async def segment_record_ids(
+        self, transaction: Transaction, subject: Mapping[str, Any]
+    ) -> tuple[uuid.UUID, ...]:
+        """Los ``platform_record_id`` de los registros del sujeto, en ``transaction``: los tramos
+        presentes del episodio o el registro de anclaje (los que lee el detalle, sin tope)."""
+        if subject["subject_kind"] == SubjectKind.FINDING.value:
+            found = (await transaction.execute(_EPISODE, _place(subject))).first()
+            if found is not None and found.segment_record_ids:
+                return tuple(_uuid(i) for i in found.segment_record_ids)
+        return (_uuid(subject["anchor_record_id"]),)
 
     async def classifications(
         self, context: ScopeContext, finding_state_id: uuid.UUID

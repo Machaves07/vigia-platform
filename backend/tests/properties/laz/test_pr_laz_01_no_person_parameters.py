@@ -243,10 +243,11 @@ REGISTERED_U04: Final = tuple(
     if isinstance(declared.route, APIRoute)
     and declared.path.startswith(("/loop", "/accreditation", "/notifications"))
 )
-"""Las 46 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
+"""Las 47 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
 causa raíz, POST y la lectura del análisis en curso, VIG-363; asignar la acción, POST y la lista de
 responsables posibles, TASK-583; el detalle, también la ficha de vida, TASK-585; la bandeja,
-también el histórico de lo cerrado, TASK-586)."""
+también el histórico de lo cerrado, TASK-586; el detalle, también la imagen de la foto
+del hallazgo, TASK-589)."""
 
 
 def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field() -> None:
@@ -268,7 +269,7 @@ def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field(
 
 def test_pr_laz_01_no_u04_operation_has_a_person_parameter_or_field() -> None:
     """La misma ausencia estructural se mantiene en la acreditación y las notificaciones."""
-    assert len(REGISTERED_U04) == 46
+    assert len(REGISTERED_U04) == 47
     assert violations(REGISTERED_U04, ("/loop", "/accreditation", "/notifications")) == []
 
 

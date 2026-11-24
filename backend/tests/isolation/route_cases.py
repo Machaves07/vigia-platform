@@ -65,6 +65,8 @@ class Ids:
     episode_photo: uuid.UUID = field(default_factory=uuid7)
     """Foto del episodio con imagen sintética en ``episode_zone`` (TASK-573, A-112)."""
     finding: uuid.UUID = field(default_factory=uuid7)
+    finding_photo: uuid.UUID = field(default_factory=uuid7)
+    """Foto ``productive`` del tramo del hallazgo, con imagen sintética (TASK-589, A-128)."""
     detection: uuid.UUID = field(default_factory=uuid7)
     action: uuid.UUID = field(default_factory=uuid7)
     analysis: uuid.UUID = field(default_factory=uuid7)
