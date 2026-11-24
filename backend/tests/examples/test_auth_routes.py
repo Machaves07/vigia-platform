@@ -33,6 +33,8 @@ Solo datos generados (NFR-CTR-43).
 
 from __future__ import annotations
 
+import ipaddress
+import itertools
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -176,8 +178,15 @@ def _body_without_correlation(response: httpx.Response) -> dict[str, Any]:
     return body
 
 
+@dataclass(frozen=True)
+class AuthApp:
+    env: HierarchyEnvironment
+    app: Any
+    addresses: Iterator[int]
+
+
 @pytest.fixture(scope="module")
-def api(postgres_endpoint: PostgresEndpoint) -> Iterator[Api]:
+def auth_app(postgres_endpoint: PostgresEndpoint) -> Iterator[AuthApp]:
     with hierarchy_environment(postgres_endpoint, "auth_routes") as env:
         authz = env.authz
         sessions = authz.sessions
@@ -235,14 +244,31 @@ def api(postgres_endpoint: PostgresEndpoint) -> Iterator[Api]:
             static_dir=STATIC,
             public_origin=ORIGIN,
         )
-        client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=10.0
-        )
         try:
-            yield Api(env, client)
+            yield AuthApp(env, app, itertools.count())
         finally:
-            env.run(client.aclose())
             pool.shutdown()
+
+
+@pytest.fixture
+def api(auth_app: AuthApp) -> Iterator[Api]:
+    """Un cliente por prueba desde su propia dirección de 198.18.0.0/15 (la red de pruebas).
+
+    El retardo del origen (BR-NUC-24) cuenta los fallos por dirección y en la base, así que
+    vive lo que vive el módulo: con una sola dirección, los fallos de una prueba retenían los
+    inicios de sesión de la siguiente según el orden del reparto. Cada prueba empieza con su
+    origen limpio; el retardo de la cuenta no cambia (cada prueba crea sus personas).
+    """
+    host = str(ipaddress.IPv4Address("198.18.0.1") + next(auth_app.addresses))
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=auth_app.app, client=(host, 40_000)),
+        base_url="http://testserver",
+        timeout=10.0,
+    )
+    try:
+        yield Api(auth_app.env, client)
+    finally:
+        auth_app.env.run(client.aclose())
 
 
 # --- Datos --------------------------------------------------------------------------------------
