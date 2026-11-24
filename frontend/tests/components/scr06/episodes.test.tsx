@@ -33,6 +33,13 @@ import { text } from '@/texts';
 import { apiError, mswPath } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { FakeClock } from '../../support/fakeClock';
+import {
+  analogParts,
+  processContext,
+  READ_AT,
+  requestsSeen,
+  STATES_LINE,
+} from '../../support/processContext';
 
 const WAIT = { timeout: 10_000 };
 const TEST_TIMEOUT = 30_000;
@@ -437,3 +444,65 @@ describe('detalle', { timeout: TEST_TIMEOUT }, () => {
     expect(await axe(absent.container)).toHaveNoViolations();
   });
 });
+
+describe(
+  'detalle: valores de proceso bajo la foto (TASK-596, A-129 Q6)',
+  { timeout: TEST_TIMEOUT },
+  () => {
+    const withValues = () => episode({ process_context: processContext() });
+
+    it('dentro del panel, bajo la foto: la línea analógica con la hora del servidor y los estados', async () => {
+      serve({ photos: [withValues(), withoutPhoto()] });
+      const view = await openDetail(WITH_PHOTO);
+      await screen.findByRole('img', { name: text('scr06_episodes.detail.photo_alt') }, WAIT);
+      const values = screen.getByRole('region', { name: text('process_values.title') });
+      const panel = document.querySelector('[data-part="episode_photo_panel"]');
+      expect(panel?.contains(values)).toBe(true);
+      expect(values.closest('[data-part="episode_photo_below"]')).not.toBeNull();
+      const [speed] = analogParts(values);
+      expect(speed).toEqual({
+        name: 'Velocidad de la máquina',
+        value: '1.350',
+        unit: 'm/min',
+        at: READ_AT,
+        aggregated: null,
+        min: '1.340',
+        max: '1.360',
+        noData: null,
+      });
+      expect(values.querySelector('[data-part="process_states"]')?.textContent).toBe(STATES_LINE);
+      expect(await axe(view.container)).toHaveNoViolations();
+    });
+
+    it('sin bloque, nada bajo la foto', async () => {
+      serve({});
+      await openDetail(WITH_PHOTO);
+      await screen.findByRole('img', { name: text('scr06_episodes.detail.photo_alt') }, WAIT);
+      expect(screen.queryByRole('region', { name: text('process_values.title') })).toBeNull();
+      expect(document.querySelector('[data-part="episode_photo_below"]')).toBeNull();
+    });
+
+    it('sin lectura nueva: con valores de proceso, las mismas peticiones que sin ellos', async () => {
+      const before = requestsSeen();
+      serve({});
+      const plain = await openDetail(WITH_PHOTO);
+      await screen.findByRole('img', { name: text('scr06_episodes.detail.photo_alt') }, WAIT);
+      await settle();
+      const baseline = before.sorted();
+      plain.unmount();
+      const after = requestsSeen();
+      const traffic = serve({ photos: [withValues(), withoutPhoto()] });
+      await openDetail(WITH_PHOTO);
+      await screen.findByRole('img', { name: text('scr06_episodes.detail.photo_alt') }, WAIT);
+      await settle();
+      expect(screen.getByRole('region', { name: text('process_values.title') })).toBeDefined();
+      expect(after.sorted()).toEqual(baseline);
+      // Y lo de siempre, nombrado: el listado y la imagen, nada más.
+      expect(baseline).toEqual([
+        `GET /episode-photos/${WITH_PHOTO}/image`,
+        `GET /zones/${ZONE}/episode-photos`,
+      ]);
+      expect([traffic.list.length, traffic.image.length]).toEqual([1, 1]);
+    });
+  },
+);

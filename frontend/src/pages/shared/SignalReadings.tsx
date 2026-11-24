@@ -7,6 +7,9 @@
  * Compartido: lo usan la clasificación (SCR-09) y el detalle (SCR-08, TASK-584); sus textos van en
  * `signal_readings.json`, del armazón, para que ninguna de las dos cargue los de la otra.
  * Selección explícita de campos (BR-APP-40): nada del objeto recibido se serializa.
+ *
+ * Con `description_es` (TASK-595/596) la señal se lee por su nombre del catálogo y el rol queda
+ * como texto secundario; sin él, por su rol como antes.
  */
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import type { SignalReading } from '@/ports/shared';
@@ -67,8 +70,16 @@ export function SignalReadings({
           data-part="signal"
           data-valid={signal.valid ? 'true' : 'false'}
         >
-          <span data-part="signal_role">{label('signal_role', signal.role)}</span>:{' '}
-          <span data-part="signal_value">{label('signal_value', signal.value)}</span>
+          {signal.description_es === null ? (
+            <span data-part="signal_role">{label('signal_role', signal.role)}</span>
+          ) : (
+            // Con su nombre del catálogo (TASK-596): «Jumbo en posición (rol): afirmada».
+            <>
+              <span data-part="signal_name">{signal.description_es}</span> (
+              <span data-part="signal_role">{label('signal_role', signal.role)}</span>)
+            </>
+          )}
+          : <span data-part="signal_value">{label('signal_value', signal.value)}</span>
           {!signal.valid && (
             <>
               {' '}

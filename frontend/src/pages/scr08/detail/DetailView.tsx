@@ -13,6 +13,7 @@
  *
  * Cada tramo lleva la foto del hallazgo con el aspecto de SCR-06 (TASK-590, A-128): la del
  * registro ancla (el primer tramo) se pide al abrir el detalle y la de los demás con «Ver foto».
+ * Tras sus señales, los valores de proceso del tramo (TASK-596, A-129), del mismo detalle.
  */
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -23,6 +24,7 @@ import { causeLabel } from '@/components/ObservabilityBadge/encoding';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ACTION_STATES, assigneeName, shownActionState } from '@/pages/shared/actionState';
+import { hasProcessValues, ProcessValues } from '@/pages/shared/ProcessValues';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
 import { SignalReadings } from '@/pages/shared/SignalReadings';
 import type { ReviewResolutionItem } from '@/ports/shared';
@@ -654,6 +656,17 @@ function Records({
                 timeZone={timeZone}
                 aggregated={detail.time_aggregated}
               />
+              {hasProcessValues(record.process_context) && (
+                <>
+                  <h4>{text('process_values.title')}</h4>
+                  <ProcessValues
+                    context={record.process_context}
+                    name={`${title} · ${text('process_values.title')}`}
+                    instant={(value) => <TimestampWithOffset instant={value} timeZone={timeZone} />}
+                    aggregated={detail.time_aggregated}
+                  />
+                </>
+              )}
               {canViewClips && clock !== null && (
                 <>
                   <h4>{text('scr08.detail.clips')}</h4>
