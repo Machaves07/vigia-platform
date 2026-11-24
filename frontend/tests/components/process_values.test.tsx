@@ -115,6 +115,44 @@ describe('ProcessValues (TASK-596)', () => {
     expect(svg?.querySelectorAll('polyline')).toHaveLength(1);
   });
 
+  it('una lectura no válida con valor presente se lee «sin dato», analógica o binaria (m_sin_guarda_valid)', () => {
+    const [speed, , jumbo] = processContext().variables;
+    if (speed === undefined || jumbo === undefined) throw new Error('Faltan variables.');
+    const { container } = mount({
+      from_offset_ms: -30_000,
+      to_offset_ms: 20_000,
+      variables: [
+        {
+          ...speed,
+          at_event: { ...speed.at_event, value: 1350, valid: false },
+          min: null,
+          max: null,
+        },
+        { ...jumbo, at_event: { ...jumbo.at_event, value: 'asserted', valid: false }, changes: [] },
+      ],
+    });
+    expect(analogParts(container)).toEqual([
+      {
+        name: 'Velocidad de la máquina',
+        value: null,
+        unit: null,
+        at: null,
+        aggregated: null,
+        min: null,
+        max: null,
+        noData: text('process_values.no_data'),
+      },
+    ]);
+    expect(part(container, 'process_states')?.textContent).toBe('Sin dato: Jumbo en posición');
+    cleanup();
+    const summary = render(
+      <ProcessSummary variables={processSummary().map((item) => ({ ...item, valid: false }))} />,
+    );
+    expect(part(summary.container, 'process_summary')?.textContent).toBe(
+      'Valores del proceso: Sin dato: Velocidad de la máquina, Jumbo en posición, Puente grúa',
+    );
+  });
+
   it('sin bloque o sin variables, nada', () => {
     expect(mount(null).container.innerHTML).toBe('');
     cleanup();
