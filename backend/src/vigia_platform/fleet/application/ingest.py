@@ -22,7 +22,9 @@ y (4) esquema con los modelos generados de U-01. Este servicio completa:
   unicidad de la clave y se vuelve a resolver igual;
 - **paso 6** y **paso 9**: ``EscritorExpediente.write`` (validación, canonicalización y
   ``head_object`` de los clips antes de abrir la transacción, PAT-NUC-RES-08), con
-  ``record_id`` = ``platform_record_id`` del recibo y ``occurred_at`` = ``node_time.started_at``;
+  ``record_id`` = ``platform_record_id`` del recibo y ``occurred_at`` = ``node_time.started_at``.
+  Un hallazgo o una detección **sin clip** (``clips: []``, fase 1 de A-128, v1.6.0) no cita
+  evidencia: ni ``head_object`` ni concesiones que marcar, y se acepta igual (TASK-603);
 - **pasos 7 y 8**, en la ``projection`` del escritor: dentro de la transacción y **antes** del
   ``INSERT`` del registro, así que van después de los clips y nada se escribe si fallan. (7)
   antigüedad (``timestamp_out_of_window``) y, en hallazgos y detecciones, el estándar vigente en la
@@ -68,7 +70,7 @@ from typing import Any, Final, Protocol
 
 from opentelemetry import trace as otel_trace
 from vigia_contracts.models._base import ContractModel
-from vigia_contracts.models.enumerations import AcceptanceStatus, RejectionCode
+from vigia_contracts.models.enumerations import AcceptanceStatus, RecordKind, RejectionCode
 from vigia_contracts.models.receipt import Receipt as ContractReceipt
 
 from vigia_platform.fleet.adapters.postgres.ingest_queries import AcceptedRecord
@@ -548,7 +550,7 @@ class IngestService:
 
     async def record_rejection(
         self,
-        kind: IngestKind,
+        kind: IngestKind | RecordKind,
         node: NodeScope,
         code: RejectionCode,
         *,
@@ -558,9 +560,12 @@ class IngestService:
         """Auditoría del rechazo permanente ``code`` y, si toca, ``ingest_rejected`` (BR-GOB-96).
 
         Las dos escrituras van en una transacción; si no se pueden hacer, la excepción sale y el
-        nodo recibe un transitorio (reintenta y se vuelve a rechazar con rastro).
+        nodo recibe un transitorio (reintenta y se vuelve a rechazar con rastro). ``kind`` es el
+        tipo de la ingesta o, para la foto del hallazgo (TASK-603), el ``RecordKind``
+        ``episode_photo`` del contrato.
         """
-        kind, code = IngestKind(kind), RejectionCode(code)
+        record_kind = kind if isinstance(kind, RecordKind) else IngestKind(kind).record_kind
+        code = RejectionCode(code)
         if code in TRANSIENT_CODES:
             return
         deps = self._deps
@@ -580,7 +585,7 @@ class IngestService:
                 if code in RECORDED_CODES:
                     content: dict[str, Any] = {
                         "node_id": str(node.node_id),
-                        "record_kind": kind.record_kind.value,
+                        "record_kind": record_kind.value,
                         "code": code.value,
                         "correlation_id": str(context.correlation_id),
                         "received_at": format_timestamp(received),
@@ -604,7 +609,7 @@ class IngestService:
                     plant_id=node.plant_id,
                     zone_id=zone,
                     resource=ResourceRef("node", node.node_id),
-                    filters={"record_kind": kind.record_kind.value, "code": code.value},
+                    filters={"record_kind": record_kind.value, "code": code.value},
                     transaction=transaction,
                 )
 
